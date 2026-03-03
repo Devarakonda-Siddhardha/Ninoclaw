@@ -250,6 +250,66 @@ _BUILTIN_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_command",
+            "description": "Run a shell command on the host system. Owner-only. Use when user asks to run a command, execute a script, check a service, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Shell command to execute"},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds (default 30)"}
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read contents of a file on the host system. Owner-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute or relative file path"},
+                    "tail": {"type": "integer", "description": "Only read last N lines (optional)"}
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Write or append text to a file on the host system. Owner-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path to write to"},
+                    "content": {"type": "string", "description": "Text content to write"},
+                    "mode": {"type": "string", "enum": ["overwrite", "append"], "description": "Write mode (default: overwrite)"}
+                },
+                "required": ["path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_dir",
+            "description": "List files and directories at a path. Owner-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Directory path (default: current directory)"}
+                },
+                "required": []
+            }
+        }
+    },
 ]
 
 # Combined tools list — built-ins + all loaded skills
@@ -488,6 +548,96 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return f"🤖 **{agent_type.capitalize()} Agent Result:**\n\n{result}"
         except Exception as e:
             return f"❌ Sub-agent failed: {e}"
+
+    # ── System tools (owner-only) ─────────────────────────────────────────────
+    _SYS_TOOLS = {"run_command", "read_file", "write_file", "list_dir"}
+    if tool_name in _SYS_TOOLS:
+        from config import OWNER_ID
+        if OWNER_ID and int(user_id) != OWNER_ID:
+            return "❌ System tools are owner-only."
+
+    if tool_name == "run_command":
+        import subprocess, shlex
+        command = arguments.get("command", "").strip()
+        timeout = int(arguments.get("timeout", 30))
+        if not command:
+            return "❌ No command provided."
+        _BLOCKED = ["rm -rf /", "mkfs", ":(){:|:&};:", "dd if=/dev/zero of=/dev/"]
+        for b in _BLOCKED:
+            if b in command:
+                return f"❌ Blocked: `{b}`"
+        try:
+            result = subprocess.run(
+                command, shell=True, capture_output=True, text=True, timeout=timeout
+            )
+            out = result.stdout.strip()
+            err = result.stderr.strip()
+            parts = [f"$ {command}"]
+            if out:
+                parts.append(f"```\n{out[:3000]}\n```")
+            if err:
+                parts.append(f"⚠️ stderr:\n```\n{err[:500]}\n```")
+            if not out and not err:
+                parts.append("_(no output)_")
+            if result.returncode != 0:
+                parts.append(f"↩️ Exit: {result.returncode}")
+            return "\n".join(parts)
+        except subprocess.TimeoutExpired:
+            return f"❌ Command timed out after {timeout}s"
+        except Exception as e:
+            return f"❌ {e}"
+
+    if tool_name == "read_file":
+        import os
+        path = os.path.expanduser(arguments.get("path", ""))
+        tail = arguments.get("tail")
+        if not os.path.exists(path):
+            return f"❌ File not found: {path}"
+        if os.path.isdir(path):
+            return f"❌ That's a directory. Use list_dir instead."
+        try:
+            with open(path, "r", errors="replace") as f:
+                lines = f.readlines()
+            if tail:
+                lines = lines[-int(tail):]
+            content = "".join(lines)
+            if len(content) > 3500:
+                content = content[:3500] + "\n…(truncated)"
+            return f"📄 `{path}`:\n```\n{content}\n```"
+        except Exception as e:
+            return f"❌ {e}"
+
+    if tool_name == "write_file":
+        import os
+        path = os.path.expanduser(arguments.get("path", ""))
+        content = arguments.get("content", "")
+        mode = "a" if arguments.get("mode") == "append" else "w"
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            with open(path, mode) as f:
+                f.write(content)
+            action = "appended to" if mode == "a" else "written to"
+            return f"✅ {len(content)} chars {action} `{path}`"
+        except Exception as e:
+            return f"❌ {e}"
+
+    if tool_name == "list_dir":
+        import os
+        path = os.path.expanduser(arguments.get("path", "."))
+        if not os.path.exists(path):
+            return f"❌ Path not found: {path}"
+        try:
+            entries = sorted(os.scandir(path), key=lambda e: (not e.is_dir(), e.name.lower()))
+            lines = [f"📁 `{os.path.abspath(path)}`:\n"]
+            for e in entries[:100]:
+                icon = "📁" if e.is_dir() else "📄"
+                size = f"  {e.stat().st_size:,}B" if e.is_file() else ""
+                lines.append(f"{icon} {e.name}{size}")
+            if len(entries) > 100:
+                lines.append(f"…and {len(entries)-100} more")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"❌ {e}"
 
     # Try skill tools
     try:
