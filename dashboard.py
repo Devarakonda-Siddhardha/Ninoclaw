@@ -162,7 +162,10 @@ BASE = """<!DOCTYPE html>
     </a>
     <div class="nav-section">Data</div>
     <a href="{{ url_for('memory_page') }}" class="nav-link {{ 'active' if active=='memory' }}">
-      <i class="bi bi-chat-dots"></i> Memory
+      <i class="bi bi-people"></i> Memory
+    </a>
+    <a href="{{ url_for('chat_page') }}" class="nav-link {{ 'active' if active=='chat' }}">
+      <i class="bi bi-chat-dots"></i> Chat History
     </a>
     <a href="{{ url_for('tasks_page') }}" class="nav-link {{ 'active' if active=='tasks' }}">
       <i class="bi bi-calendar-check"></i> Tasks & Crons
@@ -569,7 +572,7 @@ def memory_page():
     if conn:
         try:
             users = conn.execute(
-                "SELECT user_id, COUNT(*) as cnt, MAX(timestamp) as last "
+                "SELECT user_id, COUNT(*) as cnt, MAX(ts) as last "
                 "FROM conversations GROUP BY user_id ORDER BY cnt DESC"
             ).fetchall()
         except Exception:
@@ -593,7 +596,10 @@ def memory_page():
         <td><code>{{ uid }}</code></td>
         <td>{{ cnt }}</td>
         <td style="color:var(--muted);font-size:0.82rem">{{ last }}</td>
-        <td>
+        <td style="display:flex;gap:6px">
+          <a href="{{ url_for('chat_view', user_id=uid) }}" class="btn btn-outline" style="padding:4px 10px;font-size:0.8rem">
+            <i class="bi bi-chat-text"></i> View
+          </a>
           <form method="POST" action="/memory/clear" style="display:inline">
             <input type="hidden" name="user_id" value="{{ uid }}">
             <button type="submit" class="btn btn-danger" style="padding:4px 10px;font-size:0.8rem"
@@ -634,6 +640,224 @@ def memory_clear():
         conn.close()
     flash("Memory cleared.", "success")
     return redirect(url_for("memory_page"))
+
+
+@app.route("/chat")
+@require_login
+def chat_page():
+    """Chat history — pick a user"""
+    conn = get_db()
+    users = []
+    if conn:
+        try:
+            users = conn.execute(
+                "SELECT user_id, COUNT(*) as cnt, MAX(ts) as last "
+                "FROM conversations GROUP BY user_id ORDER BY last DESC"
+            ).fetchall()
+        except Exception:
+            pass
+        conn.close()
+
+    tmpl = BASE + """
+{% block content %}
+<div class="page-title">Chat History</div>
+<div class="page-sub">Live view of every conversation synced from the bot's memory.</div>
+{% if users %}
+<div class="card">
+  <div class="card-header"><i class="bi bi-people"></i> Select a conversation</div>
+  <div class="card-body" style="padding:0">
+    <table class="table table-hover mb-0">
+      <thead><tr><th>User ID</th><th>Messages</th><th>Last Active</th><th></th></tr></thead>
+      <tbody>
+      {% for uid, cnt, last in users %}
+      <tr>
+        <td><code>{{ uid }}</code></td>
+        <td>{{ cnt }}</td>
+        <td style="color:var(--muted);font-size:0.82rem">{{ last }}</td>
+        <td><a href="{{ url_for('chat_view', user_id=uid) }}" class="btn btn-primary" style="padding:5px 14px;font-size:0.82rem">
+          <i class="bi bi-chat-dots me-1"></i> Open Chat
+        </a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card"><div class="card-body" style="text-align:center;color:var(--muted);padding:40px">
+  <i class="bi bi-chat-dots" style="font-size:2.5rem;display:block;margin-bottom:12px"></i>
+  No conversations yet. Start chatting with your bot on Telegram!
+</div></div>
+{% endif %}
+{% endblock %}
+"""
+    return render_template_string(tmpl, active="chat", version=git_version(), users=users)
+
+
+@app.route("/chat/<user_id>")
+@require_login
+def chat_view(user_id):
+    """Full chat UI for a specific user"""
+    conn = get_db()
+    messages = []
+    if conn:
+        try:
+            rows = conn.execute(
+                "SELECT role, content, ts FROM conversations WHERE user_id=? ORDER BY id ASC",
+                (user_id,)
+            ).fetchall()
+            messages = [{"role": r[0], "content": r[1], "ts": r[2]} for r in rows]
+        except Exception:
+            pass
+        conn.close()
+
+    # API endpoint for polling
+    if request.args.get("format") == "json":
+        return jsonify(messages)
+
+    tmpl = BASE + """
+{% block content %}
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+  <div>
+    <div class="page-title" style="margin-bottom:2px">
+      <a href="{{ url_for('chat_page') }}" style="color:var(--muted);text-decoration:none;font-size:1rem;margin-right:8px">
+        <i class="bi bi-arrow-left"></i>
+      </a>
+      Chat — <code style="font-size:1.1rem;color:var(--accent)">{{ user_id }}</code>
+    </div>
+    <div class="page-sub" style="margin-bottom:0">{{ messages|length }} messages · auto-refreshes every 5s</div>
+  </div>
+  <div style="display:flex;gap:8px">
+    <button onclick="scrollToBottom()" class="btn btn-outline" style="font-size:0.82rem">
+      <i class="bi bi-arrow-down-circle"></i> Bottom
+    </button>
+    <form method="POST" action="/memory/clear" style="display:inline"
+      onsubmit="return confirm('Clear all memory for this user?')">
+      <input type="hidden" name="user_id" value="{{ user_id }}">
+      <button type="submit" class="btn btn-danger" style="font-size:0.82rem">
+        <i class="bi bi-trash"></i> Clear
+      </button>
+    </form>
+  </div>
+</div>
+
+<div id="chat-wrap" style="
+  background:var(--surface); border:1px solid var(--border); border-radius:8px;
+  height: calc(100vh - 200px); overflow-y:auto; padding:20px;
+  display:flex; flex-direction:column; gap:12px;
+">
+  <div id="chat-messages">
+  {% for msg in messages %}
+    {% if msg.role == 'user' %}
+    <div style="display:flex;justify-content:flex-end;">
+      <div style="max-width:70%">
+        <div style="
+          background: #1c4a9c; color:#e6edf3; border-radius:18px 18px 4px 18px;
+          padding:10px 16px; font-size:0.9rem; line-height:1.5; word-break:break-word;
+        ">{{ msg.content }}</div>
+        <div style="text-align:right;color:var(--muted);font-size:0.72rem;margin-top:3px;padding-right:4px">
+          {{ msg.ts[:16] if msg.ts else '' }}
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div style="display:flex;justify-content:flex-start;gap:8px;align-items:flex-end">
+      <div style="
+        width:32px;height:32px;border-radius:50%;background:var(--accent);
+        display:flex;align-items:center;justify-content:center;
+        font-size:0.9rem;flex-shrink:0;margin-bottom:18px
+      ">🦀</div>
+      <div style="max-width:70%">
+        <div style="
+          background:var(--surface2); color:var(--text); border-radius:18px 18px 18px 4px;
+          padding:10px 16px; font-size:0.9rem; line-height:1.5; word-break:break-word;
+          border:1px solid var(--border);
+          white-space: pre-wrap;
+        ">{{ msg.content }}</div>
+        <div style="color:var(--muted);font-size:0.72rem;margin-top:3px;padding-left:4px">
+          {{ msg.ts[:16] if msg.ts else '' }}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  {% endfor %}
+  {% if not messages %}
+  <div style="text-align:center;color:var(--muted);margin:auto">No messages yet</div>
+  {% endif %}
+  </div>
+  <div id="chat-bottom"></div>
+</div>
+
+<script>
+const userId = {{ user_id|tojson }};
+let lastCount = {{ messages|length }};
+let autoScroll = true;
+
+const wrap = document.getElementById('chat-wrap');
+wrap.addEventListener('scroll', () => {
+  autoScroll = wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 60;
+});
+
+function scrollToBottom() {
+  wrap.scrollTop = wrap.scrollHeight;
+  autoScroll = true;
+}
+
+function renderMsg(msg) {
+  const ts = msg.ts ? msg.ts.slice(0,16) : '';
+  if (msg.role === 'user') {
+    return `<div style="display:flex;justify-content:flex-end;">
+      <div style="max-width:70%">
+        <div style="background:#1c4a9c;color:#e6edf3;border-radius:18px 18px 4px 18px;
+          padding:10px 16px;font-size:0.9rem;line-height:1.5;word-break:break-word;">
+          ${escHtml(msg.content)}</div>
+        <div style="text-align:right;color:var(--muted);font-size:0.72rem;margin-top:3px;padding-right:4px">${ts}</div>
+      </div></div>`;
+  } else {
+    return `<div style="display:flex;justify-content:flex-start;gap:8px;align-items:flex-end">
+      <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);
+        display:flex;align-items:center;justify-content:center;font-size:0.9rem;
+        flex-shrink:0;margin-bottom:18px">🦀</div>
+      <div style="max-width:70%">
+        <div style="background:var(--surface2);color:var(--text);border-radius:18px 18px 18px 4px;
+          padding:10px 16px;font-size:0.9rem;line-height:1.5;word-break:break-word;
+          border:1px solid var(--border);white-space:pre-wrap;">
+          ${escHtml(msg.content)}</div>
+        <div style="color:var(--muted);font-size:0.72rem;margin-top:3px;padding-left:4px">${ts}</div>
+      </div></div>`;
+  }
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function pollMessages() {
+  try {
+    const res = await fetch(`/chat/${userId}?format=json`);
+    const msgs = await res.json();
+    if (msgs.length !== lastCount) {
+      const container = document.getElementById('chat-messages');
+      const newMsgs = msgs.slice(lastCount);
+      newMsgs.forEach(m => {
+        const div = document.createElement('div');
+        div.innerHTML = renderMsg(m);
+        container.insertBefore(div.firstChild, document.getElementById('chat-bottom'));
+      });
+      lastCount = msgs.length;
+      if (autoScroll) scrollToBottom();
+    }
+  } catch(e) {}
+}
+
+// Initial scroll + start polling
+scrollToBottom();
+setInterval(pollMessages, 5000);
+</script>
+{% endblock %}
+"""
+    return render_template_string(tmpl, active="chat", version=git_version(),
+                                  user_id=user_id, messages=messages)
 
 
 @app.route("/tasks")
