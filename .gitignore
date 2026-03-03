@@ -1,0 +1,8 @@
+.env
+*.db
+__pycache__/
+*.pyc
+*.pyo
+memory.json
+tasks.json
+cron_jobs.json

@@ -4,6 +4,18 @@ A lightweight AI assistant with memory, tasks, and Telegram integration.
 """
 import os
 import sys
+
+# ── Load .env before importing config ────────────────────────────────────────
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
+# ── First-run setup wizard ────────────────────────────────────────────────────
+from wizard import needs_setup, run_wizard
+if needs_setup():
+    run_wizard()
+    # Reload env after wizard writes .env
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=True)
+
 from telegram import BotCommand
 from telegram.ext import Application
 from telegram import __version__ as ptb_version

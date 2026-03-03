@@ -3,6 +3,9 @@ Configuration for Ninoclaw AI Assistant
 """
 import os
 import json
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 # Telegram Bot Token - Get from @BotFather
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
