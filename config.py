@@ -84,7 +84,7 @@ You have access to the following tools:
 - toggle_cron_job: Enable/disable a scheduled task
 - get_timezone: Check user's configured timezone
 
-When the user asks about something current or factual that you're unsure about, ALWAYS call web_search first before answering.
+Only call web_search when the user explicitly asks for current/real-time info (news, live scores, prices, weather) OR when you truly don't have the information needed to answer. Do NOT search for opinions, predictions, analysis, or questions you can answer from your own knowledge.
 When the user wants a one-time reminder (e.g. "remind me in 10 minutes to drink water"), call schedule_reminder.
 When the user wants a recurring schedule (e.g. "remind me every day at 9am"), call schedule_cron.
 
