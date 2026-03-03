@@ -694,6 +694,31 @@ def chat_page():
     return render_template_string(tmpl, active="chat", version=git_version(), users=users)
 
 
+@app.route("/api/chat/<user_id>/send", methods=["POST"])
+@require_login
+def chat_send(user_id):
+    """Send a message as the user and get AI response"""
+    data = request.get_json()
+    text = (data or {}).get("message", "").strip()
+    if not text:
+        return jsonify({"error": "empty message"}), 400
+    try:
+        sys.path.insert(0, DIR)
+        from memory import MemoryManager
+        from ai import chat as ai_chat
+        mem = MemoryManager()
+        mem.add_message(user_id, "user", text)
+        context = mem.get_conversation_context(user_id)
+        reply = ai_chat(context)
+        # strip tool-call noise if any
+        if isinstance(reply, dict):
+            reply = reply.get("content", str(reply))
+        mem.add_message(user_id, "assistant", reply)
+        return jsonify({"reply": reply})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/chat/<user_id>")
 @require_login
 def chat_view(user_id):
@@ -742,8 +767,8 @@ def chat_view(user_id):
 </div>
 
 <div id="chat-wrap" style="
-  background:var(--surface); border:1px solid var(--border); border-radius:8px;
-  height: calc(100vh - 200px); overflow-y:auto; padding:20px;
+  background:var(--surface); border:1px solid var(--border); border-radius:8px 8px 0 0;
+  height: calc(100vh - 260px); overflow-y:auto; padding:20px;
   display:flex; flex-direction:column; gap:12px;
 ">
   <div id="chat-messages">
@@ -782,16 +807,49 @@ def chat_view(user_id):
     {% endif %}
   {% endfor %}
   {% if not messages %}
-  <div style="text-align:center;color:var(--muted);margin:auto">No messages yet</div>
+  <div style="text-align:center;color:var(--muted);margin:auto">No messages yet — say something below!</div>
   {% endif %}
   </div>
+  <!-- typing indicator -->
+  <div id="typing-indicator" style="display:none;gap:8px;align-items:flex-end">
+    <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);
+      display:flex;align-items:center;justify-content:center;font-size:0.9rem;flex-shrink:0">🦀</div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:18px 18px 18px 4px;
+      padding:10px 18px;display:flex;gap:5px;align-items:center">
+      <span style="width:7px;height:7px;background:var(--muted);border-radius:50%;display:inline-block;animation:blink 1.2s infinite 0s"></span>
+      <span style="width:7px;height:7px;background:var(--muted);border-radius:50%;display:inline-block;animation:blink 1.2s infinite 0.3s"></span>
+      <span style="width:7px;height:7px;background:var(--muted);border-radius:50%;display:inline-block;animation:blink 1.2s infinite 0.6s"></span>
+    </div>
+  </div>
+  <style>@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}</style>
   <div id="chat-bottom"></div>
+</div>
+
+<!-- Input bar -->
+<div style="
+  background:var(--surface); border:1px solid var(--border); border-top:none;
+  border-radius:0 0 8px 8px; padding:12px 16px;
+  display:flex; gap:10px; align-items:flex-end;
+">
+  <textarea id="msg-input" rows="1" placeholder="Type a message…" style="
+    flex:1; background:var(--bg); border:1px solid var(--border); color:var(--text);
+    border-radius:20px; padding:10px 16px; font-size:0.9rem; resize:none;
+    outline:none; max-height:120px; line-height:1.4; font-family:inherit;
+  " oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"
+    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}"
+  ></textarea>
+  <button id="send-btn" onclick="sendMessage()" style="
+    background:var(--accent); color:#000; border:none; border-radius:50%;
+    width:42px; height:42px; display:flex; align-items:center; justify-content:center;
+    font-size:1.1rem; cursor:pointer; flex-shrink:0; transition:opacity 0.15s;
+  "><i class="bi bi-send-fill"></i></button>
 </div>
 
 <script>
 const userId = {{ user_id|tojson }};
 let lastCount = {{ messages|length }};
 let autoScroll = true;
+let sending = false;
 
 const wrap = document.getElementById('chat-wrap');
 wrap.addEventListener('scroll', () => {
@@ -801,6 +859,63 @@ wrap.addEventListener('scroll', () => {
 function scrollToBottom() {
   wrap.scrollTop = wrap.scrollHeight;
   autoScroll = true;
+}
+
+function nowTs() {
+  return new Date().toISOString().slice(0,16).replace('T',' ');
+}
+
+function appendMsg(role, content, ts) {
+  const container = document.getElementById('chat-messages');
+  const bottom = document.getElementById('chat-bottom');
+  const div = document.createElement('div');
+  div.innerHTML = renderMsg({role, content, ts: ts || nowTs()});
+  container.insertBefore(div.firstChild, bottom);
+  lastCount++;
+  if (autoScroll) scrollToBottom();
+}
+
+function setTyping(show) {
+  const el = document.getElementById('typing-indicator');
+  el.style.display = show ? 'flex' : 'none';
+  if (show && autoScroll) scrollToBottom();
+}
+
+async function sendMessage() {
+  if (sending) return;
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+  sending = true;
+  document.getElementById('send-btn').style.opacity = '0.5';
+
+  appendMsg('user', text, nowTs());
+  setTyping(true);
+
+  try {
+    const res = await fetch(`/api/chat/${userId}/send`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: text})
+    });
+    const data = await res.json();
+    setTyping(false);
+    if (data.reply) {
+      appendMsg('assistant', data.reply, nowTs());
+    } else {
+      appendMsg('assistant', '⚠️ ' + (data.error || 'Unknown error'), nowTs());
+    }
+  } catch(e) {
+    setTyping(false);
+    appendMsg('assistant', '⚠️ Failed to reach server', nowTs());
+  }
+
+  sending = false;
+  document.getElementById('send-btn').style.opacity = '1';
+  input.focus();
 }
 
 function renderMsg(msg) {
@@ -833,10 +948,11 @@ function escHtml(s) {
 }
 
 async function pollMessages() {
+  if (sending) return;
   try {
     const res = await fetch(`/chat/${userId}?format=json`);
     const msgs = await res.json();
-    if (msgs.length !== lastCount) {
+    if (msgs.length > lastCount) {
       const container = document.getElementById('chat-messages');
       const newMsgs = msgs.slice(lastCount);
       newMsgs.forEach(m => {
@@ -850,9 +966,9 @@ async function pollMessages() {
   } catch(e) {}
 }
 
-// Initial scroll + start polling
 scrollToBottom();
 setInterval(pollMessages, 5000);
+document.getElementById('msg-input').focus();
 </script>
 {% endblock %}
 """
