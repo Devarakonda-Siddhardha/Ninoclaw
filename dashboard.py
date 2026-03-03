@@ -184,7 +184,7 @@ BASE = """<!DOCTYPE html>
   {% for msg in get_flashed_messages(category_filter=['error']) %}
   <div class="alert alert-danger"><i class="bi bi-x-circle me-2"></i>{{ msg }}</div>
   {% endfor %}
-  {% block content %}{% endblock %}
+
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
@@ -260,7 +260,7 @@ def index():
         conn.close()
 
     tmpl = BASE + """
-{% block content %}
+
 <div class="page-title">Overview</div>
 <div class="page-sub">Your Ninoclaw bot at a glance</div>
 
@@ -287,7 +287,7 @@ def index():
     </table>
   </div>
 </div>
-{% endblock %}
+
 """
     return render_template_string(tmpl, active="home", version=git_version(),
                                   stats=stats, env=env)
@@ -309,7 +309,7 @@ def config_page():
         return redirect(url_for("config_page"))
 
     tmpl = BASE + """
-{% block content %}
+
 <div class="page-title">Bot Configuration</div>
 <div class="page-sub">Edit API keys and core settings. Saved directly to your .env file.</div>
 <form method="POST">
@@ -376,7 +376,7 @@ def config_page():
 </div>
 <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i> Save Configuration</button>
 </form>
-{% endblock %}
+
 """
     return render_template_string(tmpl, active="config", version=git_version(), env=env)
 
@@ -403,7 +403,7 @@ def plugins_page():
         return env.get(key, default) != "false"
 
     tmpl = BASE + """
-{% block content %}
+
 <div class="page-title">Plugins & Skills</div>
 <div class="page-sub">Toggle features on or off. Changes apply after bot restart.</div>
 <form method="POST">
@@ -476,7 +476,7 @@ def plugins_page():
 <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i> Save Plugin Settings</button>
 <p style="color:var(--muted);font-size:0.8rem;margin-top:12px;">⚠ Restart the bot for changes to take effect: <code>ninoclaw restart</code></p>
 </form>
-{% endblock %}
+
 """
     return render_template_string(tmpl, active="plugins", version=git_version(), env=env,
         web_search=is_on("ENABLE_WEB_SEARCH"),
@@ -505,7 +505,7 @@ def models_page():
         return redirect(url_for("models_page"))
 
     tmpl = BASE + """
-{% block content %}
+
 <div class="page-title">AI Models</div>
 <div class="page-sub">Configure primary and fallback AI models. The bot tries each in order.</div>
 
@@ -559,7 +559,7 @@ def models_page():
     </table>
   </div>
 </div>
-{% endblock %}
+
 """
     return render_template_string(tmpl, active="models", version=git_version(), env=env)
 
@@ -580,7 +580,7 @@ def memory_page():
         conn.close()
 
     tmpl = BASE + """
-{% block content %}
+
 <div class="page-title">Memory</div>
 <div class="page-sub">Conversation history stored in the local SQLite database.</div>
 
@@ -621,7 +621,7 @@ def memory_page():
 <form method="POST" action="/memory/clear" onsubmit="return confirm('Clear ALL memory for ALL users?')">
   <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i> Clear All Memory</button>
 </form>
-{% endblock %}
+
 """
     return render_template_string(tmpl, active="memory", version=git_version(), users=users)
 
@@ -659,7 +659,7 @@ def chat_page():
         conn.close()
 
     tmpl = BASE + """
-{% block content %}
+
 <div class="page-title">Chat History</div>
 <div class="page-sub">Live view of every conversation synced from the bot's memory.</div>
 {% if users %}
@@ -689,7 +689,7 @@ def chat_page():
   No conversations yet. Start chatting with your bot on Telegram!
 </div></div>
 {% endif %}
-{% endblock %}
+
 """
     return render_template_string(tmpl, active="chat", version=git_version(), users=users)
 
@@ -741,7 +741,7 @@ def chat_view(user_id):
         return jsonify(messages)
 
     tmpl = BASE + """
-{% block content %}
+
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
   <div>
     <div class="page-title" style="margin-bottom:2px">
@@ -970,7 +970,7 @@ scrollToBottom();
 setInterval(pollMessages, 5000);
 document.getElementById('msg-input').focus();
 </script>
-{% endblock %}
+
 """
     return render_template_string(tmpl, active="chat", version=git_version(),
                                   user_id=user_id, messages=messages)
@@ -996,7 +996,7 @@ def tasks_page():
         conn.close()
 
     tmpl = BASE + """
-{% block content %}
+
 <div class="page-title">Tasks & Cron Jobs</div>
 <div class="page-sub">Reminders and recurring schedules across all users.</div>
 
@@ -1045,7 +1045,7 @@ def tasks_page():
     {% endif %}
   </div>
 </div>
-{% endblock %}
+
 """
     return render_template_string(tmpl, active="tasks", version=git_version(),
                                   tasks=tasks, crons=crons)
