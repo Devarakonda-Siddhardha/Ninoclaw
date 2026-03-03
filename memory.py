@@ -1,88 +1,98 @@
 """
-Memory management for Ninoclaw
+Memory management for Ninoclaw — SQLite backend
 """
+import sqlite3
 import json
 from datetime import datetime
-from config import MEMORY_FILE, MAX_MEMORY_SIZE
+from config import MAX_MEMORY_SIZE
+
+DB_FILE = "ninoclaw.db"
+
+def _get_conn():
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def _init_db():
+    conn = _get_conn()
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id  TEXT NOT NULL,
+            role     TEXT NOT NULL,
+            content  TEXT NOT NULL,
+            ts       TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS user_data (
+            user_id  TEXT NOT NULL,
+            key      TEXT NOT NULL,
+            value    TEXT,
+            PRIMARY KEY (user_id, key)
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+_init_db()
 
 class Memory:
-    def __init__(self):
-        self.memory_file = MEMORY_FILE
-        self.data = self._load()
-
-    def _load(self):
-        """Load memory from file"""
-        try:
-            with open(self.memory_file, 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            return {"conversations": {}, "user_data": {}}
-
-    def _save(self):
-        """Save memory to file"""
-        with open(self.memory_file, 'w') as f:
-            json.dump(self.data, f, indent=2)
-
     def get_conversation(self, user_id, limit=MAX_MEMORY_SIZE):
-        """Get conversation history for a user"""
-        key = str(user_id)
-        conv = self.data["conversations"].get(key, [])
-        return conv[-limit:]
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT role, content, ts FROM conversations WHERE user_id=? ORDER BY id DESC LIMIT ?",
+            (str(user_id), limit)
+        ).fetchall()
+        conn.close()
+        return [{"role": r["role"], "content": r["content"], "timestamp": r["ts"]} for r in reversed(rows)]
 
     def add_message(self, user_id, role, content):
-        """Add a message to conversation history"""
-        key = str(user_id)
-
-        if key not in self.data["conversations"]:
-            self.data["conversations"][key] = []
-
-        self.data["conversations"][key].append({
-            "role": role,
-            "content": content,
-            "timestamp": datetime.now().isoformat()
-        })
-
-        # Trim if too large
-        if len(self.data["conversations"][key]) > MAX_MEMORY_SIZE:
-            self.data["conversations"][key] = self.data["conversations"][key][-MAX_MEMORY_SIZE:]
-
-        self._save()
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO conversations (user_id, role, content, ts) VALUES (?,?,?,?)",
+            (str(user_id), role, content, datetime.now().isoformat())
+        )
+        # Trim old messages beyond MAX_MEMORY_SIZE
+        conn.execute("""
+            DELETE FROM conversations WHERE user_id=? AND id NOT IN (
+                SELECT id FROM conversations WHERE user_id=? ORDER BY id DESC LIMIT ?
+            )
+        """, (str(user_id), str(user_id), MAX_MEMORY_SIZE))
+        conn.commit()
+        conn.close()
 
     def get_user_data(self, user_id):
-        """Get stored user data"""
-        key = str(user_id)
-        return self.data["user_data"].get(key, {})
+        conn = _get_conn()
+        rows = conn.execute("SELECT key, value FROM user_data WHERE user_id=?", (str(user_id),)).fetchall()
+        conn.close()
+        result = {}
+        for r in rows:
+            try:
+                result[r["key"]] = json.loads(r["value"])
+            except (json.JSONDecodeError, TypeError):
+                result[r["key"]] = r["value"]
+        return result
 
     def set_user_data(self, user_id, key, value):
-        """Set user data (name, preferences, etc)"""
-        user_key = str(user_id)
-
-        if user_key not in self.data["user_data"]:
-            self.data["user_data"][user_key] = {}
-
-        self.data["user_data"][user_key][key] = value
-        self._save()
+        conn = _get_conn()
+        conn.execute(
+            "INSERT OR REPLACE INTO user_data (user_id, key, value) VALUES (?,?,?)",
+            (str(user_id), key, json.dumps(value))
+        )
+        conn.commit()
+        conn.close()
 
     def get_conversation_context(self, user_id):
-        """Get conversation formatted for AI (excluding system prompts)"""
         conv = self.get_conversation(user_id)
-        return [
-            {"role": msg["role"], "content": msg["content"]}
-            for msg in conv
-        ]
+        return [{"role": m["role"], "content": m["content"]} for m in conv]
 
     def get_timezone(self, user_id):
-        """Get user's timezone"""
-        user_data = self.get_user_data(user_id)
-        return user_data.get("timezone", None)
+        return self.get_user_data(user_id).get("timezone")
 
     def set_timezone(self, user_id, timezone):
-        """Set user's timezone"""
         self.set_user_data(user_id, "timezone", timezone)
 
     def clear_conversation(self, user_id):
-        """Clear conversation history for a user"""
-        key = str(user_id)
-        if key in self.data["conversations"]:
-            self.data["conversations"][key] = []
-            self._save()
+        conn = _get_conn()
+        conn.execute("DELETE FROM conversations WHERE user_id=?", (str(user_id),))
+        conn.commit()
+        conn.close()
