@@ -19,38 +19,67 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # AI Model Chain — tried in order, falls back to the next on error/rate-limit
-# Each entry: {"api_url": "...", "api_key": "...", "model": "..."}
+# Each entry needs: api_url, api_key, model
+# All providers use OpenAI-compatible /chat/completions API.
 #
-# Override with MODELS_JSON env var (JSON array), or use the individual
-# PRIMARY_* / FALLBACK_* vars below for simple two-model setups.
+# Set keys in .env:
+#   OPENAI_API_KEY      → OpenAI / any primary provider
+#   OPENAI_API_URL      → override base URL (default: Google Gemini)
+#   OPENAI_MODEL        → override model name
+#   GROQ_API_KEY        → Grok / Groq (https://console.groq.com)
+#   MISTRAL_API_KEY     → Mistral (https://console.mistral.ai)
+#   GLM_API_KEY         → ZhipuAI GLM (https://open.bigmodel.cn)
+#   MINIMAX_API_KEY     → MiniMax (https://api.minimax.chat)
+#   MINIMAX_GROUP_ID    → MiniMax group ID (required for MiniMax)
+#   XAI_API_KEY         → xAI Grok (https://console.x.ai)
+#   TOGETHER_API_KEY    → Together AI (https://api.together.xyz)
+#   OPENROUTER_API_KEY  → OpenRouter (https://openrouter.ai) — 100+ models
+#   OLLAMA_MODEL        → local Ollama model name (e.g. llama3.2)
 # ---------------------------------------------------------------------------
+
+def _provider(url, key_env, model, default_model=None):
+    key = os.getenv(key_env, "")
+    if not key:
+        return None
+    return {"api_url": url, "api_key": key, "model": os.getenv(model, default_model or "")}
 
 _primary = {
     "api_url": os.getenv("OPENAI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
     "api_key": os.getenv("OPENAI_API_KEY", "your-api-key-here"),
-    "model":   os.getenv("OPENAI_MODEL", "gemini-3-flash-preview"),
+    "model":   os.getenv("OPENAI_MODEL", "gemini-2.0-flash"),
 }
 
-# Optional second model (e.g. Ollama local fallback, or a different API key)
-_fallback_url = os.getenv("FALLBACK_API_URL", "")
-_fallback_key = os.getenv("FALLBACK_API_KEY", "")
-_fallback_model = os.getenv("FALLBACK_MODEL", "")
+_provider_chain = [
+    # Groq — fast inference, free tier (llama, mixtral, gemma)
+    _provider("https://api.groq.com/openai/v1",       "GROQ_API_KEY",       "GROQ_MODEL",       "llama-3.3-70b-versatile"),
+    # Mistral — mistral-small free, mistral-large paid
+    _provider("https://api.mistral.ai/v1",             "MISTRAL_API_KEY",    "MISTRAL_MODEL",    "mistral-small-latest"),
+    # xAI Grok
+    _provider("https://api.x.ai/v1",                   "XAI_API_KEY",        "XAI_MODEL",        "grok-3-mini"),
+    # ZhipuAI GLM
+    _provider("https://open.bigmodel.cn/api/paas/v4",  "GLM_API_KEY",        "GLM_MODEL",        "glm-4-flash"),
+    # MiniMax
+    _provider(
+        f"https://api.minimax.chat/v1",
+        "MINIMAX_API_KEY", "MINIMAX_MODEL", "MiniMax-Text-01"
+    ),
+    # Together AI — 100+ open models
+    _provider("https://api.together.xyz/v1",           "TOGETHER_API_KEY",   "TOGETHER_MODEL",   "meta-llama/Llama-3-70b-chat-hf"),
+    # OpenRouter — universal gateway
+    _provider("https://openrouter.ai/api/v1",          "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+    # Ollama — local
+    {"api_url": os.getenv("OLLAMA_HOST", "http://localhost:11434") + "/v1",
+     "api_key": "ollama",
+     "model":   os.getenv("OLLAMA_MODEL", "")} if os.getenv("OLLAMA_MODEL") else None,
+]
 
-_fallbacks = []
-if _fallback_model:
-    _fallbacks.append({
-        "api_url": _fallback_url or _primary["api_url"],
-        "api_key": _fallback_key or _primary["api_key"],
-        "model":   _fallback_model,
-    })
-
-# Full chain — can also be set entirely via MODELS_JSON env var
+# Full chain — primary first, then any configured providers, skip unconfigured
 if os.getenv("MODELS_JSON"):
     MODELS = json.loads(os.getenv("MODELS_JSON"))
 else:
-    MODELS = [_primary] + _fallbacks
+    MODELS = [_primary] + [p for p in _provider_chain if p and p.get("model")]
 
-# Legacy aliases (used by other parts of the code)
+# Legacy aliases
 AI_PROVIDER    = "openai"
 OPENAI_API_KEY = _primary["api_key"]
 OPENAI_API_URL = _primary["api_url"]
