@@ -252,10 +252,12 @@ def run_wizard():
         config["OPENAI_MODEL"]   = ask("Model", default="meta-llama/Llama-3-70b-chat-hf") or ""
 
     elif provider == "openrouter":
-        print(f"  {DIM}  Get key: https://openrouter.ai/keys{RST}\n")
+        print(f"  {DIM}  Get key: https://openrouter.ai/keys{RST}")
+        print(f"  {DIM}  Free models: google/gemini-2.0-flash-exp:free  |  meta-llama/llama-3.3-70b-instruct:free{RST}\n")
         config["OPENAI_API_URL"] = "https://openrouter.ai/api/v1"
         config["OPENAI_API_KEY"] = ask("OpenRouter API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default="openai/gpt-4o-mini") or ""
+        config["OPENAI_MODEL"]   = ask("Model", default=existing.get("OPENAI_MODEL", "google/gemini-2.0-flash-exp:free")) or ""
+        config["OPENROUTER_API_KEY"] = config["OPENAI_API_KEY"]
 
     elif provider == "anthropic":
         print(f"  {DIM}  Get key: https://console.anthropic.com/{RST}\n")
@@ -280,7 +282,7 @@ def run_wizard():
         ("ZhipuAI GLM","GLM_API_KEY",         "https://open.bigmodel.cn"),
         ("MiniMax",    "MINIMAX_API_KEY",     "https://api.minimax.chat"),
         ("Together AI","TOGETHER_API_KEY",    "https://api.together.xyz"),
-        ("OpenRouter", "OPENROUTER_API_KEY",  "https://openrouter.ai"),
+        ("OpenRouter", "OPENROUTER_API_KEY",  "https://openrouter.ai — free models available"),
         ("Ollama (local)", "OLLAMA_MODEL",    "ollama serve"),
     ]
     for name, key_var, hint in _extra:
@@ -524,9 +526,11 @@ def run_wizard():
 
     elif provider == "openrouter":
         print(f"  {DIM}Get API key: https://openrouter.ai/keys{RST}")
+        print(f"  {DIM}Free models: google/gemini-2.0-flash-exp:free  |  meta-llama/llama-3.3-70b-instruct:free{RST}")
         config["OPENAI_API_URL"] = "https://openrouter.ai/api/v1"
         config["OPENAI_API_KEY"] = ask("OpenRouter API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default="openai/gpt-4o-mini") or ""
+        config["OPENAI_MODEL"]   = ask("Model", default=existing.get("OPENAI_MODEL", "google/gemini-2.0-flash-exp:free")) or ""
+        config["OPENROUTER_API_KEY"] = config["OPENAI_API_KEY"]
 
     elif provider == "anthropic":
         print(f"  {DIM}Get API key: https://console.anthropic.com/{RST}")
@@ -549,7 +553,7 @@ def run_wizard():
         ("Mistral",     "MISTRAL_API_KEY",     "https://console.mistral.ai"),
         ("xAI Grok",    "XAI_API_KEY",         "https://console.x.ai"),
         ("ZhipuAI GLM", "GLM_API_KEY",         "https://open.bigmodel.cn"),
-        ("OpenRouter",  "OPENROUTER_API_KEY",  "https://openrouter.ai"),
+        ("OpenRouter",  "OPENROUTER_API_KEY",  "https://openrouter.ai — free models available"),
         ("Ollama (local)", "OLLAMA_MODEL",     "model name e.g. llama3.2"),
     ]
     added = 0
