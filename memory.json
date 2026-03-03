@@ -1,0 +1,235 @@
+{
+  "conversations": {
+    "1840615179": [
+      {
+        "role": "user",
+        "content": "What is your name",
+        "timestamp": "2026-03-03T00:07:46.359414"
+      },
+      {
+        "role": "assistant",
+        "content": "Error connecting to Ollama: 404 Client Error: Not Found for url: http://localhost:11434/api/chat",
+        "timestamp": "2026-03-03T00:07:47.303303"
+      },
+      {
+        "role": "user",
+        "content": "Hey",
+        "timestamp": "2026-03-03T00:07:51.999271"
+      },
+      {
+        "role": "assistant",
+        "content": "Error connecting to Ollama: 404 Client Error: Not Found for url: http://localhost:11434/api/chat",
+        "timestamp": "2026-03-03T00:07:52.476391"
+      },
+      {
+        "role": "user",
+        "content": "Hello",
+        "timestamp": "2026-03-03T00:08:05.810664"
+      },
+      {
+        "role": "assistant",
+        "content": "Error connecting to Ollama: 404 Client Error: Not Found for url: http://localhost:11434/api/chat",
+        "timestamp": "2026-03-03T00:08:07.630668"
+      },
+      {
+        "role": "user",
+        "content": "Hi",
+        "timestamp": "2026-03-03T00:17:42.856337"
+      },
+      {
+        "role": "assistant",
+        "content": "Hi Sid! I'm Hi, your personal assistant. I'm ready to help automate your work and tasks. What can I get started on for you today?",
+        "timestamp": "2026-03-03T00:17:48.330385"
+      },
+      {
+        "role": "user",
+        "content": "Hey nino",
+        "timestamp": "2026-03-03T00:18:32.097867"
+      },
+      {
+        "role": "assistant",
+        "content": "Hey Sid! How can I help you out today? Ready to automate some workflows or tackle your to-do list!",
+        "timestamp": "2026-03-03T00:18:35.217344"
+      },
+      {
+        "role": "user",
+        "content": "What all can you do",
+        "timestamp": "2026-03-03T00:18:41.329468"
+      },
+      {
+        "role": "assistant",
+        "content": "I'm here to streamline things for you, Sid! Here\u2019s what I can handle:\n\n*   **Automate Workflows:** I can help set up and run processes to save you time.\n*   **Task Management:** I can schedule tasks and set reminders so nothing falls through the cracks.\n*   **Memory:** I remember our past conversations to provide better context and help.\n*   **General Assistance:** Whether it's answering questions or executing specific tasks, I'm on it.\n\nWhat\u2019s the first thing we should tackle?",
+        "timestamp": "2026-03-03T00:18:46.493693"
+      },
+      {
+        "role": "user",
+        "content": "Can you search web",
+        "timestamp": "2026-03-03T00:20:10.103019"
+      },
+      {
+        "role": "assistant",
+        "content": "I don't have direct access to browse the live web right now, Sid. \n\nMy strengths are remembering our context, managing your tasks, and automating your workflows. However, if you have specific information or text you want me to analyze or use to set up a process, just paste it here and I'll get right on it! \n\nWhat's on your mind?",
+        "timestamp": "2026-03-03T00:20:16.896223"
+      },
+      {
+        "role": "user",
+        "content": "What is your name",
+        "timestamp": "2026-03-03T00:20:21.813528"
+      },
+      {
+        "role": "assistant",
+        "content": "My name is Nino! How can I help you today, Sid?",
+        "timestamp": "2026-03-03T00:20:25.536945"
+      },
+      {
+        "role": "user",
+        "content": "Hey",
+        "timestamp": "2026-03-03T01:03:52.291435"
+      },
+      {
+        "role": "assistant",
+        "content": "Hey Sid! How can I help you today? Ready to automate some workflows or schedule some tasks?",
+        "timestamp": "2026-03-03T01:03:57.181454"
+      },
+      {
+        "role": "user",
+        "content": "Hey",
+        "timestamp": "2026-03-03T01:03:57.634599"
+      },
+      {
+        "role": "assistant",
+        "content": "Hey Sid! I'm here and ready to help. What's on your mind today? Want to schedule a reminder or automate a task?",
+        "timestamp": "2026-03-03T01:03:59.769920"
+      },
+      {
+        "role": "user",
+        "content": "Can you schedule a cron job at 1:07 am for pls sleep",
+        "timestamp": "2026-03-03T01:04:19.875410"
+      },
+      {
+        "role": "user",
+        "content": "Can you schedule a cron job at 1:07 am for pls sleep",
+        "timestamp": "2026-03-03T01:06:54.293529"
+      },
+      {
+        "role": "assistant",
+        "content": "Error creating schedule: Invalid cron expression or natural language",
+        "timestamp": "2026-03-03T01:06:58.614806"
+      },
+      {
+        "role": "user",
+        "content": "Can you schedule a cron job at 1:07 am for pls sleep",
+        "timestamp": "2026-03-03T01:20:01.359121"
+      },
+      {
+        "role": "assistant",
+        "content": "\u2705 Scheduled task created!\n\n\ud83d\udcdd pls sleep\n\u23f0 Schedule: 1:07 am daily\n\ud83d\udcc5 Next run: 2026-03-04 00:00\n\ud83c\udd94 ID: 1772481005381201",
+        "timestamp": "2026-03-03T01:20:05.381941"
+      },
+      {
+        "role": "user",
+        "content": "No change it to 1:22",
+        "timestamp": "2026-03-03T01:20:17.053208"
+      },
+      {
+        "role": "assistant",
+        "content": "\u2705 Scheduled task removed!",
+        "timestamp": "2026-03-03T01:20:20.873395"
+      },
+      {
+        "role": "user",
+        "content": "Can you schedule a cron job at 1:022 am for pls sleep",
+        "timestamp": "2026-03-03T01:20:31.575876"
+      },
+      {
+        "role": "assistant",
+        "content": "\u2705 Scheduled task created!\n\n\ud83d\udcdd pls sleep\n\u23f0 Schedule: 1:22 am daily\n\ud83d\udcc5 Next run: 2026-03-04 00:00\n\ud83c\udd94 ID: 1772481036072092",
+        "timestamp": "2026-03-03T01:20:36.072625"
+      },
+      {
+        "role": "user",
+        "content": "Hey",
+        "timestamp": "2026-03-03T01:24:09.254095"
+      },
+      {
+        "role": "assistant",
+        "content": "Hey Sid! How's it going? I've got that \"pls sleep\" reminder set for 1:22 AM. Anything else you need help with right now?",
+        "timestamp": "2026-03-03T01:24:12.134990"
+      },
+      {
+        "role": "user",
+        "content": "Can you schedule cron at 1:26 am for pls sleep",
+        "timestamp": "2026-03-03T01:24:36.722479"
+      },
+      {
+        "role": "assistant",
+        "content": "\ud83d\udd50 Your timezone: Not set (using server time)\n\nUse /timezone command to set it (e.g., /timezone Asia/Kolkata for India)",
+        "timestamp": "2026-03-03T01:24:40.391779"
+      },
+      {
+        "role": "user",
+        "content": "Yeah india timezone",
+        "timestamp": "2026-03-03T01:24:49.133034"
+      },
+      {
+        "role": "assistant",
+        "content": "\ud83d\udd50 Your timezone: Not set (using server time)\n\nUse /timezone command to set it (e.g., /timezone Asia/Kolkata for India)",
+        "timestamp": "2026-03-03T01:24:53.894453"
+      },
+      {
+        "role": "user",
+        "content": "Hey",
+        "timestamp": "2026-03-03T01:26:04.081930"
+      },
+      {
+        "role": "assistant",
+        "content": "\u2705 Timezone set to: Asia/Kolkata",
+        "timestamp": "2026-03-03T01:26:07.731938"
+      },
+      {
+        "role": "user",
+        "content": "Now schedule cron at 1:28 am for pls sleep",
+        "timestamp": "2026-03-03T01:26:41.764728"
+      },
+      {
+        "role": "assistant",
+        "content": "Error creating schedule: Invalid cron expression: '1:28 am'. Try formats like 'every day at 9am', 'hourly', 'daily', or '*/30 * * * *'",
+        "timestamp": "2026-03-03T01:26:45.093476"
+      },
+      {
+        "role": "user",
+        "content": "What happened man",
+        "timestamp": "2026-03-03T01:26:54.284346"
+      },
+      {
+        "role": "assistant",
+        "content": "\u2705 Scheduled task created!\n\n\ud83d\udcdd pls sleep\n\u23f0 Schedule: 1:28am daily\n\ud83d\udcc5 Next run: 2026-03-03 01:28\n\ud83c\udd94 ID: 1772481418370884",
+        "timestamp": "2026-03-03T01:26:58.371972"
+      },
+      {
+        "role": "user",
+        "content": "Tmrw morning 6 am send me good morning message",
+        "timestamp": "2026-03-03T01:28:47.108803"
+      },
+      {
+        "role": "user",
+        "content": "Tmrw morning 6 am send me good morning message",
+        "timestamp": "2026-03-03T01:29:20.753973"
+      },
+      {
+        "role": "assistant",
+        "content": "\u2705 Scheduled task created!\n\n\ud83d\udcdd Good morning, Sid!\n\u23f0 Schedule: 6am daily\n\ud83d\udcc5 Next run: 2026-03-03 06:00\n\ud83c\udd94 ID: 1772481564121496",
+        "timestamp": "2026-03-03T01:29:24.122150"
+      }
+    ]
+  },
+  "user_data": {
+    "1840615179": {
+      "agent_name": "Nino",
+      "onboarding_step": 2,
+      "user_name": "Sid",
+      "purpose": "Automate workflows and help with tasks",
+      "onboarding_complete": true
+    }
+  }
+}

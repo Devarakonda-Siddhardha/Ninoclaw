@@ -1,0 +1,38 @@
+[
+  {
+    "id": "1772481036072092",
+    "user_id": "1840615179",
+    "name": "pls sleep",
+    "cron_expression": "0 0 * * *",
+    "original_expression": "1:22 am daily",
+    "command": "pls sleep",
+    "is_active": true,
+    "created_at": "2026-03-03T01:20:36.072115",
+    "last_run": null,
+    "next_run": 1772562600.0
+  },
+  {
+    "id": "1772481418370884",
+    "user_id": "1840615179",
+    "name": "pls sleep",
+    "cron_expression": "28 1 * * *",
+    "original_expression": "1:28am daily",
+    "command": "pls sleep",
+    "is_active": true,
+    "created_at": "2026-03-03T01:26:58.370912",
+    "last_run": "2026-03-03T01:28:05.046487",
+    "next_run": 1772567880.0
+  },
+  {
+    "id": "1772481564121496",
+    "user_id": "1840615179",
+    "name": "Good morning, Sid!",
+    "cron_expression": "0 6 * * *",
+    "original_expression": "6am daily",
+    "command": "Good morning, Sid!",
+    "is_active": true,
+    "created_at": "2026-03-03T01:29:24.121520",
+    "last_run": "2026-03-03T06:00:04.360763",
+    "next_run": 1772584200.0
+  }
+]

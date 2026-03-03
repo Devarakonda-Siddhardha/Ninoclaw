@@ -1,0 +1,4 @@
+python-telegram-bot==21.0
+requests==2.31.0
+schedule==1.2.0
+croniter==3.0.3
