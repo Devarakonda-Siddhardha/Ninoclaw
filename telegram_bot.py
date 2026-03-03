@@ -10,6 +10,7 @@ from memory import Memory
 from tasks import task_manager
 from config import SYSTEM_PROMPT
 from tools import get_tool_definitions, execute_tool
+from summarizer import extract_urls, is_youtube, get_youtube_transcript, get_url_content, build_summary_prompt
 
 memory = Memory()
 
@@ -399,6 +400,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Normal chat - Save user message to memory
     memory.add_message(user_id, "user", user_message)
+
+    # Check for URLs — auto-summarize
+    urls = extract_urls(user_message)
+    if urls:
+        url = urls[0]
+        await update.message.chat.send_action(action="typing")
+        if is_youtube(url):
+            content, err = get_youtube_transcript(url)
+        else:
+            content, err = get_url_content(url)
+
+        if err:
+            await update.message.reply_text(f"❌ {err}")
+            return
+
+        summary_prompt = build_summary_prompt(content, url, is_yt=is_youtube(url))
+        response = chat(message=summary_prompt, system_prompt=SYSTEM_PROMPT, history=[])
+        final_response = response if isinstance(response, str) else response.get("content", "")
+        memory.add_message(user_id, "assistant", final_response)
+        await update.message.reply_text(f"🔗 Summary of {url}\n\n{final_response}")
+        return
 
     # Get conversation history for context
     conv_history = memory.get_conversation_context(user_id)
