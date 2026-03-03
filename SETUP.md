@@ -1,121 +1,111 @@
-# Ninoclaw - Personal AI Assistant
+# 🦀 Ninoclaw — Personal AI Assistant
 
-A lightweight Python AI assistant with memory, tasks, and Telegram integration.
+A lightweight personal AI assistant with memory, scheduling, web search, image vision, and Telegram integration.
 
-## Features
+---
 
-- 🤖 **AI Options** - OpenAI API or local Ollama
-- 💾 **Memory** - Remembers conversations across sessions
-- 📋 **Tasks** - Schedule tasks and reminders
-- 📱 **Telegram** - Chat with your assistant via Telegram
-- 🔒 **Private** - Choose local or cloud based on your needs
-
-## Setup
-
-### 1. Install Python Dependencies
+## ⚡ Quick Start (Termux)
 
 ```bash
+# 1. Install dependencies
+pkg install python git -y
 pip install -r requirements.txt
+
+# 2. Clone
+git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
+cd Ninoclaw
+
+# 3. Make CLI available globally
+chmod +x ninoclaw
+ln -s "$(pwd)/ninoclaw" "$PREFIX/bin/ninoclaw"
+
+# 4. Run setup wizard + start bot
+ninoclaw setup
+ninoclaw start
 ```
 
-### 2. Get Telegram Bot Token
+---
 
-1. Open Telegram and search for `@BotFather`
-2. Send `/newbot` and follow instructions
-3. Copy your bot token (looks like `123456:ABC-defGHI...`)
-
-### 3. Choose AI Provider
-
-**Option A: OpenAI API (Recommended - easier setup)**
+## 🖥 CLI Commands
 
 ```bash
-export AI_PROVIDER="openai"
-export OPENAI_API_KEY="your-api-key-here"
-export OPENAI_MODEL="gpt-4o-mini"  # or gpt-4o, claude-3-5-sonnet, etc.
+ninoclaw               # start the bot (auto-setup on first run)
+ninoclaw setup         # run setup wizard (API keys, model, etc.)
+ninoclaw onboard       # alias for setup
+ninoclaw reset         # wipe config and re-configure
+ninoclaw status        # show current config, model, DB stats
+ninoclaw update        # pull latest from GitHub and restart
+ninoclaw memory clear  # clear all conversations
+ninoclaw memory stats  # show per-user message counts
+ninoclaw version       # show current git version
 ```
 
-Get API key from:
-- OpenAI: https://platform.openai.com/api-keys
-- Anthropic Claude: https://console.anthropic.com/keys
+---
 
-**Option B: Local Ollama**
+## 🤖 Telegram Bot Commands
+
+| Command | Description |
+|---|---|
+| `/start` | Welcome + onboarding (first time) |
+| `/status` | System status |
+| `/memory` | Show recent conversation |
+| `/clear` | Clear chat history |
+| `/tasks` | List pending tasks |
+| `/remind in 10 minutes buy milk` | One-time reminder |
+| `/cron add every day at 9am Good morning!` | Recurring task |
+| `/cron list` | List cron jobs |
+| `/timezone Asia/Kolkata` | Set your timezone |
+| `/update` | Update bot to latest version (owner only) |
+
+You can also just **chat naturally**:
+- *"Remind me in 30 minutes to call mom"*
+- *"Search for latest iPhone 16 price"*
+- *"Update yourself to the latest version"*
+- Send any **photo** — bot will describe/analyze it
+
+---
+
+## 🔑 What You Need
+
+| Thing | Where to get |
+|---|---|
+| Telegram Bot Token | Message `@BotFather` on Telegram |
+| Gemini API Key *(free)* | https://aistudio.google.com/app/apikey |
+| Serper API Key *(optional, web search)* | https://serper.dev |
+| Your Telegram ID *(optional, owner lock)* | Message `@userinfobot` on Telegram |
+
+---
+
+## 🔄 Run in Background (Termux)
 
 ```bash
-export AI_PROVIDER="ollama"
-export OLLAMA_HOST="http://localhost:11434"
-export OLLAMA_MODEL="llama3.2"
-```
+# Keep running after closing Termux
+nohup ninoclaw start > ninoclaw.log 2>&1 &
 
-### 4. Set Telegram Token
-
-```bash
-export TELEGRAM_BOT_TOKEN="your_bot_token_here"
-```
-
-### 5. Run Ninoclaw
-
-**For OpenAI API:**
-```bash
-python main.py
-```
-
-**For Ollama (start it first in another terminal):**
-```bash
-# In your Debian proot:
-ollama serve
-
-# In Termux:
-python main.py
-```
-
-## Commands
-
-- `/start` - Start bot (first time: onboarding flow)
-- `/status` - Check system status
-- `/models` - List available AI models
-- `/memory` - Show conversation memory
-- `/clear` - Clear memory
-- `/reset` - Reset onboarding (start over)
-- `/tasks` - List your tasks
-- `/addtask <task>` - Add a task
-- `/remind <time> <message>` - Set a reminder
-
-## First-Time Setup (Onboarding)
-
-When you first run `/start`, the bot will ask you:
-
-1. **What would you like to call me?** - Agent's name
-2. **What's your name?** - Your name
-3. **What's my purpose?** - What bot should help you with
-
-This information is saved and used in all future conversations.
-
-## Usage Examples
-
-```
-/remind in 10 minutes check the oven
-/addtask call mom at 5pm
-Remember my birthday is July 15th
-What's on my calendar today?
-```
-
-## Files
-
-- `config.py` - Configuration settings
-- `ai.py` - AI integration (OpenAI API + Ollama)
-- `memory.py` - Conversation memory
-- `tasks.py` - Task scheduling
-- `telegram_bot.py` - Telegram bot
-- `main.py` - Entry point
-
-## Running in Background
-
-```bash
-# Using nohup
-nohup python main.py > ninoclaw.log 2>&1 &
-
-# Using tmux
+# With tmux (recommended)
+pkg install tmux
 tmux new -s ninoclaw
-python main.py
-# Press Ctrl+B then D to detach
+ninoclaw start
+# Detach: Ctrl+B then D
+# Reattach: tmux attach -t ninoclaw
 ```
+
+---
+
+## 📁 Project Files
+
+| File | Purpose |
+|---|---|
+| `cli.py` | CLI entry point |
+| `wizard.py` | Interactive setup wizard |
+| `main.py` | Bot startup |
+| `telegram_bot.py` | Telegram handlers |
+| `ai.py` | AI model chain with fallback |
+| `memory.py` | SQLite conversation memory |
+| `tasks.py` | Task & cron scheduler |
+| `tools.py` | AI tool definitions |
+| `summarizer.py` | URL & YouTube summarizer |
+| `updater.py` | Self-update via git pull |
+| `config.py` | Configuration loader |
+| `.env` | Your secrets *(never committed)* |
+| `ninoclaw.db` | SQLite database *(never committed)* |
