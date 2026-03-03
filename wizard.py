@@ -134,10 +134,11 @@ def run_wizard():
         config["OPENAI_API_URL"] = "https://generativelanguage.googleapis.com/v1beta/openai"
         config["OPENAI_API_KEY"] = ask("Gemini API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
         config["OPENAI_MODEL"]   = choose("Model", [
-            ("gemini-2.0-flash  (fast, recommended)", "gemini-2.0-flash"),
-            ("gemini-1.5-flash  (stable)",            "gemini-1.5-flash"),
-            ("gemini-1.5-pro   (smarter, slower)",    "gemini-1.5-pro"),
-        ]) or "gemini-2.0-flash"
+            ("gemini-2.5-flash-preview  (latest, smartest)", "gemini-2.5-flash-preview"),
+            ("gemini-2.0-flash  (fast, recommended)",        "gemini-2.0-flash"),
+            ("gemini-1.5-flash  (stable)",                   "gemini-1.5-flash"),
+            ("gemini-1.5-pro   (smarter, slower)",           "gemini-1.5-pro"),
+        ]) or "gemini-2.5-flash-preview"
 
     elif provider == "openai":
         print(f"  {DIM}Get API key: https://platform.openai.com/api-keys{RST}")
