@@ -263,7 +263,9 @@ def config_page():
     if request.method == "POST":
         fields = ["TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY", "OPENAI_API_URL",
                   "OPENAI_MODEL", "SERPER_API_KEY", "OWNER_ID",
-                  "CONTEXT_WINDOW", "DASHBOARD_PASSWORD", "DASHBOARD_PORT"]
+                  "CONTEXT_WINDOW", "DASHBOARD_PASSWORD", "DASHBOARD_PORT",
+                  "AGENT_NAME", "USER_NAME", "BOT_PURPOSE", "TIMEZONE",
+                  "RESEND_API_KEY", "RESEND_FROM", "OWNER_EMAIL"]
         for f in fields:
             val = request.form.get(f, "").strip()
             if val:
@@ -317,6 +319,46 @@ def config_page():
       <input class="form-control" type="password" name="SERPER_API_KEY" placeholder="Leave blank to keep current" autocomplete="off">
       {% if env.get('SERPER_API_KEY') %}<small style="color:var(--muted)">Currently set: {{ env['SERPER_API_KEY'][:8] }}...</small>
       {% else %}<small style="color:var(--muted)">Get a free key at <a href="https://serper.dev" style="color:var(--accent)">serper.dev</a> (2500 free searches/month)</small>{% endif %}
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-header"><i class="bi bi-envelope"></i> Resend Email  <small style="color:var(--muted);font-weight:400">(skill: resend_email)</small></div>
+  <div class="card-body">
+    <div style="margin-bottom:16px">
+      <label class="form-label">Resend API Key</label>
+      <input class="form-control" type="password" name="RESEND_API_KEY" placeholder="re_xxxx... — leave blank to keep current" autocomplete="off">
+      {% if env.get('RESEND_API_KEY') %}<small style="color:var(--green)">✓ Set</small>
+      {% else %}<small style="color:var(--muted)">Free at <a href="https://resend.com" style="color:var(--accent)">resend.com</a> — 100 emails/day</small>{% endif %}
+    </div>
+    <div style="margin-bottom:16px">
+      <label class="form-label">From Address  <small>(verified sender in Resend)</small></label>
+      <input class="form-control" name="RESEND_FROM" value="{{ env.get('RESEND_FROM','') }}" placeholder="you@yourdomain.com">
+    </div>
+    <div>
+      <label class="form-label">Your Email  <small>(default recipient)</small></label>
+      <input class="form-control" name="OWNER_EMAIL" value="{{ env.get('OWNER_EMAIL','') }}" placeholder="you@gmail.com">
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-header"><i class="bi bi-person-circle"></i> Personalization</div>
+  <div class="card-body">
+    <div style="margin-bottom:16px">
+      <label class="form-label">Bot Name</label>
+      <input class="form-control" name="AGENT_NAME" value="{{ env.get('AGENT_NAME','Ninoclaw') }}">
+    </div>
+    <div style="margin-bottom:16px">
+      <label class="form-label">Your Name</label>
+      <input class="form-control" name="USER_NAME" value="{{ env.get('USER_NAME','friend') }}">
+    </div>
+    <div style="margin-bottom:16px">
+      <label class="form-label">Bot Purpose</label>
+      <input class="form-control" name="BOT_PURPOSE" value="{{ env.get('BOT_PURPOSE','be your personal AI assistant') }}">
+    </div>
+    <div>
+      <label class="form-label">Timezone</label>
+      <input class="form-control" name="TIMEZONE" value="{{ env.get('TIMEZONE','UTC') }}" placeholder="Asia/Kolkata">
     </div>
   </div>
 </div>

@@ -324,14 +324,23 @@ def run_wizard():
     config["TIMEZONE"] = timezone or "UTC"
     ok(f"Bot: {config['AGENT_NAME']} | You: {config['USER_NAME']} | TZ: {config['TIMEZONE']}")
 
+    # ── Resend Email ──────────────────────────────────────────────────────────
+    section("Resend Email  (optional skill)")
+    print(f"  {DIM}  Send emails from the bot. Free tier: 100/day at https://resend.com{RST}\n")
+    resend_key = ask("Resend API Key", default=existing.get("RESEND_API_KEY"), optional=True, secret=True)
+    if resend_key:
+        config["RESEND_API_KEY"] = resend_key
+        config["RESEND_FROM"]    = ask("From address (verified in Resend)", default=existing.get("RESEND_FROM")) or ""
+        config["OWNER_EMAIL"]    = ask("Your email  (default recipient)",   default=existing.get("OWNER_EMAIL")) or ""
+        ok("Resend configured — tell bot 'load resend email skill' to activate")
+    else:
+        ok("Skipped")
+
     # ── Done ──────────────────────────────────────────────────────────────────
     save_env(config)
     print(f"\n{G}  ✔  Config saved to .env{RST}\n")
     print(f"{C}  🦀 Starting Ninoclaw...{RST}\n")
     return config
-
-
-def needs_setup():
     existing = load_existing_env()
     token = existing.get("TELEGRAM_BOT_TOKEN", "")
     return not token or token == "YOUR_BOT_TOKEN_HERE"
@@ -583,6 +592,18 @@ def run_wizard():
     timezone = ask("Your timezone  (e.g. Asia/Kolkata, UTC, America/New_York)", default=existing.get("TIMEZONE", "UTC"))
     config["TIMEZONE"] = timezone or "UTC"
     ok(f"Bot: {config['AGENT_NAME']} | You: {config['USER_NAME']} | TZ: {config['TIMEZONE']}")
+
+    # ── Resend Email ──────────────────────────────────────────────────────────
+    section("Resend Email  (optional skill)")
+    print(f"  {DIM}Send emails from the bot. Free tier: 100/day at https://resend.com{RST}")
+    resend_key = ask("Resend API Key", default=existing.get("RESEND_API_KEY"), optional=True, secret=True)
+    if resend_key:
+        config["RESEND_API_KEY"] = resend_key
+        config["RESEND_FROM"]    = ask("From address (verified in Resend)", default=existing.get("RESEND_FROM")) or ""
+        config["OWNER_EMAIL"]    = ask("Your email  (default recipient)",   default=existing.get("OWNER_EMAIL")) or ""
+        ok("Resend configured — tell bot 'load resend email skill' to activate")
+    else:
+        ok("Skipped")
 
     # ── Save ─────────────────────────────────────────────────────────────────
     save_env(config)
