@@ -3,6 +3,7 @@ AI integration with OpenAI API and Ollama
 """
 import requests
 import json
+import time
 from typing import Dict, Any, Optional, Tuple
 from config import (
     AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL,
@@ -78,8 +79,17 @@ def _chat_openai(message, system_prompt=None, history=None, tools=None, image_b6
         payload["tool_choice"] = "auto"
 
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=60)
-        response.raise_for_status()
+        for attempt in range(3):
+            response = requests.post(url, json=payload, headers=headers, timeout=60)
+            if response.status_code == 429:
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                time.sleep(wait)
+                continue
+            response.raise_for_status()
+            break
+        else:
+            return "⚠️ Gemini is rate limiting right now. Please wait a moment and try again."
+
         data = response.json()
 
         assistant_message = data["choices"][0]["message"]
