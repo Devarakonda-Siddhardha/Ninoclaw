@@ -2,21 +2,10 @@
 Configuration for Ninoclaw AI Assistant
 """
 import os
+import json
 
 # Telegram Bot Token - Get from @BotFather
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-
-# AI Provider: "openai" or "ollama"
-AI_PROVIDER = os.getenv("AI_PROVIDER", "openai")
-
-# OpenAI API Settings (for GPT-4, Claude-compatible, Gemini, etc.)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your-api-key-here")
-OPENAI_API_URL = os.getenv("OPENAI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gemini-3-flash-preview")  # or gpt-4o, claude-3-5-sonnet, etc.
-
-# Ollama Settings (local, alternative to API)
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 
 # Bot Owner - Only this Telegram user ID can trigger /update and admin commands
 # Get your ID by messaging @userinfobot on Telegram
@@ -24,8 +13,51 @@ OWNER_ID = int(os.getenv("OWNER_ID", "0"))  # 0 = not set
 
 # Serper API (Google Search) - Get from https://serper.dev
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
-MEMORY_FILE = "memory.json"
-MAX_MEMORY_SIZE = 1000  # max messages in memory
+
+# ---------------------------------------------------------------------------
+# AI Model Chain — tried in order, falls back to the next on error/rate-limit
+# Each entry: {"api_url": "...", "api_key": "...", "model": "..."}
+#
+# Override with MODELS_JSON env var (JSON array), or use the individual
+# PRIMARY_* / FALLBACK_* vars below for simple two-model setups.
+# ---------------------------------------------------------------------------
+
+_primary = {
+    "api_url": os.getenv("OPENAI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
+    "api_key": os.getenv("OPENAI_API_KEY", "your-api-key-here"),
+    "model":   os.getenv("OPENAI_MODEL", "gemini-2.0-flash"),
+}
+
+# Optional second model (e.g. Ollama local fallback, or a different API key)
+_fallback_url = os.getenv("FALLBACK_API_URL", "")
+_fallback_key = os.getenv("FALLBACK_API_KEY", "")
+_fallback_model = os.getenv("FALLBACK_MODEL", "")
+
+_fallbacks = []
+if _fallback_model:
+    _fallbacks.append({
+        "api_url": _fallback_url or _primary["api_url"],
+        "api_key": _fallback_key or _primary["api_key"],
+        "model":   _fallback_model,
+    })
+
+# Full chain — can also be set entirely via MODELS_JSON env var
+if os.getenv("MODELS_JSON"):
+    MODELS = json.loads(os.getenv("MODELS_JSON"))
+else:
+    MODELS = [_primary] + _fallbacks
+
+# Legacy aliases (used by other parts of the code)
+AI_PROVIDER    = "openai"
+OPENAI_API_KEY = _primary["api_key"]
+OPENAI_API_URL = _primary["api_url"]
+OPENAI_MODEL   = _primary["model"]
+OLLAMA_HOST    = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL", "llama3.2")
+
+# Memory Settings
+MEMORY_FILE    = "memory.json"
+MAX_MEMORY_SIZE = 1000
 
 # Task Settings
 TASKS_FILE = "tasks.json"
