@@ -220,6 +220,34 @@ _BUILTIN_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_agent",
+            "description": (
+                "Spawn a specialized sub-agent to handle a complex task autonomously. "
+                "The sub-agent can search the web, do calculations, and reason across multiple steps. "
+                "Use when a task requires deep research, multi-step analysis, code writing, or planning. "
+                "Agent types: 'researcher' (deep web research), 'coder' (write/debug code), "
+                "'analyst' (math/data analysis), 'planner' (break into steps), 'autonomous' (general)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_type": {
+                        "type": "string",
+                        "enum": ["researcher", "coder", "analyst", "planner", "autonomous"],
+                        "description": "Type of sub-agent to use"
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "Detailed task description for the sub-agent"
+                    }
+                },
+                "required": ["agent_type", "task"]
+            }
+        }
+    },
 ]
 
 # Combined tools list — built-ins + all loaded skills
@@ -446,6 +474,18 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
                     f"You can now use it — just ask me to use it.")
         except Exception as e:
             return f"⚠️ Skill saved to skills/{skill_name}.py but reload failed: {e}\nRestart bot to activate."
+
+    if tool_name == "run_agent":
+        agent_type = arguments.get("agent_type", "autonomous")
+        task = arguments.get("task", "")
+        if not task:
+            return "❌ Task description is required."
+        try:
+            from subagent import run_subagent
+            result = await run_subagent(agent_type, task, user_id, task_manager)
+            return f"🤖 **{agent_type.capitalize()} Agent Result:**\n\n{result}"
+        except Exception as e:
+            return f"❌ Sub-agent failed: {e}"
 
     # Try skill tools
     try:
