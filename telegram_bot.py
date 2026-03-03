@@ -603,9 +603,14 @@ Your purpose is to {purpose}."""
 
 
 async def update_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Pull latest code from GitHub and restart"""
+    """Pull latest code from GitHub and restart — owner only"""
     from updater import check_for_updates, do_update, get_current_version, restart
+    from config import OWNER_ID
     import asyncio
+
+    if OWNER_ID and update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("⛔ Only the bot owner can trigger updates.")
+        return
 
     await update.message.reply_text(f"🔍 Checking for updates... (current: {get_current_version()})")
 

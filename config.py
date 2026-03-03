@@ -18,10 +18,12 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gemini-3-flash-preview")  # or gpt-4o,
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 
+# Bot Owner - Only this Telegram user ID can trigger /update and admin commands
+# Get your ID by messaging @userinfobot on Telegram
+OWNER_ID = int(os.getenv("OWNER_ID", "0"))  # 0 = not set
+
 # Serper API (Google Search) - Get from https://serper.dev
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
-
-# Memory Settings
 MEMORY_FILE = "memory.json"
 MAX_MEMORY_SIZE = 1000  # max messages in memory
 

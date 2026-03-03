@@ -181,7 +181,10 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
 
     if tool_name == "self_update":
         from updater import check_for_updates, do_update, get_current_version, restart
+        from config import OWNER_ID
         import asyncio
+        if OWNER_ID and user_id != OWNER_ID:
+            return "⛔ Only the bot owner can trigger updates."
         has_updates, commits = check_for_updates()
         if not has_updates:
             return f"✅ Already on the latest version! (commit: {get_current_version()})"
