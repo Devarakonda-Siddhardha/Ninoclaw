@@ -2,6 +2,7 @@
 Telegram bot for Ninoclaw
 """
 import re
+import base64
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from ai import chat, list_models, test_connection
@@ -532,6 +533,53 @@ Commands:
 /status - Check system status"""
         )
 
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle photo messages - send image to vision model"""
+    user_id = update.effective_user.id
+    user_data = memory.get_user_data(user_id)
+
+    if not user_data.get("onboarding_complete"):
+        await update.message.reply_text("Please complete setup first. Send /start")
+        return
+
+    # Get caption as the user's question (optional)
+    caption = update.message.caption or "Describe this image in detail."
+
+    # Download the highest-res photo
+    photo = update.message.photo[-1]
+    file = await context.bot.get_file(photo.file_id)
+    photo_bytes = await file.download_as_bytearray()
+    image_b64 = base64.b64encode(photo_bytes).decode("utf-8")
+
+    # Build personalized prompt
+    agent_name = user_data.get("agent_name", "Ninoclaw")
+    user_name = user_data.get("user_name", "friend")
+    purpose = user_data.get("purpose", "be your assistant")
+    personalized_prompt = f"""{SYSTEM_PROMPT}
+
+Your name is {agent_name}. You are talking to {user_name}.
+Your purpose is to {purpose}."""
+
+    await update.message.chat.send_action(action="typing")
+
+    conv_history = memory.get_conversation_context(user_id)
+
+    response = chat(
+        message=caption,
+        system_prompt=personalized_prompt,
+        history=conv_history,
+        tools=get_tool_definitions(),
+        image_b64=image_b64
+    )
+
+    final_response = response if isinstance(response, str) else response.get("content", "")
+
+    memory.add_message(user_id, "user", f"[Image] {caption}")
+    memory.add_message(user_id, "assistant", final_response)
+
+    await update.message.reply_text(final_response)
+
+
 def create_bot(token):
     """Create and configure the Telegram bot"""
     app = Application.builder().token(token).build()
@@ -551,6 +599,7 @@ def create_bot(token):
 
     # Add message handler for chat
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     # Set telegram app reference for cron job execution
     task_manager.telegram_app = app

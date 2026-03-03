@@ -2,10 +2,28 @@
 Tools for Ninoclaw AI Agent
 Functions the AI can call to perform actions
 """
+import requests as _requests
 from typing import Dict, Any
 
 # Tool definitions that the AI can call
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the internet for current information, news, facts, prices, or anything you don't know. Use this when the user asks about recent events or things that require up-to-date info.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to look up on Google"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -123,9 +141,32 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         Result message string
     """
     from memory import Memory
+    from config import SERPER_API_KEY
 
     memory = Memory()
     user_timezone = memory.get_timezone(user_id)
+
+    if tool_name == "web_search":
+        query = arguments.get("query", "")
+        if not SERPER_API_KEY:
+            return "❌ Web search is not configured. Set SERPER_API_KEY in your environment."
+        try:
+            resp = _requests.post(
+                "https://google.serper.dev/search",
+                headers={"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"},
+                json={"q": query, "num": 5},
+                timeout=10
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            results = []
+            for item in data.get("organic", [])[:5]:
+                results.append(f"**{item.get('title')}**\n{item.get('snippet', '')}\n{item.get('link', '')}")
+            if not results:
+                return f"No results found for: {query}"
+            return f"🔍 Search results for \"{query}\":\n\n" + "\n\n".join(results)
+        except Exception as e:
+            return f"❌ Search failed: {e}"
 
     if tool_name == "get_timezone":
         tz = user_timezone or "Not set (using server time)"

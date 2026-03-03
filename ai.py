@@ -10,7 +10,7 @@ from config import (
 )
 
 
-def chat(message, system_prompt=None, history=None, tools=None):
+def chat(message, system_prompt=None, history=None, tools=None, image_b64=None):
     """
     Send a message to AI and get a response
 
@@ -19,17 +19,18 @@ def chat(message, system_prompt=None, history=None, tools=None):
         system_prompt: Optional system prompt
         history: Optional conversation history as list of messages
         tools: Optional list of tools/functions the AI can call
+        image_b64: Optional base64-encoded image (JPEG) for vision
 
     Returns:
         AI response text
     """
     if AI_PROVIDER == "openai":
-        return _chat_openai(message, system_prompt, history, tools)
+        return _chat_openai(message, system_prompt, history, tools, image_b64)
     else:
         return _chat_ollama(message, system_prompt, history, tools)
 
-def _chat_openai(message, system_prompt=None, history=None, tools=None):
-    """Chat using OpenAI-compatible API (supports GPT-4, Claude, etc.)"""
+def _chat_openai(message, system_prompt=None, history=None, tools=None, image_b64=None):
+    """Chat using OpenAI-compatible API (supports GPT-4, Claude, Gemini, etc.)"""
     url = f"{OPENAI_API_URL}/chat/completions"
 
     headers = {
@@ -50,11 +51,20 @@ def _chat_openai(message, system_prompt=None, history=None, tools=None):
     if history:
         messages.extend(history)
 
-    # Add current message
-    messages.append({
-        "role": "user",
-        "content": message
-    })
+    # Add current message (with optional image)
+    if image_b64:
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": message or "What's in this image?"},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
+            ]
+        })
+    else:
+        messages.append({
+            "role": "user",
+            "content": message
+        })
 
     payload = {
         "model": OPENAI_MODEL,

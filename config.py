@@ -18,6 +18,9 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gemini-3-flash-preview")  # or gpt-4o,
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 
+# Serper API (Google Search) - Get from https://serper.dev
+SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
+
 # Memory Settings
 MEMORY_FILE = "memory.json"
 MAX_MEMORY_SIZE = 1000  # max messages in memory
@@ -33,13 +36,15 @@ SYSTEM_PROMPT = """You are Ninoclaw, a helpful personal AI assistant. You:
 - Are concise but friendly
 - Can execute tasks when needed
 
-You have access to tools for managing scheduled tasks:
+You have access to the following tools:
+- web_search: Search the internet for current info, news, facts, prices, or anything you don't know. Use this proactively when the user asks about recent events or real-time data.
 - schedule_cron: Create a recurring task
 - list_cron_jobs: List all scheduled tasks
 - remove_cron_job: Remove a scheduled task
 - toggle_cron_job: Enable/disable a scheduled task
 - get_timezone: Check user's configured timezone
 
+When the user asks about something current or factual that you're unsure about, ALWAYS call web_search first before answering.
 When the user wants to schedule something naturally (like "remind me every day at 9am"), call the schedule_cron tool with the appropriate parameters.
 
 Current context is available in your memory. Respond naturally.
