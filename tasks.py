@@ -364,6 +364,32 @@ This is an automated task execution. Be helpful and concise."""
                     text=f"❌ Error in scheduled task: {error_msg}"
                 )
 
+    async def check_due_tasks(self):
+        """Check for due one-time tasks and send Telegram notifications"""
+        now = datetime.now().timestamp()
+        triggered = []
+
+        for task in self.tasks:
+            if task.get("completed"):
+                continue
+            if task.get("scheduled_time", 0) <= now:
+                triggered.append(task)
+
+        for task in triggered:
+            task["completed"] = True
+            task["completed_at"] = datetime.now().isoformat()
+            if self.telegram_app:
+                try:
+                    await self.telegram_app.bot.send_message(
+                        chat_id=int(task["user_id"]),
+                        text=f"⏰ {task['name']}"
+                    )
+                except Exception as e:
+                    print(f"[Reminder] Failed to send: {e}")
+
+        if triggered:
+            self._save()
+
     async def update_cron_schedules(self):
         """Check and run due cron jobs"""
         now = datetime.now().timestamp()
@@ -388,6 +414,7 @@ This is an automated task execution. Be helpful and concise."""
                 # Run cron schedule check in a new event loop
                 import asyncio
                 try:
+                    asyncio.run(self.check_due_tasks())
                     asyncio.run(self.update_cron_schedules())
                 except Exception:
                     pass  # Ignore errors in async execution
