@@ -246,51 +246,7 @@ def logout():
 @app.route("/")
 @require_login
 def index():
-    env = get_env()
-    stats = {"messages": 0, "users": 0, "tasks": 0, "crons": 0}
-    conn = get_db()
-    if conn:
-        try:
-            stats["messages"] = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
-            stats["users"]    = conn.execute("SELECT COUNT(DISTINCT user_id) FROM conversations").fetchone()[0]
-            stats["tasks"]    = conn.execute("SELECT COUNT(*) FROM tasks WHERE completed=0").fetchone()[0]
-            stats["crons"]    = conn.execute("SELECT COUNT(*) FROM cron_jobs WHERE is_active=1").fetchone()[0]
-        except Exception:
-            pass
-        conn.close()
-
-    tmpl = BASE + """
-
-<div class="page-title">Overview</div>
-<div class="page-sub">Your Ninoclaw bot at a glance</div>
-
-<div class="row">
-  <div class="col"><div class="stat-card"><div class="stat-num">{{ stats.messages }}</div><div class="stat-label">Messages Stored</div></div></div>
-  <div class="col"><div class="stat-card"><div class="stat-num">{{ stats.users }}</div><div class="stat-label">Users</div></div></div>
-  <div class="col"><div class="stat-card"><div class="stat-num">{{ stats.tasks }}</div><div class="stat-label">Pending Reminders</div></div></div>
-  <div class="col"><div class="stat-card"><div class="stat-num">{{ stats.crons }}</div><div class="stat-label">Active Cron Jobs</div></div></div>
-</div>
-
-<div class="card">
-  <div class="card-header"><i class="bi bi-info-circle"></i> Configuration Status</div>
-  <div class="card-body">
-    <table class="table table-hover">
-      <tr><th>Telegram Token</th><td>{% if env.get('TELEGRAM_BOT_TOKEN') %}<span class="badge-on">✔ Set</span>{% else %}<span class="badge-off">Not set</span>{% endif %}</td></tr>
-      <tr><th>AI Model</th><td><code style="color:var(--accent)">{{ env.get('OPENAI_MODEL','—') }}</code></td></tr>
-      <tr><th>API Key</th><td>{% set k = env.get('OPENAI_API_KEY','') %}{% if k %}<span class="key-masked">{{ k[:6] }}...{{ k[-4:] }}</span>{% else %}<span class="badge-off">Not set</span>{% endif %}</td></tr>
-      <tr><th>Web Search</th><td>{% if env.get('ENABLE_WEB_SEARCH','true') == 'false' %}<span class="badge-off">Disabled</span>{% elif env.get('SERPER_API_KEY') %}<span class="badge-on">✔ Enabled</span>{% else %}<span class="badge-off">No API key</span>{% endif %}</td></tr>
-      <tr><th>Vision (Images)</th><td>{% if env.get('ENABLE_VISION','true') != 'false' %}<span class="badge-on">✔ Enabled</span>{% else %}<span class="badge-off">Disabled</span>{% endif %}</td></tr>
-      <tr><th>URL Summarizer</th><td>{% if env.get('ENABLE_SUMMARIZER','true') != 'false' %}<span class="badge-on">✔ Enabled</span>{% else %}<span class="badge-off">Disabled</span>{% endif %}</td></tr>
-      <tr><th>Context Window</th><td>{{ env.get('CONTEXT_WINDOW','20') }} messages</td></tr>
-      <tr><th>Owner ID</th><td>{{ env.get('OWNER_ID','Not set') }}</td></tr>
-      <tr><th>Version</th><td><span class="version-tag">{{ version }}</span></td></tr>
-    </table>
-  </div>
-</div>
-
-"""
-    return render_template_string(tmpl, active="home", version=git_version(),
-                                  stats=stats, env=env)
+    return redirect(url_for("chat_page"))
 
 
 @app.route("/config", methods=["GET", "POST"])
