@@ -8,20 +8,22 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 # Telegram Bot Token - Get from @BotFather
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+def _env(key, default=""):
+    """Get env var, stripping accidental whitespace/tabs."""
+    return os.getenv(key, default).strip()
+
+TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 
 # Bot Owner - Only this Telegram user ID can trigger /update and admin commands
-# Get your ID by messaging @userinfobot on Telegram
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))  # 0 = not set
+OWNER_ID = int(_env("OWNER_ID", "0"))  # 0 = not set
 
 # Personalization — set via wizard or .env directly
-AGENT_NAME  = os.getenv("AGENT_NAME",  "Ninoclaw")
-USER_NAME   = os.getenv("USER_NAME",   "friend")
-BOT_PURPOSE = os.getenv("BOT_PURPOSE", "be your personal AI assistant")
-TIMEZONE    = os.getenv("TIMEZONE",    "UTC")
+AGENT_NAME  = _env("AGENT_NAME",  "Ninoclaw")
+USER_NAME   = _env("USER_NAME",   "friend")
+BOT_PURPOSE = _env("BOT_PURPOSE", "be your personal AI assistant")
+TIMEZONE    = _env("TIMEZONE",    "UTC")
 
-# Serper API (Google Search) - Get from https://serper.dev
-SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
+SERPER_API_KEY = _env("SERPER_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # AI Model Chain — tried in order, falls back to the next on error/rate-limit
@@ -44,13 +46,13 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 # ---------------------------------------------------------------------------
 
 def _provider(url, key_env, model, default_model=None):
-    key = os.getenv(key_env, "")
+    key = _env(key_env)
     if not key:
         return None
-    return {"api_url": url, "api_key": key, "model": os.getenv(model, default_model or "")}
+    return {"api_url": url, "api_key": key, "model": _env(model) or default_model or ""}
 
 _primary = {
-    "api_url": os.getenv("OPENAI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
+    "api_url": _env("OPENAI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
     "api_key": os.getenv("OPENAI_API_KEY", "your-api-key-here"),
     "model":   os.getenv("OPENAI_MODEL", "gemini-2.0-flash"),
 }
