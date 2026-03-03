@@ -89,6 +89,24 @@ def setup_bot_commands(application):
     application.bot._commands = commands
     return None
 
+def start_dashboard():
+    """Start the web dashboard in a background thread"""
+    try:
+        from dashboard import app as dash_app
+        from dotenv import dotenv_values
+        import threading
+        env = dotenv_values(os.path.join(os.path.dirname(__file__), ".env"))
+        port = int(env.get("DASHBOARD_PORT", "8080"))
+        t = threading.Thread(
+            target=lambda: dash_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False),
+            daemon=True
+        )
+        t.start()
+        print(f"✅ Dashboard started → http://localhost:{port}")
+    except Exception as e:
+        print(f"⚠️  Dashboard failed to start: {e}")
+
+
 def main():
     """Main entry point"""
     print_banner()
@@ -103,6 +121,9 @@ def main():
     # Start task scheduler
     task_manager.start_scheduler()
     print("✅ Task scheduler started")
+
+    # Start dashboard
+    start_dashboard()
 
     # Create bot
     app = telegram_module.create_bot(TELEGRAM_BOT_TOKEN)
