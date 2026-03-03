@@ -36,6 +36,9 @@ HELP = f"""
     {DIM}clear [user_id]{RST}    Clear chat history (all users or specific)
     {DIM}stats{RST}             Show memory usage stats
   {G}dashboard{RST}          Start the web dashboard (default port 8080)
+  {G}model{RST}              Show or change the AI model
+    {DIM}ninoclaw model{RST}          Show current model
+    {DIM}ninoclaw model <name>{RST}   Switch to a different model
   {G}version{RST}            Show current version (git commit)
 
 {W}Examples:{RST}
@@ -228,6 +231,38 @@ def cmd_version():
         print(f"{R}Could not determine version.{RST}")
 
 
+def cmd_model(args):
+    """Show or switch the AI model"""
+    from dotenv import dotenv_values, set_key
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    env = dotenv_values(env_path)
+    current = env.get("OPENAI_MODEL", "gemini-3-flash-preview")
+
+    if not args:
+        # Show current + suggestions
+        print(f"\n{C}🤖 Current model:{RST} {W}{current}{RST}")
+        print(f"\n{DIM}Suggested models:{RST}")
+        suggestions = [
+            ("gemini-3-flash-preview",        "Google  — latest, fast"),
+            ("gemini-2.5-flash-preview-04-17","Google  — stable preview"),
+            ("gemini-2.0-flash-exp",          "Google  — free tier"),
+            ("gpt-4o-mini",                   "OpenAI  — affordable"),
+            ("gpt-4o",                        "OpenAI  — best quality"),
+            ("mistral-small-latest",          "Mistral — free tier"),
+            ("llama3.2",                      "Ollama  — local/offline"),
+        ]
+        for name, desc in suggestions:
+            marker = f"{G}●{RST}" if name == current else f"{DIM}○{RST}"
+            print(f"  {marker} {W}{name:<40}{RST} {DIM}{desc}{RST}")
+        print(f"\n{DIM}Usage: ninoclaw model <name>{RST}\n")
+        return
+
+    new_model = args[0].strip()
+    set_key(env_path, "OPENAI_MODEL", new_model)
+    print(f"\n{G}✔  Model switched:{RST} {W}{new_model}{RST}")
+    print(f"{DIM}Restart the bot for changes to take effect: ninoclaw start{RST}\n")
+
+
 def main():
     args = sys.argv[1:]
     cmd  = args[0].lower() if args else "start"
@@ -246,6 +281,8 @@ def main():
         cmd_update()
     elif cmd == "dashboard":
         cmd_dashboard()
+    elif cmd == "model":
+        cmd_model(args[1:])
     elif cmd == "version":
         cmd_version()
     elif cmd in ("help", "--help", "-h"):

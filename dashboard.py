@@ -586,15 +586,21 @@ def plugins_page():
 def models_page():
     env = get_env()
     if request.method == "POST":
-        fallback_model = request.form.get("FALLBACK_MODEL", "").strip()
-        fallback_key   = request.form.get("FALLBACK_API_KEY", "").strip()
-        fallback_url   = request.form.get("FALLBACK_API_URL", "").strip()
-        if fallback_model:
-            save_env_key("FALLBACK_MODEL", fallback_model)
-        if fallback_key:
-            save_env_key("FALLBACK_API_KEY", fallback_key)
-        if fallback_url:
-            save_env_key("FALLBACK_API_URL", fallback_url)
+        section = request.form.get("section", "fallback")
+        if section == "primary":
+            model = request.form.get("OPENAI_MODEL", "").strip()
+            url   = request.form.get("OPENAI_API_URL", "").strip()
+            key   = request.form.get("OPENAI_API_KEY", "").strip()
+            if model: save_env_key("OPENAI_MODEL", model)
+            if url:   save_env_key("OPENAI_API_URL", url)
+            if key:   save_env_key("OPENAI_API_KEY", key)
+        else:
+            fallback_model = request.form.get("FALLBACK_MODEL", "").strip()
+            fallback_key   = request.form.get("FALLBACK_API_KEY", "").strip()
+            fallback_url   = request.form.get("FALLBACK_API_URL", "").strip()
+            if fallback_model: save_env_key("FALLBACK_MODEL", fallback_model)
+            if fallback_key:   save_env_key("FALLBACK_API_KEY", fallback_key)
+            if fallback_url:   save_env_key("FALLBACK_API_URL", fallback_url)
         flash("Model settings saved!", "success")
         return redirect(url_for("models_page"))
 
@@ -606,11 +612,23 @@ def models_page():
 <div class="card">
   <div class="card-header"><i class="bi bi-1-circle"></i> Primary Model</div>
   <div class="card-body">
-    <p style="color:var(--muted);font-size:0.88rem">Configured in <b>Bot Config</b>. Currently:</p>
-    <div class="table-wrap"><table class="table">
-      <tr><th>Model</th><td><code style="color:var(--accent)">{{ env.get('OPENAI_MODEL','—') }}</code></td></tr>
-      <tr><th>API URL</th><td><code style="color:var(--muted)">{{ env.get('OPENAI_API_URL','—') }}</code></td></tr>
-    </table></div>
+    <form method="POST">
+    <input type="hidden" name="section" value="primary">
+    <div style="margin-bottom:14px">
+      <label class="form-label">Model Name</label>
+      <input class="form-control" name="OPENAI_MODEL" value="{{ env.get('OPENAI_MODEL','gemini-3-flash-preview') }}" placeholder="e.g. gemini-3-flash-preview">
+    </div>
+    <div style="margin-bottom:14px">
+      <label class="form-label">API URL</label>
+      <input class="form-control" name="OPENAI_API_URL" value="{{ env.get('OPENAI_API_URL','https://generativelanguage.googleapis.com/v1beta/openai') }}">
+    </div>
+    <div style="margin-bottom:14px">
+      <label class="form-label">API Key</label>
+      <input class="form-control" type="password" name="OPENAI_API_KEY" placeholder="Leave blank to keep current" autocomplete="off">
+      {% if env.get('OPENAI_API_KEY') %}<small style="color:var(--green)">✓ Set</small>{% endif %}
+    </div>
+    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i> Save Primary</button>
+    </form>
   </div>
 </div>
 
@@ -619,8 +637,8 @@ def models_page():
   <div class="card-body">
     <p style="color:var(--muted);font-size:0.88rem">Used automatically if the primary model fails or is rate-limited.</p>
     <form method="POST">
+    <input type="hidden" name="section" value="fallback">
     <div style="margin-bottom:14px">
-      <label class="form-label">Fallback Model Name</label>
       <input class="form-control" name="FALLBACK_MODEL" value="{{ env.get('FALLBACK_MODEL','') }}" placeholder="e.g. gemini-1.5-flash">
     </div>
     <div style="margin-bottom:14px">
@@ -642,13 +660,14 @@ def models_page():
     <div class="table-wrap"><table class="table table-hover">
       <thead><tr><th>Model</th><th>Provider</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr><td><code>gemini-2.0-flash-exp</code></td><td>Google</td><td>Fast, free tier</td></tr>
-        <tr><td><code>gemini-1.5-flash</code></td><td>Google</td><td>Good fallback</td></tr>
+        <tr><td><code>gemini-3-flash-preview</code></td><td>Google</td><td>Latest, fast</td></tr>
+        <tr><td><code>gemini-2.5-flash-preview-04-17</code></td><td>Google</td><td>Stable preview</td></tr>
+        <tr><td><code>gemini-2.0-flash-exp</code></td><td>Google</td><td>Free tier</td></tr>
         <tr><td><code>gemini-1.5-pro</code></td><td>Google</td><td>High quality</td></tr>
         <tr><td><code>gpt-4o-mini</code></td><td>OpenAI</td><td>Affordable</td></tr>
         <tr><td><code>gpt-4o</code></td><td>OpenAI</td><td>Best quality</td></tr>
-        <tr><td><code>llama3</code></td><td>Ollama (local)</td><td>Offline, private</td></tr>
-        <tr><td><code>mistral</code></td><td>Ollama (local)</td><td>Offline, private</td></tr>
+        <tr><td><code>mistral-small-latest</code></td><td>Mistral</td><td>Free tier</td></tr>
+        <tr><td><code>llama3.2</code></td><td>Ollama (local)</td><td>Offline, private</td></tr>
       </tbody>
     </table></div>
   </div>
