@@ -565,27 +565,30 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = ""
     try:
         if ext == ".pdf":
+            pdf_data = bytes(file_bytes)
+            # Try pdfminer first (handles more encodings)
             try:
-                import pypdf
+                from pdfminer.high_level import extract_text as pdfminer_extract
+                text = pdfminer_extract(io.BytesIO(pdf_data)) or ""
             except ImportError:
-                await update.message.reply_text("❌ pypdf not installed. Run: `pip install pypdf`")
-                return
-            reader = pypdf.PdfReader(io.BytesIO(bytes(file_bytes)))
-            pages_text = []
-            for i, page in enumerate(reader.pages):
-                try:
-                    t = page.extract_text() or ""
-                    pages_text.append(t)
-                except Exception:
-                    pages_text.append("")
-            text = "\n".join(pages_text)
+                text = ""
+            # Fallback to pypdf
             if not text.strip():
-                n = len(reader.pages)
+                try:
+                    import pypdf
+                    reader = pypdf.PdfReader(io.BytesIO(pdf_data))
+                    text = "\n".join(p.extract_text() or "" for p in reader.pages)
+                except ImportError:
+                    await update.message.reply_text("❌ Install a PDF library: `pip install pdfminer.six`")
+                    return
+                except Exception as e:
+                    await update.message.reply_text(f"❌ Failed to read PDF: {e}")
+                    return
+            if not text.strip():
                 await update.message.reply_text(
-                    f"⚠️ Could not extract text from this PDF ({n} page{'s' if n!=1 else ''}).\n\n"
-                    "This is likely a **scanned PDF** (image-only). "
-                    "pypdf can only read text-based PDFs. "
-                    "Try a PDF with selectable text, or copy-paste the content directly."
+                    "⚠️ Could not extract text from this PDF.\n\n"
+                    "Try: `pip install pdfminer.six` for better PDF support, "
+                    "or send the text content directly."
                 )
                 return
 
