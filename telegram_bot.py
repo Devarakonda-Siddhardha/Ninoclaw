@@ -567,10 +567,26 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ext == ".pdf":
             try:
                 import pypdf
-                reader = pypdf.PdfReader(io.BytesIO(file_bytes))
-                text = "\n".join(p.extract_text() or "" for p in reader.pages)
             except ImportError:
                 await update.message.reply_text("❌ pypdf not installed. Run: `pip install pypdf`")
+                return
+            reader = pypdf.PdfReader(io.BytesIO(bytes(file_bytes)))
+            pages_text = []
+            for i, page in enumerate(reader.pages):
+                try:
+                    t = page.extract_text() or ""
+                    pages_text.append(t)
+                except Exception:
+                    pages_text.append("")
+            text = "\n".join(pages_text)
+            if not text.strip():
+                n = len(reader.pages)
+                await update.message.reply_text(
+                    f"⚠️ Could not extract text from this PDF ({n} page{'s' if n!=1 else ''}).\n\n"
+                    "This is likely a **scanned PDF** (image-only). "
+                    "pypdf can only read text-based PDFs. "
+                    "Try a PDF with selectable text, or copy-paste the content directly."
+                )
                 return
 
         elif ext in (".docx",):
