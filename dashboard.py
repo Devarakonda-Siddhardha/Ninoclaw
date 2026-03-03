@@ -228,14 +228,21 @@ LOGIN_TMPL = """<!DOCTYPE html>
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    from security import check_login_rate, reset_login_rate
     error = None
     if request.method == "POST":
-        env = get_env()
-        pwd = env.get("DASHBOARD_PASSWORD", "admin")
-        if request.form.get("password") == pwd:
-            session["logged_in"] = True
-            return redirect(url_for("index"))
-        error = "Incorrect password"
+        ip = request.remote_addr or "unknown"
+        rate_err = check_login_rate(ip)
+        if rate_err:
+            error = rate_err
+        else:
+            env = get_env()
+            pwd = env.get("DASHBOARD_PASSWORD", "admin")
+            if request.form.get("password") == pwd:
+                session["logged_in"] = True
+                reset_login_rate(ip)
+                return redirect(url_for("index"))
+            error = "Incorrect password"
     return render_template_string(LOGIN_TMPL, error=error)
 
 @app.route("/logout")

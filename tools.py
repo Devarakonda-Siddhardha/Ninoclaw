@@ -335,16 +335,17 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
     """
     from memory import Memory
     from config import SERPER_API_KEY
+    from security import require_owner, safe_path, safe_command, validate_skill_code
 
     memory = Memory()
     user_timezone = memory.get_timezone(user_id)
 
     if tool_name == "self_update":
         from updater import check_for_updates, do_update, get_current_version, restart
-        from config import OWNER_ID
         import asyncio
-        if OWNER_ID and user_id != OWNER_ID:
-            return "⛔ Only the bot owner can trigger updates."
+        err = require_owner(user_id)
+        if err:
+            return err
         has_updates, commits = check_for_updates()
         if not has_updates:
             return f"✅ Already on the latest version! (commit: {get_current_version()})"
@@ -449,9 +450,8 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return f"❌ {e}"
 
     if tool_name == "delete_skill":
-        from config import OWNER_ID
-        if OWNER_ID and int(user_id) != OWNER_ID:
-            return "❌ Only the owner can delete skills."
+        err = require_owner(user_id)
+        if err: return err
         skill_name = arguments.get("skill_name", "").strip().lower().replace(" ", "_")
         import os, re
         if not re.match(r'^[a-z][a-z0-9_]*$', skill_name):
@@ -468,18 +468,19 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         return f"🗑️ Skill '{skill_name}' deleted."
 
     if tool_name == "install_skill":
-        from config import OWNER_ID
-        if OWNER_ID and int(user_id) != OWNER_ID:
-            return "❌ Only the owner can install skills."
+        err = require_owner(user_id)
+        if err: return err
         import os, re
         url = arguments.get("url", "").strip()
         if not url:
             return "❌ URL is required."
+        # Only allow github.com and raw.githubusercontent.com
+        if not re.match(r'https://(raw\.githubusercontent\.com|github\.com)/', url):
+            return "❌ Only GitHub URLs are allowed for skill installation."
         # Convert github.com blob URL → raw URL
         raw_url = url
         if "github.com" in url and "/blob/" in url:
             raw_url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
-        # Derive skill name from filename in URL
         skill_name = os.path.splitext(raw_url.rstrip("/").split("/")[-1])[0]
         skill_name = re.sub(r'[^a-z0-9_]', '_', skill_name.lower())
         if not re.match(r'^[a-z][a-z0-9_]*$', skill_name):
@@ -490,8 +491,9 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             code = resp.text
         except Exception as e:
             return f"❌ Failed to download skill: {e}"
-        if "SKILL_INFO" not in code or "TOOLS" not in code or "def execute" not in code:
-            return "❌ File doesn't look like a valid Ninoclaw skill (missing SKILL_INFO, TOOLS, or execute)."
+        # Full AST validation
+        err = validate_skill_code(code)
+        if err: return err
         skills_dir = os.path.join(os.path.dirname(__file__), "skills")
         os.makedirs(skills_dir, exist_ok=True)
         skill_path = os.path.join(skills_dir, f"{skill_name}.py")
@@ -507,9 +509,8 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return f"⚠️ Skill saved as skills/{skill_name}.py but reload failed: {e}\nRestart bot to activate."
 
     if tool_name == "create_skill":
-        from config import OWNER_ID
-        if OWNER_ID and int(user_id) != OWNER_ID:
-            return "❌ Only the owner can create skills."
+        err = require_owner(user_id)
+        if err: return err
         import os, re
         skill_name = arguments.get("skill_name", "").strip().lower().replace(" ", "_").replace("-", "_")
         code = arguments.get("code", "").strip()
@@ -517,19 +518,17 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return "❌ Need both skill_name and code."
         if not re.match(r'^[a-z][a-z0-9_]*$', skill_name):
             return "❌ Skill name must be lowercase letters/numbers/underscores."
-        # Validate required structure
-        if "SKILL_INFO" not in code or "TOOLS" not in code or "def execute" not in code:
-            return "❌ Skill code must contain SKILL_INFO, TOOLS, and execute() function."
+        # Full AST validation
+        err = validate_skill_code(code)
+        if err: return err
         skills_dir = os.path.join(os.path.dirname(__file__), "skills")
         os.makedirs(skills_dir, exist_ok=True)
         skill_path = os.path.join(skills_dir, f"{skill_name}.py")
         with open(skill_path, "w") as f:
             f.write(code)
-        # Hot-reload skills
         try:
             import skill_manager as sm
             sm.load_skills()
-            # Also update TOOLS so new tool is available immediately
             import tools as _t
             _t.TOOLS = _t._BUILTIN_TOOLS + sm.get_tools()
             return (f"✅ Skill **{skill_name}** created and loaded!\n"
@@ -549,35 +548,33 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         except Exception as e:
             return f"❌ Sub-agent failed: {e}"
 
-    # ── System tools (owner-only) ─────────────────────────────────────────────
+    # ── System tools (owner-only, hardened) ──────────────────────────────────
     _SYS_TOOLS = {"run_command", "read_file", "write_file", "list_dir"}
     if tool_name in _SYS_TOOLS:
-        from config import OWNER_ID
-        if OWNER_ID and int(user_id) != OWNER_ID:
-            return "❌ System tools are owner-only."
+        err = require_owner(user_id)
+        if err: return err
 
     if tool_name == "run_command":
-        import subprocess, shlex
+        import subprocess
         command = arguments.get("command", "").strip()
         timeout = int(arguments.get("timeout", 30))
         if not command:
             return "❌ No command provided."
-        _BLOCKED = ["rm -rf /", "mkfs", ":(){:|:&};:", "dd if=/dev/zero of=/dev/"]
-        for b in _BLOCKED:
-            if b in command:
-                return f"❌ Blocked: `{b}`"
+        err = safe_command(command)
+        if err: return err
         try:
             result = subprocess.run(
-                command, shell=True, capture_output=True, text=True, timeout=timeout
+                command, shell=True, capture_output=True, text=True,
+                timeout=timeout, env={**__import__('os').environ, "HOME": __import__('os').path.expanduser("~")}
             )
             out = result.stdout.strip()
-            err = result.stderr.strip()
+            err_out = result.stderr.strip()
             parts = [f"$ {command}"]
             if out:
                 parts.append(f"```\n{out[:3000]}\n```")
-            if err:
-                parts.append(f"⚠️ stderr:\n```\n{err[:500]}\n```")
-            if not out and not err:
+            if err_out:
+                parts.append(f"⚠️ stderr:\n```\n{err_out[:500]}\n```")
+            if not out and not err_out:
                 parts.append("_(no output)_")
             if result.returncode != 0:
                 parts.append(f"↩️ Exit: {result.returncode}")
@@ -589,14 +586,17 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
 
     if tool_name == "read_file":
         import os
-        path = os.path.expanduser(arguments.get("path", ""))
+        path = arguments.get("path", "")
         tail = arguments.get("tail")
-        if not os.path.exists(path):
+        err = safe_path(path)
+        if err: return err
+        expanded = os.path.expanduser(path)
+        if not os.path.exists(expanded):
             return f"❌ File not found: {path}"
-        if os.path.isdir(path):
-            return f"❌ That's a directory. Use list_dir instead."
+        if os.path.isdir(expanded):
+            return "❌ That's a directory. Use list_dir instead."
         try:
-            with open(path, "r", errors="replace") as f:
+            with open(expanded, "r", errors="replace") as f:
                 lines = f.readlines()
             if tail:
                 lines = lines[-int(tail):]
@@ -609,12 +609,15 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
 
     if tool_name == "write_file":
         import os
-        path = os.path.expanduser(arguments.get("path", ""))
+        path = arguments.get("path", "")
         content = arguments.get("content", "")
+        err = safe_path(path)
+        if err: return err
         mode = "a" if arguments.get("mode") == "append" else "w"
+        expanded = os.path.expanduser(path)
         try:
-            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            with open(path, mode) as f:
+            os.makedirs(os.path.dirname(os.path.abspath(expanded)), exist_ok=True)
+            with open(expanded, mode) as f:
                 f.write(content)
             action = "appended to" if mode == "a" else "written to"
             return f"✅ {len(content)} chars {action} `{path}`"
