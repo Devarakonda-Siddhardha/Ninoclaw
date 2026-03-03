@@ -104,6 +104,7 @@ You have access to the following tools:
 - create_skill: Write and save a new Python skill to skills/ folder — immediately usable. Use when user says "create a skill", "add ability to", "build a skill for", etc.
 - list_skills: List all currently loaded skills
 - delete_skill: Delete a skill by name
+- install_skill: Download and install a skill from a GitHub URL (e.g. "install skill from github.com/user/repo/blob/main/jokes.py"). Converts github.com URLs to raw automatically.
 
 SKILL CREATION — when user asks you to create a skill, call create_skill with valid Python code following this EXACT template:
 

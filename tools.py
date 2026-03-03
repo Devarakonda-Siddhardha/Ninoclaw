@@ -203,6 +203,23 @@ _BUILTIN_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "install_skill",
+            "description": "Download and install a Python skill from a GitHub URL or raw URL. Use when user says 'install skill from github.com/...', 'download skill from ...', etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "GitHub URL or raw URL of the skill .py file. Supports github.com/user/repo/blob/main/skill.py or raw.githubusercontent.com URLs."
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
 ]
 
 # Combined tools list — built-ins + all loaded skills
@@ -359,6 +376,45 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         except Exception:
             pass
         return f"🗑️ Skill '{skill_name}' deleted."
+
+    if tool_name == "install_skill":
+        from config import OWNER_ID
+        if OWNER_ID and int(user_id) != OWNER_ID:
+            return "❌ Only the owner can install skills."
+        import os, re
+        url = arguments.get("url", "").strip()
+        if not url:
+            return "❌ URL is required."
+        # Convert github.com blob URL → raw URL
+        raw_url = url
+        if "github.com" in url and "/blob/" in url:
+            raw_url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+        # Derive skill name from filename in URL
+        skill_name = os.path.splitext(raw_url.rstrip("/").split("/")[-1])[0]
+        skill_name = re.sub(r'[^a-z0-9_]', '_', skill_name.lower())
+        if not re.match(r'^[a-z][a-z0-9_]*$', skill_name):
+            skill_name = "remote_skill"
+        try:
+            resp = _requests.get(raw_url, timeout=15)
+            resp.raise_for_status()
+            code = resp.text
+        except Exception as e:
+            return f"❌ Failed to download skill: {e}"
+        if "SKILL_INFO" not in code or "TOOLS" not in code or "def execute" not in code:
+            return "❌ File doesn't look like a valid Ninoclaw skill (missing SKILL_INFO, TOOLS, or execute)."
+        skills_dir = os.path.join(os.path.dirname(__file__), "skills")
+        os.makedirs(skills_dir, exist_ok=True)
+        skill_path = os.path.join(skills_dir, f"{skill_name}.py")
+        with open(skill_path, "w") as f:
+            f.write(code)
+        try:
+            import skill_manager as sm
+            sm.load_skills()
+            import tools as _t
+            _t.TOOLS = _t._BUILTIN_TOOLS + sm.get_tools()
+            return f"✅ Skill **{skill_name}** installed from:\n`{url}`\n\nReady to use — just ask me!"
+        except Exception as e:
+            return f"⚠️ Skill saved as skills/{skill_name}.py but reload failed: {e}\nRestart bot to activate."
 
     if tool_name == "create_skill":
         from config import OWNER_ID
