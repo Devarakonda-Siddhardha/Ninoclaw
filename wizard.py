@@ -311,6 +311,19 @@ def run_wizard():
     else:
         ok("Skipped — admin commands open to all users!")
 
+    # ── Personalization ───────────────────────────────────────────────────────
+    section("Personalization")
+    print(f"  {DIM}  Name your bot and tell it who you are.{RST}\n")
+    agent_name = ask("Bot name", default=existing.get("AGENT_NAME", "Ninoclaw"))
+    config["AGENT_NAME"] = agent_name or "Ninoclaw"
+    user_name = ask("Your name", default=existing.get("USER_NAME", "friend"))
+    config["USER_NAME"] = user_name or "friend"
+    purpose = ask("Bot's purpose  (e.g. 'help me code and stay productive')", default=existing.get("BOT_PURPOSE", "be your personal AI assistant"))
+    config["BOT_PURPOSE"] = purpose or "be your personal AI assistant"
+    timezone = ask("Your timezone  (e.g. Asia/Kolkata, UTC, America/New_York)", default=existing.get("TIMEZONE", "UTC"))
+    config["TIMEZONE"] = timezone or "UTC"
+    ok(f"Bot: {config['AGENT_NAME']} | You: {config['USER_NAME']} | TZ: {config['TIMEZONE']}")
+
     # ── Twilio Voice Calls ────────────────────────────────────────────────────
     section("Twilio Voice Calls  (optional)")
     print(f"  {DIM}  Bot calls your phone and speaks messages aloud.{RST}")
@@ -571,6 +584,19 @@ def run_wizard():
         ok(f"Owner ID: {owner}")
     else:
         ok("Skipped — anyone can run admin commands!")
+
+    # ── Personalization ───────────────────────────────────────────────────────
+    section("Personalization")
+    print(f"  {DIM}Name your bot and tell it who you are.{RST}")
+    agent_name = ask("Bot name", default=existing.get("AGENT_NAME", "Ninoclaw"))
+    config["AGENT_NAME"] = agent_name or "Ninoclaw"
+    user_name = ask("Your name", default=existing.get("USER_NAME", "friend"))
+    config["USER_NAME"] = user_name or "friend"
+    purpose = ask("Bot's purpose  (e.g. 'help me code and stay productive')", default=existing.get("BOT_PURPOSE", "be your personal AI assistant"))
+    config["BOT_PURPOSE"] = purpose or "be your personal AI assistant"
+    timezone = ask("Your timezone  (e.g. Asia/Kolkata, UTC, America/New_York)", default=existing.get("TIMEZONE", "UTC"))
+    config["TIMEZONE"] = timezone or "UTC"
+    ok(f"Bot: {config['AGENT_NAME']} | You: {config['USER_NAME']} | TZ: {config['TIMEZONE']}")
 
     # ── Twilio Voice Calls ────────────────────────────────────────────────────
     section("Twilio Voice Calls  (optional)")

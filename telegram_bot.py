@@ -8,40 +8,21 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from ai import chat, list_models, test_connection
 from memory import Memory
 from tasks import task_manager
-from config import SYSTEM_PROMPT
+from config import SYSTEM_PROMPT, AGENT_NAME, USER_NAME, BOT_PURPOSE
 from tools import get_tool_definitions, execute_tool
 from summarizer import extract_urls, is_youtube, get_youtube_transcript, get_url_content, build_summary_prompt
 
 memory = Memory()
 
-# Onboarding states
-ONBOARDING_STEPS = [
-    "agent_name",
-    "user_name",
-    "purpose",
-    "timezone"
-]
-
 # Command handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command with onboarding"""
-    user_id = update.effective_user.id
-    user_data = memory.get_user_data(user_id)
+    """Show welcome message"""
+    welcome = f"""🦀 Hey {USER_NAME}!
 
-    # Check if onboarding completed
-    if user_data.get("onboarding_complete"):
-        # Show welcome with personalized info
-        agent_name = user_data.get("agent_name", "Ninoclaw")
-        user_name = user_data.get("user_name", "friend")
-        purpose = user_data.get("purpose", "be your assistant")
-
-        welcome = f"""🦀 Welcome back, {user_name}!
-
-I'm {agent_name}, {purpose}.
+I'm {AGENT_NAME}, here to {BOT_PURPOSE}.
 
 Commands:
 /start - Show this message
-/chat - Talk to me
 /memory - Show conversation memory
 /clear - Clear memory
 /tasks - List your tasks
@@ -52,15 +33,7 @@ Commands:
 /status - Check system status
 
 Just send any message to chat!"""
-        await update.message.reply_text(welcome)
-    else:
-        # Start onboarding
-        memory.set_user_data(user_id, "onboarding_step", 0)
-        await update.message.reply_text("""🦀 Welcome! Let me get to know you better.
-
-I need to ask you a few questions:
-
-1️⃣ What would you like to call me? (My name)""")
+    await update.message.reply_text(welcome)
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Check system status"""
@@ -143,19 +116,6 @@ async def set_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     memory.set_timezone(user_id, timezone)
     display_tz = timezone if timezone else "Server time (UTC)"
     await update.message.reply_text(f"✅ Timezone set to: {display_tz}")
-
-async def reset_onboarding(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Reset onboarding to start over"""
-    user_id = update.effective_user.id
-
-    # Clear onboarding data
-    memory.set_user_data(user_id, "agent_name", None)
-    memory.set_user_data(user_id, "user_name", None)
-    memory.set_user_data(user_id, "purpose", None)
-    memory.set_user_data(user_id, "onboarding_step", 0)
-    memory.set_user_data(user_id, "onboarding_complete", False)
-
-    await update.message.reply_text("✅ Onboarding reset! Send /start to begin again.")
 
 async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List user tasks"""
@@ -388,17 +348,11 @@ async def cron_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Message handler for chat
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle regular chat messages and onboarding"""
+    """Handle regular chat messages"""
     user_id = update.effective_user.id
     user_message = update.message.text
-    user_data = memory.get_user_data(user_id)
 
-    # Check if in onboarding
-    if not user_data.get("onboarding_complete"):
-        await handle_onboarding(update, user_id, user_message, user_data)
-        return
-
-    # Normal chat - Save user message to memory
+    # Save user message to memory
     memory.add_message(user_id, "user", user_message)
 
     # Check for URLs — auto-summarize
@@ -427,15 +381,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Remove the last message (we just added it)
     conv_history = conv_history[:-1]
 
-    # Build personalized system prompt
-    agent_name = user_data.get("agent_name", "Ninoclaw")
-    user_name = user_data.get("user_name", "friend")
-    purpose = user_data.get("purpose", "be your assistant")
-
     personalized_prompt = f"""{SYSTEM_PROMPT}
 
-Your name is {agent_name}. You are talking to {user_name}.
-Your purpose is to {purpose}.
+Your name is {AGENT_NAME}. You are talking to {USER_NAME}.
+Your purpose is to {BOT_PURPOSE}.
 Remember these details and use them in your responses.
 
 You have access to tools to schedule and manage recurring tasks. When the user wants to schedule something (like "remind me every day at 9am"), use the schedule_cron tool."""
@@ -555,14 +504,12 @@ Commands:
 /status - Check system status"""
         )
 
+async def handle_onboarding(update, user_id, message, user_data):
+    pass  # Onboarding moved to CLI wizard — this stub kept for safety
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle photo messages - send image to vision model"""
     user_id = update.effective_user.id
-    user_data = memory.get_user_data(user_id)
-
-    if not user_data.get("onboarding_complete"):
-        await update.message.reply_text("Please complete setup first. Send /start")
-        return
 
     # Get caption as the user's question (optional)
     caption = update.message.caption or "Describe this image in detail."
@@ -573,14 +520,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo_bytes = await file.download_as_bytearray()
     image_b64 = base64.b64encode(photo_bytes).decode("utf-8")
 
-    # Build personalized prompt
-    agent_name = user_data.get("agent_name", "Ninoclaw")
-    user_name = user_data.get("user_name", "friend")
-    purpose = user_data.get("purpose", "be your assistant")
     personalized_prompt = f"""{SYSTEM_PROMPT}
 
-Your name is {agent_name}. You are talking to {user_name}.
-Your purpose is to {purpose}."""
+Your name is {AGENT_NAME}. You are talking to {USER_NAME}.
+Your purpose is to {BOT_PURPOSE}."""
 
     await update.message.chat.send_action(action="typing")
 
@@ -606,11 +549,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle document uploads — PDF, DOCX, TXT, CSV, code files"""
     import os, io, tempfile
     user_id = update.effective_user.id
-    user_data = memory.get_user_data(user_id)
-
-    if not user_data.get("onboarding_complete"):
-        await update.message.reply_text("Please complete setup first. Send /start")
-        return
 
     doc = update.message.document
     filename = doc.file_name or "file"
@@ -677,12 +615,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"User's question/request: {question}"
     )
 
-    agent_name = user_data.get("agent_name", "Ninoclaw")
-    user_name  = user_data.get("user_name", "friend")
-    purpose    = user_data.get("purpose", "be your assistant")
     personalized_prompt = (
-        f"{SYSTEM_PROMPT}\n\nYour name is {agent_name}. "
-        f"You are talking to {user_name}. Your purpose is to {purpose}."
+        f"{SYSTEM_PROMPT}\n\nYour name is {AGENT_NAME}. "
+        f"You are talking to {USER_NAME}. Your purpose is to {BOT_PURPOSE}."
     )
 
     conv_history = memory.get_conversation_context(user_id)
@@ -740,7 +675,6 @@ def create_bot(token):
     app.add_handler(CommandHandler("models", models_command))
     app.add_handler(CommandHandler("memory", show_memory))
     app.add_handler(CommandHandler("clear", clear_memory))
-    app.add_handler(CommandHandler("reset", reset_onboarding))
     app.add_handler(CommandHandler("tasks", list_tasks))
     app.add_handler(CommandHandler("addtask", add_task))
     app.add_handler(CommandHandler("remind", remind))

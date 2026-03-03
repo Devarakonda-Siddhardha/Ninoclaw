@@ -14,6 +14,12 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 # Get your ID by messaging @userinfobot on Telegram
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))  # 0 = not set
 
+# Personalization — set via wizard or .env directly
+AGENT_NAME  = os.getenv("AGENT_NAME",  "Ninoclaw")
+USER_NAME   = os.getenv("USER_NAME",   "friend")
+BOT_PURPOSE = os.getenv("BOT_PURPOSE", "be your personal AI assistant")
+TIMEZONE    = os.getenv("TIMEZONE",    "UTC")
+
 # Serper API (Google Search) - Get from https://serper.dev
 SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 
