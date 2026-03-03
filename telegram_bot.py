@@ -638,7 +638,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(prefix + final_response)
 
 
-
+async def update_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Pull latest code from GitHub and restart — owner only"""
     from updater import check_for_updates, do_update, get_current_version, restart
     from config import OWNER_ID

@@ -38,9 +38,10 @@ _SAFE_NAMES = {
 }
 
 _ALLOWED = (
-    ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant, ast.Num,
-    ast.Add, ast.Sub, ast.Mul, ast.Div, ast.Pow, ast.Mod, ast.FloorDiv,
+    ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant,
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod, ast.FloorDiv,
     ast.USub, ast.UAdd, ast.Call, ast.Name, ast.Load,
+    *([ast.Num] if hasattr(ast, "Num") else []),   # Python < 3.8 compat
 )
 
 def _safe_eval(expr):
