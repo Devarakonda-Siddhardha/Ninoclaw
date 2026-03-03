@@ -138,6 +138,17 @@ def run_wizard():
     cfg["TELEGRAM_BOT_TOKEN"] = token
     ok("Telegram token saved")
 
+    # ── 1b. Discord (optional) ────────────────────────────────────────────────
+    section("Step 1b — Discord Bot Token  (optional)")
+    info("Create a bot at https://discord.com/developers/applications")
+    info("Enable: Message Content Intent  |  Bot scope: bot + applications.commands")
+    discord_token = ask("Discord Bot Token", default=e.get("DISCORD_BOT_TOKEN"), optional=True, secret=True)
+    if discord_token:
+        cfg["DISCORD_BOT_TOKEN"] = discord_token
+        ok("Discord token saved — bot will respond to @mentions and DMs")
+    else:
+        ok("Skipped")
+
     # ── 2. AI Provider ────────────────────────────────────────────────────────
     section("Step 2 — AI Provider")
     provider = choose("Which AI provider?", [

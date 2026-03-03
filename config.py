@@ -13,6 +13,7 @@ def _env(key, default=""):
     return os.getenv(key, default).strip()
 
 TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+DISCORD_BOT_TOKEN  = _env("DISCORD_BOT_TOKEN", "")
 
 # Bot Owner - Only this Telegram user ID can trigger /update and admin commands
 OWNER_ID = int(_env("OWNER_ID", "0"))  # 0 = not set

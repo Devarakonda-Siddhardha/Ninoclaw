@@ -13,7 +13,7 @@ from telegram import BotCommand
 from telegram.ext import Application
 from telegram import __version__ as ptb_version
 from config import (
-    TELEGRAM_BOT_TOKEN, AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL,
+    TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL,
     OPENAI_MODEL, OPENAI_API_URL, AGENT_NAME, USER_NAME, BOT_PURPOSE, TIMEZONE
 )
 import telegram_bot as telegram_module  # Import our local telegram module
@@ -219,8 +219,19 @@ def main():
     # Start dashboard
     start_dashboard()
 
-    # Create bot
+    # Create and start Telegram bot
     app = telegram_module.create_bot(TELEGRAM_BOT_TOKEN)
+
+    # Start Discord bot if configured
+    if DISCORD_BOT_TOKEN:
+        try:
+            import discord_bot as discord_module
+            discord_module.run_bot(DISCORD_BOT_TOKEN)
+            print("✅ Discord bot started")
+        except ImportError:
+            print("⚠️  Discord token set but discord.py not installed — run: pip install discord.py")
+        except Exception as e:
+            print(f"⚠️  Discord bot failed to start: {e}")
 
     # Start bot
     print("\n🦀 Ninoclaw is running!")
