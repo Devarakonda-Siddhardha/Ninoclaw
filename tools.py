@@ -310,6 +310,25 @@ _BUILTIN_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "voice_call",
+            "description": (
+                "Call the owner's phone via Twilio and speak a message aloud. "
+                "Use for urgent alerts, reminders, or when user says 'call me', "
+                "'phone me', 'send me a voice note', 'call and say'. "
+                "Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, OWNER_PHONE in .env."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "The message to speak on the call"}
+                },
+                "required": ["message"]
+            }
+        }
+    },
 ]
 
 # Combined tools list — built-ins + all loaded skills
@@ -641,6 +660,42 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return "\n".join(lines)
         except Exception as e:
             return f"❌ {e}"
+
+    if tool_name == "voice_call":
+        err = require_owner(user_id)
+        if err: return err
+        message = arguments.get("message", "").strip()
+        if not message:
+            return "❌ Message is required."
+        import os
+        sid   = os.getenv("TWILIO_ACCOUNT_SID", "")
+        token = os.getenv("TWILIO_AUTH_TOKEN", "")
+        from_num = os.getenv("TWILIO_FROM", "")
+        to_num   = os.getenv("OWNER_PHONE", "")
+        if not all([sid, token, from_num, to_num]):
+            return (
+                "❌ Twilio not configured. Add to .env:\n"
+                "TWILIO_ACCOUNT_SID=...\n"
+                "TWILIO_AUTH_TOKEN=...\n"
+                "TWILIO_FROM=+1xxxxxxxxxx\n"
+                "OWNER_PHONE=+91xxxxxxxxxx"
+            )
+        try:
+            from twilio.rest import Client
+        except ImportError:
+            return "❌ twilio not installed. Run: `pip install twilio`"
+        try:
+            client = Client(sid, token)
+            # TwiML: speak message then hang up
+            twiml = f'<Response><Say voice="alice">{message}</Say></Response>'
+            call = client.calls.create(
+                twiml=twiml,
+                to=to_num,
+                from_=from_num,
+            )
+            return f"📞 Calling {to_num}...\nMessage: _{message}_\nCall SID: `{call.sid}`"
+        except Exception as e:
+            return f"❌ Twilio call failed: {e}"
 
     # Try skill tools
     try:

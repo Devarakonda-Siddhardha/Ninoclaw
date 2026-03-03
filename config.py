@@ -139,6 +139,7 @@ You have access to the following tools:
 - read_file: Read contents of a file (owner-only). Supports tail=N to read last N lines.
 - write_file: Write or append text to a file (owner-only).
 - list_dir: List files and folders in a directory (owner-only).
+- voice_call: Call the owner's phone via Twilio and speak a message. Use when user says 'call me', 'phone me', 'send me a voice note', or for urgent alerts. Requires TWILIO_* in .env.
 
 SKILL CREATION — when user asks you to create a skill, call create_skill with valid Python code following this EXACT template:
 

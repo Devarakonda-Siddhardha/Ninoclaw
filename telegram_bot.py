@@ -602,7 +602,108 @@ Your purpose is to {purpose}."""
     await update.message.reply_text(final_response)
 
 
-async def update_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle document uploads — PDF, DOCX, TXT, CSV, code files"""
+    import os, io, tempfile
+    user_id = update.effective_user.id
+    user_data = memory.get_user_data(user_id)
+
+    if not user_data.get("onboarding_complete"):
+        await update.message.reply_text("Please complete setup first. Send /start")
+        return
+
+    doc = update.message.document
+    filename = doc.file_name or "file"
+    ext = os.path.splitext(filename)[1].lower()
+    caption = update.message.caption or ""
+
+    await update.message.chat.send_action(action="typing")
+
+    # Download file bytes
+    file = await context.bot.get_file(doc.file_id)
+    file_bytes = await file.download_as_bytearray()
+
+    # Extract text based on file type
+    text = ""
+    try:
+        if ext == ".pdf":
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+                text = "\n".join(p.extract_text() or "" for p in reader.pages)
+            except ImportError:
+                await update.message.reply_text("❌ pypdf not installed. Run: `pip install pypdf`")
+                return
+
+        elif ext in (".docx",):
+            try:
+                import docx
+                doc_obj = docx.Document(io.BytesIO(file_bytes))
+                text = "\n".join(p.text for p in doc_obj.paragraphs)
+            except ImportError:
+                await update.message.reply_text("❌ python-docx not installed. Run: `pip install python-docx`")
+                return
+
+        elif ext in (".txt", ".md", ".py", ".js", ".ts", ".json", ".yaml", ".yml",
+                     ".csv", ".html", ".css", ".sh", ".env", ".log", ".xml"):
+            text = file_bytes.decode("utf-8", errors="replace")
+
+        else:
+            await update.message.reply_text(
+                f"❌ Unsupported file type: `{ext}`\n"
+                "Supported: PDF, DOCX, TXT, MD, CSV, JSON, YAML, code files, logs"
+            )
+            return
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to read file: {e}")
+        return
+
+    if not text.strip():
+        await update.message.reply_text("⚠️ File appears to be empty or unreadable.")
+        return
+
+    # Truncate if very large
+    MAX_CHARS = 12000
+    truncated = len(text) > MAX_CHARS
+    if truncated:
+        text = text[:MAX_CHARS]
+
+    # Build prompt
+    question = caption or "Summarize this file and highlight the key points."
+    file_prompt = (
+        f"The user sent a file: `{filename}`\n"
+        f"{'(truncated to first 12,000 chars) ' if truncated else ''}\n\n"
+        f"File contents:\n```\n{text}\n```\n\n"
+        f"User's question/request: {question}"
+    )
+
+    agent_name = user_data.get("agent_name", "Ninoclaw")
+    user_name  = user_data.get("user_name", "friend")
+    purpose    = user_data.get("purpose", "be your assistant")
+    personalized_prompt = (
+        f"{SYSTEM_PROMPT}\n\nYour name is {agent_name}. "
+        f"You are talking to {user_name}. Your purpose is to {purpose}."
+    )
+
+    conv_history = memory.get_conversation_context(user_id)
+
+    response = chat(
+        message=file_prompt,
+        system_prompt=personalized_prompt,
+        history=conv_history,
+        tools=get_tool_definitions(),
+    )
+
+    final_response = response if isinstance(response, str) else response.get("content", "")
+
+    memory.add_message(user_id, "user", f"[File: {filename}] {question}")
+    memory.add_message(user_id, "assistant", final_response)
+
+    prefix = f"📄 **{filename}**{'  _(truncated)_' if truncated else ''}\n\n"
+    await update.message.reply_text(prefix + final_response)
+
+
+
     """Pull latest code from GitHub and restart — owner only"""
     from updater import check_for_updates, do_update, get_current_version, restart
     from config import OWNER_ID
@@ -650,6 +751,7 @@ def create_bot(token):
     # Add message handler for chat
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 
     # Set telegram app reference for cron job execution
     task_manager.telegram_app = app
