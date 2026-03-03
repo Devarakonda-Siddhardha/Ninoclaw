@@ -225,11 +225,13 @@ _BUILTIN_TOOLS = [
         "function": {
             "name": "run_agent",
             "description": (
-                "Spawn a specialized sub-agent to handle a complex task autonomously. "
-                "The sub-agent can search the web, do calculations, and reason across multiple steps. "
-                "Use when a task requires deep research, multi-step analysis, code writing, or planning. "
-                "Agent types: 'researcher' (deep web research), 'coder' (write/debug code), "
-                "'analyst' (math/data analysis), 'planner' (break into steps), 'autonomous' (general)."
+                "Spawn a specialized sub-agent ONLY for genuinely complex tasks that require "
+                "multiple searches, multi-step reasoning, full code programs, or deep analysis. "
+                "Do NOT use for simple questions, quick facts, single lookups, or short answers — "
+                "handle those directly yourself. "
+                "Agent types: 'researcher' (needs 3+ web searches), 'coder' (write full programs), "
+                "'analyst' (complex data/math), 'planner' (multi-step project plans), "
+                "'autonomous' (complex open-ended tasks)."
             ),
             "parameters": {
                 "type": "object",

@@ -105,7 +105,7 @@ You have access to the following tools:
 - list_skills: List all currently loaded skills
 - delete_skill: Delete a skill by name
 - install_skill: Download and install a skill from a GitHub URL (e.g. "install skill from github.com/user/repo/blob/main/jokes.py"). Converts github.com URLs to raw automatically.
-- run_agent: Delegate a complex task to a specialized sub-agent that can autonomously search, calculate, and reason across multiple steps. Types: researcher (deep web research), coder (write/debug code), analyst (data/math), planner (break into steps), autonomous (general). Use when a task is too complex for a single response.
+- run_agent: Delegate to a specialized sub-agent ONLY when the task is genuinely complex — requires multiple web searches, multi-step reasoning, writing full code, or deep analysis. Do NOT use for simple questions, single lookups, quick calculations, or anything you can answer directly. Types: researcher (deep research needing 3+ searches), coder (write/debug full programs), analyst (complex data/math breakdowns), planner (multi-step project planning), autonomous (complex open-ended tasks).
 
 SKILL CREATION — when user asks you to create a skill, call create_skill with valid Python code following this EXACT template:
 
