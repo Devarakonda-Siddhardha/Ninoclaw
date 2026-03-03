@@ -5,8 +5,15 @@ Functions the AI can call to perform actions
 import requests as _requests
 from typing import Dict, Any
 
+# Load skills and merge their tools
+try:
+    import skill_manager as _sm
+    _SKILL_TOOLS = _sm.get_tools()
+except Exception:
+    _SKILL_TOOLS = []
+
 # Tool definitions that the AI can call
-TOOLS = [
+_BUILTIN_TOOLS = [
     {
         "type": "function",
         "function": {
@@ -155,8 +162,11 @@ TOOLS = [
     }
 ]
 
+# Combined tools list — built-ins + all loaded skills
+TOOLS = _BUILTIN_TOOLS + _SKILL_TOOLS
+
 def get_tool_definitions() -> list:
-    """Get all tool definitions"""
+    """Get all tool definitions (built-ins + skills)"""
     return TOOLS
 
 
@@ -273,5 +283,14 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return "❌ Job not found or you don't have permission"
         status = "enabled" if is_active else "disabled"
         return f"✅ Scheduled task {status}!"
+
+    # Try skill tools
+    try:
+        import skill_manager as _sm
+        result = _sm.execute(tool_name, arguments)
+        if result is not None:
+            return result
+    except Exception as e:
+        pass
 
     return f"Unknown tool: {tool_name}"

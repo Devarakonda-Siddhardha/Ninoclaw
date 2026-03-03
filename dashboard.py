@@ -342,6 +342,7 @@ def config_page():
 def plugins_page():
     env = get_env()
     if request.method == "POST":
+        # Built-in plugin flags
         plugins = {
             "ENABLE_WEB_SEARCH": request.form.get("ENABLE_WEB_SEARCH", "false"),
             "ENABLE_VISION":     request.form.get("ENABLE_VISION", "false"),
@@ -352,19 +353,52 @@ def plugins_page():
         }
         for k, v in plugins.items():
             save_env_key(k, v)
-        flash("Plugin settings saved!", "success")
+        # Skills: build DISABLED_SKILLS list from unchecked boxes
+        try:
+            import skill_manager as sm
+            all_skills = sm.list_all_skill_files()
+            disabled = [s for s in all_skills if request.form.get(f"SKILL_{s}") != "true"]
+            save_env_key("DISABLED_SKILLS", ",".join(disabled))
+        except Exception:
+            pass
+        flash("Settings saved! Restart bot to apply.", "success")
         return redirect(url_for("plugins_page"))
 
     def is_on(key, default="true"):
         return env.get(key, default) != "false"
 
+    # Load skills info
+    skills_data = []
+    try:
+        import skill_manager as sm
+        all_skill_files = sm.list_all_skill_files()
+        disabled_skills = {s.strip() for s in env.get("DISABLED_SKILLS","").split(",") if s.strip()}
+        loaded = sm.list_skills()
+        sys.path.insert(0, DIR)
+        import importlib
+        for sk in all_skill_files:
+            try:
+                mod = importlib.import_module(f"skills.{sk}")
+                info = getattr(mod, "SKILL_INFO", {"name": sk, "description": "", "icon": "🔧"})
+                tools_count = len(getattr(mod, "TOOLS", []))
+                skills_data.append({
+                    "key": sk, "info": info,
+                    "enabled": sk not in disabled_skills,
+                    "tools": tools_count
+                })
+            except Exception:
+                skills_data.append({"key": sk, "info": {"name": sk, "description": "Failed to load", "icon": "⚠️"}, "enabled": False, "tools": 0})
+    except Exception:
+        pass
+
     tmpl = BASE + """
 
 <div class="page-title">Plugins & Skills</div>
-<div class="page-sub">Toggle features on or off. Changes apply after bot restart.</div>
+<div class="page-sub">Toggle built-in features and skills. Restart bot to apply changes.</div>
 <form method="POST">
+
 <div class="card">
-  <div class="card-header"><i class="bi bi-puzzle"></i> Available Plugins</div>
+  <div class="card-header"><i class="bi bi-puzzle"></i> Built-in Plugins</div>
   <div class="card-body" style="padding: 8px 20px;">
 
     <div class="toggle-wrap">
@@ -429,12 +463,43 @@ def plugins_page():
 
   </div>
 </div>
-<button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i> Save Plugin Settings</button>
-<p style="color:var(--muted);font-size:0.8rem;margin-top:12px;">⚠ Restart the bot for changes to take effect: <code>ninoclaw restart</code></p>
+
+<div class="card">
+  <div class="card-header">
+    <i class="bi bi-stars"></i> Skills
+    <span style="color:var(--muted);font-size:0.8rem;font-weight:400;margin-left:8px">
+      {{ skills|length }} installed · drop a .py file in the <code>skills/</code> folder to add more
+    </span>
+  </div>
+  <div class="card-body" style="padding: 8px 20px;">
+  {% if skills %}
+    {% for sk in skills %}
+    <div class="toggle-wrap">
+      <div class="toggle-info">
+        <strong>{{ sk.info.get('icon','🔧') }} {{ sk.info.get('name', sk.key) }}
+          <span style="color:var(--muted);font-size:0.75rem;font-weight:400">v{{ sk.info.get('version','1.0') }}</span>
+          <span style="color:var(--muted);font-size:0.75rem;margin-left:6px">· {{ sk.tools }} tool{{ 's' if sk.tools != 1 else '' }}</span>
+        </strong>
+        <small>{{ sk.info.get('description','') }}</small>
+      </div>
+      <div class="form-check form-switch ms-3">
+        <input class="form-check-input" type="checkbox" name="SKILL_{{ sk.key }}" value="true" {{ 'checked' if sk.enabled }}>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div style="color:var(--muted);padding:16px 0;font-size:0.9rem">No skills found in <code>skills/</code> folder.</div>
+  {% endif %}
+  </div>
+</div>
+
+<button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i> Save All Settings</button>
+<p style="color:var(--muted);font-size:0.8rem;margin-top:12px;">⚠ Run <code>ninoclaw restart</code> for changes to take effect.</p>
 </form>
 
 """
     return render_template_string(tmpl, active="plugins", version=git_version(), env=env,
+        skills=skills_data,
         web_search=is_on("ENABLE_WEB_SEARCH"),
         vision=is_on("ENABLE_VISION"),
         summarizer=is_on("ENABLE_SUMMARIZER"),
