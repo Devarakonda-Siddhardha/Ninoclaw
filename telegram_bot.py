@@ -14,7 +14,73 @@ from summarizer import extract_urls, is_youtube, get_youtube_transcript, get_url
 
 memory = Memory()
 
-# Command handlers
+# ── File extensions for known code languages ─────────────────────────────────
+_CODE_EXTS = {
+    "html": "html", "css": "css", "javascript": "js", "js": "js",
+    "typescript": "ts", "ts": "ts", "python": "py", "py": "py",
+    "bash": "sh", "sh": "sh", "json": "json", "yaml": "yaml",
+    "yml": "yml", "sql": "sql", "markdown": "md", "md": "md",
+    "xml": "xml", "rust": "rs", "go": "go", "java": "java",
+    "cpp": "cpp", "c": "c", "kotlin": "kt", "swift": "swift",
+    "php": "php", "ruby": "rb", "r": "r", "toml": "toml",
+}
+
+async def send_with_code_files(update: Update, text: str):
+    """
+    Send a response. If it contains code blocks (```lang\\n...```),
+    extract them and send as downloadable files, then send remaining text.
+    """
+    import io
+
+    # Find all fenced code blocks
+    pattern = re.compile(r"```(\w+)?\n([\s\S]*?)```", re.MULTILINE)
+    matches = list(pattern.finditer(text))
+
+    # Only extract as files if the code is substantial (>10 lines or >300 chars)
+    file_matches = [
+        m for m in matches
+        if len(m.group(2).strip().splitlines()) > 10 or len(m.group(2).strip()) > 300
+    ]
+
+    if not file_matches:
+        # No large code blocks — send as plain text
+        if len(text) > 4096:
+            for i in range(0, len(text), 4096):
+                await update.message.reply_text(text[i:i+4096])
+        else:
+            await update.message.reply_text(text)
+        return
+
+    # Send text with code blocks replaced by "[see attached file]"
+    summary = text
+    sent_files = []
+    for m in file_matches:
+        lang = (m.group(1) or "txt").lower()
+        ext = _CODE_EXTS.get(lang, "txt")
+        filename = f"code.{ext}"
+        # Use a unique name if multiple files
+        i = len(sent_files) + 1
+        if len(file_matches) > 1:
+            filename = f"file{i}.{ext}"
+        sent_files.append((filename, m.group(2).strip()))
+        summary = summary.replace(m.group(0), f"📎 `{filename}`")
+
+    # Send summary text
+    summary = summary.strip()
+    if summary:
+        if len(summary) > 4096:
+            for i in range(0, len(summary), 4096):
+                await update.message.reply_text(summary[i:i+4096])
+        else:
+            await update.message.reply_text(summary)
+
+    # Send each code block as a file
+    for filename, code in sent_files:
+        buf = io.BytesIO(code.encode("utf-8"))
+        buf.name = filename
+        await update.message.reply_document(document=buf, filename=filename)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show welcome message"""
     welcome = f"""🦀 Hey {USER_NAME}!
@@ -436,9 +502,10 @@ You have access to tools to schedule and manage recurring tasks. When the user w
         memory.add_message(user_id, "assistant", result)
         asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, result))
         try:
-            await status_msg.edit_text(result)
+            await status_msg.delete()
         except Exception:
-            await update.message.reply_text(result)
+            pass
+        await send_with_code_files(update, result)
         return
 
     # Get AI response — use streaming for plain messages, non-streaming when tools needed
@@ -477,7 +544,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
 
         memory.add_message(user_id, "assistant", final_response)
         asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
-        await update.message.reply_text(final_response)
+        await send_with_code_files(update, final_response)
         return
 
     # No tool calls — use streaming response
@@ -496,21 +563,25 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             now = asyncio.get_event_loop().time()
             if now - last_edit >= EDIT_INTERVAL and accumulated.strip():
                 try:
-                    await sent_msg.edit_text(accumulated)
+                    await sent_msg.edit_text(accumulated[:4096])
                     last_edit = now
                 except Exception:
                     pass
 
-        # Final edit with complete response
-        if accumulated.strip() and accumulated != (await sent_msg.text if hasattr(sent_msg, 'text') else ""):
-            try:
-                await sent_msg.edit_text(accumulated)
-            except Exception:
-                pass
+        # Final edit / send with file extraction
+        final_response = accumulated or final_response
+        try:
+            await sent_msg.delete()
+        except Exception:
+            pass
+        await send_with_code_files(update, final_response or "⚠️ No response.")
+
     except Exception:
-        # Fallback: just use the non-streamed response
-        accumulated = final_response
-        await sent_msg.edit_text(accumulated or "⚠️ No response.")
+        final_response = final_response or "⚠️ No response."
+        try:
+            await sent_msg.edit_text(final_response[:4096])
+        except Exception:
+            pass
 
     final_response = accumulated or final_response
     memory.add_message(user_id, "assistant", final_response)
