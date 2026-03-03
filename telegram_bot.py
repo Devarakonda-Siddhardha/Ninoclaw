@@ -602,6 +602,28 @@ Your purpose is to {purpose}."""
     await update.message.reply_text(final_response)
 
 
+async def update_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Pull latest code from GitHub and restart"""
+    from updater import check_for_updates, do_update, get_current_version, restart
+    import asyncio
+
+    await update.message.reply_text(f"🔍 Checking for updates... (current: {get_current_version()})")
+
+    has_updates, commits = check_for_updates()
+    if not has_updates:
+        await update.message.reply_text("✅ Already on the latest version!")
+        return
+
+    await update.message.reply_text(f"📦 New changes found:\n{commits}\n\nUpdating...")
+    success, msg = do_update()
+    if not success:
+        await update.message.reply_text(f"❌ Update failed:\n{msg}")
+        return
+
+    await update.message.reply_text("✅ Update complete! Restarting in 2 seconds... 🔄")
+    asyncio.get_event_loop().call_later(2, restart)
+
+
 def create_bot(token):
     """Create and configure the Telegram bot"""
     app = Application.builder().token(token).build()
@@ -618,6 +640,7 @@ def create_bot(token):
     app.add_handler(CommandHandler("remind", remind))
     app.add_handler(CommandHandler("cron", cron_command))
     app.add_handler(CommandHandler("timezone", set_timezone))
+    app.add_handler(CommandHandler("update", update_bot))
 
     # Add message handler for chat
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

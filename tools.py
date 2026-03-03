@@ -10,6 +10,18 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "self_update",
+            "description": "Update the bot to the latest version from GitHub. Use when user says 'update yourself', 'pull latest version', 'update to latest', etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "web_search",
             "description": "Search the internet for current information, news, facts, prices, or anything you don't know. Use this when the user asks about recent events or things that require up-to-date info.",
             "parameters": {
@@ -166,6 +178,19 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
 
     memory = Memory()
     user_timezone = memory.get_timezone(user_id)
+
+    if tool_name == "self_update":
+        from updater import check_for_updates, do_update, get_current_version, restart
+        import asyncio
+        has_updates, commits = check_for_updates()
+        if not has_updates:
+            return f"✅ Already on the latest version! (commit: {get_current_version()})"
+        success, msg = do_update()
+        if not success:
+            return f"❌ Update failed:\n{msg}"
+        # Schedule restart after reply is sent
+        asyncio.get_event_loop().call_later(2, restart)
+        return f"✅ Updated successfully!\n\nChanges:\n{commits}\n\n🔄 Restarting now..."
 
     if tool_name == "web_search":
         query = arguments.get("query", "")

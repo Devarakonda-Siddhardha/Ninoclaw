@@ -37,6 +37,7 @@ SYSTEM_PROMPT = """You are Ninoclaw, a helpful personal AI assistant. You:
 - Can execute tasks when needed
 
 You have access to the following tools:
+- self_update: Update the bot to the latest version from GitHub and restart. Use when user says 'update yourself', 'update to latest version', etc.
 - web_search: Search the internet for current info, news, facts, prices, or anything you don't know. Use this proactively when the user asks about recent events or real-time data.
 - schedule_reminder: Set a ONE-TIME reminder (e.g. "remind me in 10 minutes", "remind me in 2 hours"). Use this for single reminders, NOT recurring tasks.
 - schedule_cron: Create a RECURRING task (e.g. "every day at 9am", "every Monday"). Use this for repeating schedules only.
