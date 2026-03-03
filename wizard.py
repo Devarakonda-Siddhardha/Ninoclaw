@@ -311,6 +311,20 @@ def run_wizard():
     else:
         ok("Skipped — admin commands open to all users!")
 
+    # ── Twilio Voice Calls ────────────────────────────────────────────────────
+    section("Twilio Voice Calls  (optional)")
+    print(f"  {DIM}  Bot calls your phone and speaks messages aloud.{RST}")
+    print(f"  {DIM}  Sign up free at https://twilio.com — get Account SID + Auth Token{RST}\n")
+    twilio_sid = ask("Twilio Account SID", default=existing.get("TWILIO_ACCOUNT_SID"), optional=True, secret=True)
+    if twilio_sid:
+        config["TWILIO_ACCOUNT_SID"] = twilio_sid
+        config["TWILIO_AUTH_TOKEN"]  = ask("Twilio Auth Token",    default=existing.get("TWILIO_AUTH_TOKEN"),  secret=True) or ""
+        config["TWILIO_FROM"]        = ask("Twilio Phone Number (e.g. +1415xxxxxxx)", default=existing.get("TWILIO_FROM")) or ""
+        config["OWNER_PHONE"]        = ask("Your Phone Number     (e.g. +91xxxxxxxxxx)", default=existing.get("OWNER_PHONE")) or ""
+        ok("Twilio configured — say 'call me and say...' to test")
+    else:
+        ok("Skipped")
+
     # ── Done ──────────────────────────────────────────────────────────────────
     save_env(config)
     print(f"\n{G}  ✔  Config saved to .env{RST}\n")
@@ -557,6 +571,19 @@ def run_wizard():
         ok(f"Owner ID: {owner}")
     else:
         ok("Skipped — anyone can run admin commands!")
+
+    # ── Twilio Voice Calls ────────────────────────────────────────────────────
+    section("Twilio Voice Calls  (optional)")
+    print(f"  {DIM}Bot calls your phone and speaks messages. Free at https://twilio.com{RST}")
+    twilio_sid = ask("Twilio Account SID", default=existing.get("TWILIO_ACCOUNT_SID"), optional=True, secret=True)
+    if twilio_sid:
+        config["TWILIO_ACCOUNT_SID"] = twilio_sid
+        config["TWILIO_AUTH_TOKEN"]  = ask("Twilio Auth Token",          default=existing.get("TWILIO_AUTH_TOKEN"),  secret=True) or ""
+        config["TWILIO_FROM"]        = ask("Twilio Number (+1415xxxxxxx)", default=existing.get("TWILIO_FROM")) or ""
+        config["OWNER_PHONE"]        = ask("Your Phone   (+91xxxxxxxxxx)", default=existing.get("OWNER_PHONE")) or ""
+        ok("Twilio configured — say 'call me and say...' to test")
+    else:
+        ok("Skipped")
 
     # ── Save ─────────────────────────────────────────────────────────────────
     save_env(config)
