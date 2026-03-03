@@ -134,13 +134,28 @@ BASE = """<!DOCTYPE html>
   .row { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 20px 0; }
   .col { flex: 1; min-width: 140px; }
   @media (max-width: 768px) {
-    .sidebar { display: none; }
-    .main { margin-left: 0; padding: 16px; }
+    .sidebar { transform: translateX(-100%); transition: transform 0.25s ease; z-index: 1000; }
+    .sidebar.open { transform: translateX(0); }
+    .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 999; }
+    .overlay.open { display: block; }
+    .main { margin-left: 0; padding: 12px; }
+    .topbar { display: flex !important; }
+    .stat-num { font-size: 1.5rem; }
+    .table-wrap { overflow-x: auto; }
+    .page-title { font-size: 1.15rem; }
   }
+  .topbar {
+    display: none; position: sticky; top: 0; z-index: 998;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 10px 16px; align-items: center; gap: 12px;
+    margin: -12px -12px 16px -12px;
+  }
+  .topbar-brand { font-weight: 700; color: var(--accent); font-size: 1rem; flex: 1; }
+  .hamburger { background: none; border: none; color: var(--text); font-size: 1.4rem; cursor: pointer; padding: 0; line-height: 1; }
 </style>
 </head>
 <body>
-<div class="sidebar">
+<div class="sidebar" id="sidebar">
   <div class="sidebar-brand">
     🦀 Ninoclaw
     <span>Dashboard <span class="version-tag">{{ version }}</span></span>
@@ -177,7 +192,12 @@ BASE = """<!DOCTYPE html>
     </a>
   </div>
 </div>
+<div class="overlay" id="overlay" onclick="closeNav()"></div>
 <div class="main">
+<div class="topbar">
+  <button class="hamburger" onclick="openNav()">&#9776;</button>
+  <span class="topbar-brand">🦀 Ninoclaw</span>
+</div>
   {% for msg in get_flashed_messages(category_filter=['success']) %}
   <div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>{{ msg }}</div>
   {% endfor %}
@@ -187,6 +207,10 @@ BASE = """<!DOCTYPE html>
 
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+function openNav()  { document.getElementById('sidebar').classList.add('open'); document.getElementById('overlay').classList.add('open'); }
+function closeNav() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('overlay').classList.remove('open'); }
+</script>
 </body>
 </html>
 """
@@ -583,10 +607,10 @@ def models_page():
   <div class="card-header"><i class="bi bi-1-circle"></i> Primary Model</div>
   <div class="card-body">
     <p style="color:var(--muted);font-size:0.88rem">Configured in <b>Bot Config</b>. Currently:</p>
-    <table class="table">
+    <div class="table-wrap"><table class="table">
       <tr><th>Model</th><td><code style="color:var(--accent)">{{ env.get('OPENAI_MODEL','—') }}</code></td></tr>
       <tr><th>API URL</th><td><code style="color:var(--muted)">{{ env.get('OPENAI_API_URL','—') }}</code></td></tr>
-    </table>
+    </table></div>
   </div>
 </div>
 
@@ -615,7 +639,7 @@ def models_page():
 <div class="card">
   <div class="card-header"><i class="bi bi-list-ol"></i> Suggested Models</div>
   <div class="card-body">
-    <table class="table table-hover">
+    <div class="table-wrap"><table class="table table-hover">
       <thead><tr><th>Model</th><th>Provider</th><th>Notes</th></tr></thead>
       <tbody>
         <tr><td><code>gemini-2.0-flash-exp</code></td><td>Google</td><td>Fast, free tier</td></tr>
@@ -626,7 +650,7 @@ def models_page():
         <tr><td><code>llama3</code></td><td>Ollama (local)</td><td>Offline, private</td></tr>
         <tr><td><code>mistral</code></td><td>Ollama (local)</td><td>Offline, private</td></tr>
       </tbody>
-    </table>
+    </table></div>
   </div>
 </div>
 
@@ -658,7 +682,7 @@ def memory_page():
   <div class="card-header"><i class="bi bi-people"></i> Users ({{ users|length }})</div>
   <div class="card-body" style="padding:0">
     {% if users %}
-    <table class="table table-hover mb-0">
+    <div class="table-wrap"><table class="table table-hover mb-0">
       <thead><tr><th>User ID</th><th>Messages</th><th>Last Active</th><th></th></tr></thead>
       <tbody>
       {% for uid, cnt, last in users %}
@@ -681,7 +705,7 @@ def memory_page():
       </tr>
       {% endfor %}
       </tbody>
-    </table>
+    </table></div>
     {% else %}
     <div style="padding:24px;text-align:center;color:var(--muted)">No conversations yet</div>
     {% endif %}
@@ -736,7 +760,7 @@ def chat_page():
 <div class="card">
   <div class="card-header"><i class="bi bi-people"></i> Select a conversation</div>
   <div class="card-body" style="padding:0">
-    <table class="table table-hover mb-0">
+    <div class="table-wrap"><table class="table table-hover mb-0">
       <thead><tr><th>User ID</th><th>Messages</th><th>Last Active</th><th></th></tr></thead>
       <tbody>
       {% for uid, cnt, last in users %}
@@ -750,7 +774,7 @@ def chat_page():
       </tr>
       {% endfor %}
       </tbody>
-    </table>
+    </table></div>
   </div>
 </div>
 {% else %}
@@ -1074,7 +1098,7 @@ def tasks_page():
   <div class="card-header"><i class="bi bi-alarm"></i> Pending Reminders</div>
   <div class="card-body" style="padding:0">
     {% if tasks %}
-    <table class="table table-hover mb-0">
+    <div class="table-wrap"><table class="table table-hover mb-0">
       <thead><tr><th>User</th><th>Description</th><th>Due At</th><th>Status</th></tr></thead>
       <tbody>
       {% for tid, uid, desc, due, done in tasks %}
@@ -1086,7 +1110,7 @@ def tasks_page():
       </tr>
       {% endfor %}
       </tbody>
-    </table>
+    </table></div>
     {% else %}
     <div style="padding:24px;text-align:center;color:var(--muted)">No reminders set</div>
     {% endif %}
@@ -1097,7 +1121,7 @@ def tasks_page():
   <div class="card-header"><i class="bi bi-clock-history"></i> Recurring Cron Jobs</div>
   <div class="card-body" style="padding:0">
     {% if crons %}
-    <table class="table table-hover mb-0">
+    <div class="table-wrap"><table class="table table-hover mb-0">
       <thead><tr><th>User</th><th>Description</th><th>Schedule</th><th>Status</th></tr></thead>
       <tbody>
       {% for cid, uid, desc, expr, active in crons %}
@@ -1109,7 +1133,7 @@ def tasks_page():
       </tr>
       {% endfor %}
       </tbody>
-    </table>
+    </table></div>
     {% else %}
     <div style="padding:24px;text-align:center;color:var(--muted)">No cron jobs yet</div>
     {% endif %}
