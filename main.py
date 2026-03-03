@@ -14,7 +14,7 @@ from telegram.ext import Application
 from telegram import __version__ as ptb_version
 from config import (
     TELEGRAM_BOT_TOKEN, AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL,
-    OPENAI_MODEL, OPENAI_API_URL
+    OPENAI_MODEL, OPENAI_API_URL, AGENT_NAME, USER_NAME, BOT_PURPOSE, TIMEZONE
 )
 import telegram_bot as telegram_module  # Import our local telegram module
 from ai import test_connection
@@ -123,11 +123,87 @@ def acquire_lock():
         sys.exit(1)
 
 
+def ask_personalization():
+    """Interactive first-run: ask bot name, user name, purpose, timezone."""
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+
+    # Read existing .env lines
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            lines = f.readlines()
+
+    def _set(key, value):
+        """Update or append a key in .env"""
+        found = False
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}="):
+                lines[i] = f"{key}={value}\n"
+                found = True
+                break
+        if not found:
+            lines.append(f"{key}={value}\n")
+        with open(env_path, "w") as f:
+            f.writelines(lines)
+        # Also update os.environ so config picks it up immediately
+        os.environ[key] = value
+
+    C = "\033[96m"; G = "\033[92m"; Y = "\033[93m"; RST = "\033[0m"; B = "\033[1m"
+
+    print(f"\n{C}{B}👋 Quick setup — let me get to know you!{RST}")
+    print(f"{Y}  (Press Enter to keep the default shown in brackets){RST}\n")
+
+    try:
+        name = input(f"  {C}>{RST} What would you like to call me? [{AGENT_NAME}]: ").strip()
+        if not name:
+            name = AGENT_NAME
+        _set("AGENT_NAME", name)
+        print(f"  {G}✓{RST} Got it, I'll be {name}!\n")
+
+        you = input(f"  {C}>{RST} What's your name? [{USER_NAME}]: ").strip()
+        if not you:
+            you = USER_NAME
+        _set("USER_NAME", you)
+        print(f"  {G}✓{RST} Nice to meet you, {you}!\n")
+
+        purpose = input(f"  {C}>{RST} What should I help you with? [{BOT_PURPOSE}]: ").strip()
+        if not purpose:
+            purpose = BOT_PURPOSE
+        _set("BOT_PURPOSE", purpose)
+        print(f"  {G}✓{RST} I'll {purpose}.\n")
+
+        tz = input(f"  {C}>{RST} Your timezone (e.g. Asia/Kolkata, UTC) [{TIMEZONE}]: ").strip()
+        if not tz:
+            tz = TIMEZONE
+        _set("TIMEZONE", tz)
+        print(f"  {G}✓{RST} Timezone: {tz}\n")
+
+        print(f"  {G}✅ All set! Starting {name}...{RST}\n")
+
+        # Reload config values in telegram_bot so it picks up new names
+        import importlib, config as cfg
+        cfg.AGENT_NAME  = os.environ.get("AGENT_NAME",  name)
+        cfg.USER_NAME   = os.environ.get("USER_NAME",   you)
+        cfg.BOT_PURPOSE = os.environ.get("BOT_PURPOSE", purpose)
+        cfg.TIMEZONE    = os.environ.get("TIMEZONE",    tz)
+        import telegram_bot as tb
+        tb.AGENT_NAME  = cfg.AGENT_NAME
+        tb.USER_NAME   = cfg.USER_NAME
+        tb.BOT_PURPOSE = cfg.BOT_PURPOSE
+
+    except (KeyboardInterrupt, EOFError):
+        print(f"\n  {Y}Skipped — using defaults.{RST}\n")
+
+
 def main():
     """Main entry point"""
     lock = acquire_lock()  # noqa: F841 — keep lock held
 
     print_banner()
+
+    # If personalization not set, ask interactively
+    if USER_NAME == "friend" or AGENT_NAME == "Ninoclaw":
+        ask_personalization()
 
     # Check environment
     if not check_environment():
