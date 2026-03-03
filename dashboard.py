@@ -289,7 +289,8 @@ def config_page():
                   "OPENAI_MODEL", "SERPER_API_KEY", "OWNER_ID",
                   "CONTEXT_WINDOW", "DASHBOARD_PASSWORD", "DASHBOARD_PORT",
                   "AGENT_NAME", "USER_NAME", "BOT_PURPOSE", "TIMEZONE",
-                  "RESEND_API_KEY", "RESEND_FROM", "OWNER_EMAIL"]
+                  "RESEND_API_KEY", "RESEND_FROM", "OWNER_EMAIL",
+                  "OPENROUTER_API_KEY", "OPENROUTER_MODEL"]
         for f in fields:
             val = request.form.get(f, "").strip()
             if val:
@@ -383,6 +384,21 @@ def config_page():
     <div>
       <label class="form-label">Timezone</label>
       <input class="form-control" name="TIMEZONE" value="{{ env.get('TIMEZONE','UTC') }}" placeholder="Asia/Kolkata">
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-header"><i class="bi bi-diagram-3"></i> OpenRouter  <small style="color:var(--muted);font-weight:400">100+ models in one API — <a href="https://openrouter.ai/keys" style="color:var(--accent)">openrouter.ai</a></small></div>
+  <div class="card-body">
+    <div style="margin-bottom:14px">
+      <label class="form-label">OpenRouter API Key</label>
+      <input class="form-control" type="password" name="OPENROUTER_API_KEY" placeholder="sk-or-... — leave blank to keep current" autocomplete="off">
+      {% if env.get('OPENROUTER_API_KEY') %}<small style="color:var(--green)">✓ Set — used as fallback automatically</small>
+      {% else %}<small style="color:var(--muted)">Free credits on signup. Use any model like <code>google/gemini-flash-1.5</code></small>{% endif %}
+    </div>
+    <div>
+      <label class="form-label">OpenRouter Model  <small>(when used as primary)</small></label>
+      <input class="form-control" name="OPENROUTER_MODEL" value="{{ env.get('OPENROUTER_MODEL','google/gemini-flash-1.5') }}">
     </div>
   </div>
 </div>
@@ -663,10 +679,12 @@ def models_page():
         <tr><td><code>gemini-3-flash-preview</code></td><td>Google</td><td>Latest, fast</td></tr>
         <tr><td><code>gemini-2.5-flash-preview-04-17</code></td><td>Google</td><td>Stable preview</td></tr>
         <tr><td><code>gemini-2.0-flash-exp</code></td><td>Google</td><td>Free tier</td></tr>
-        <tr><td><code>gemini-1.5-pro</code></td><td>Google</td><td>High quality</td></tr>
         <tr><td><code>gpt-4o-mini</code></td><td>OpenAI</td><td>Affordable</td></tr>
         <tr><td><code>gpt-4o</code></td><td>OpenAI</td><td>Best quality</td></tr>
         <tr><td><code>mistral-small-latest</code></td><td>Mistral</td><td>Free tier</td></tr>
+        <tr><td><code>google/gemini-flash-1.5</code></td><td>OpenRouter</td><td>Via openrouter.ai</td></tr>
+        <tr><td><code>google/gemini-2.0-flash-exp:free</code></td><td>OpenRouter</td><td>Free on OpenRouter</td></tr>
+        <tr><td><code>meta-llama/llama-3.3-70b-instruct:free</code></td><td>OpenRouter</td><td>Free Llama 3.3</td></tr>
         <tr><td><code>llama3.2</code></td><td>Ollama (local)</td><td>Offline, private</td></tr>
       </tbody>
     </table></div>
