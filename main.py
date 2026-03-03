@@ -19,6 +19,7 @@ from config import (
 import telegram_bot as telegram_module  # Import our local telegram module
 from ai import test_connection
 from tasks import task_manager
+from bg_agent import bg_runner
 
 def print_banner():
     """Print startup banner"""
@@ -221,6 +222,19 @@ def main():
 
     # Create and start Telegram bot
     app = telegram_module.create_bot(TELEGRAM_BOT_TOKEN)
+
+    # Wire background agent runner
+    bg_runner.task_manager = task_manager
+
+    async def _tg_notify(user_id, msg):
+        try:
+            await app.bot.send_message(chat_id=int(user_id), text=msg)
+        except Exception as e:
+            print(f"[BG Agent] Notify error: {e}")
+
+    bg_runner.notify_fn = _tg_notify
+    bg_runner.start()
+    print("✅ Background agent runner started")
 
     # Start Discord bot if configured
     if DISCORD_BOT_TOKEN:

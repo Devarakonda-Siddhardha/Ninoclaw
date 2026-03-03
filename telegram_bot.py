@@ -6,7 +6,7 @@ import base64
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from ai import chat, list_models, test_connection
-from memory import Memory
+from memory import Memory, extract_and_store_facts
 from tasks import task_manager
 from config import SYSTEM_PROMPT, AGENT_NAME, USER_NAME, BOT_PURPOSE
 from tools import get_tool_definitions, execute_tool
@@ -347,8 +347,25 @@ async def cron_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Unknown action: {action}\nUse /cron for help")
 
 # Message handler for chat
+_AGENT_KEYWORDS = ("research", "find me", "look up and summarize", "compare", "analyze")
+_BG_KEYWORDS = ("in background", "background task", "while i sleep")
+_COMPLEX_KEYWORDS = ("research", "find all", "look up and summarize", "compare", "analyze and report", "monitor")
+
+
+def _is_background_request(msg: str) -> bool:
+    low = msg.lower()
+    return any(low.startswith(kw) or f" {kw}" in low for kw in _BG_KEYWORDS)
+
+
+def _is_complex_request(msg: str) -> bool:
+    low = msg.lower()
+    return any(kw in low for kw in _COMPLEX_KEYWORDS)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle regular chat messages"""
+    import asyncio
+    from ai import chat_stream
     user_id = update.effective_user.id
     user_message = update.message.text
 
@@ -373,7 +390,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = chat(message=summary_prompt, system_prompt=SYSTEM_PROMPT, history=[])
         final_response = response if isinstance(response, str) else response.get("content") or ""
         memory.add_message(user_id, "assistant", final_response)
+        asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
         await update.message.reply_text(f"🔗 Summary of {url}\n\n{final_response}")
+        return
+
+    # ── Background job detection ──────────────────────────────────────────────
+    if _is_background_request(user_message):
+        from bg_agent import bg_runner
+        # Strip the background prefix to get the actual goal
+        goal = user_message
+        for kw in _BG_KEYWORDS:
+            goal = re.sub(rf'(?i)^{re.escape(kw)}[,:\s]*', '', goal).strip()
+        job_id = bg_runner.queue_job(str(user_id), goal)
+        await update.message.reply_text(f"⚙️ Got it! Working on it in the background...\n\n🆔 Job ID: `{job_id}`\nUse /jobs to check status.")
         return
 
     # Get conversation history for context
@@ -381,13 +410,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Remove the last message (we just added it)
     conv_history = conv_history[:-1]
 
+    facts_ctx = memory.facts_as_context(user_id)
     personalized_prompt = f"""{SYSTEM_PROMPT}
 
 Your name is {AGENT_NAME}. You are talking to {USER_NAME}.
 Your purpose is to {BOT_PURPOSE}.
+{facts_ctx}
 Remember these details and use them in your responses.
 
 You have access to tools to schedule and manage recurring tasks. When the user wants to schedule something (like "remind me every day at 9am"), use the schedule_cron tool."""
+
+    # ── Agent mode for complex multi-step requests ────────────────────────────
+    if _is_complex_request(user_message):
+        from agent import run_agent
+        await update.message.chat.send_action(action="typing")
+        status_msg = await update.message.reply_text("🤔 Working on it step by step...")
+
+        async def _progress(msg):
+            try:
+                await status_msg.edit_text(msg)
+            except Exception:
+                pass
+
+        result = await run_agent(user_message, str(user_id), task_manager, notify_fn=_progress)
+        memory.add_message(user_id, "assistant", result)
+        asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, result))
+        try:
+            await status_msg.edit_text(result)
+        except Exception:
+            await update.message.reply_text(result)
+        return
 
     # Get AI response — use streaming for plain messages, non-streaming when tools needed
     await update.message.chat.send_action(action="typing")
@@ -424,13 +476,11 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             final_response += "\n\n".join(tool_results)
 
         memory.add_message(user_id, "assistant", final_response)
+        asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
         await update.message.reply_text(final_response)
         return
 
     # No tool calls — use streaming response
-    from ai import chat_stream
-    import asyncio
-
     sent_msg = await update.message.reply_text("⏳")
     accumulated = ""
     last_edit = 0
@@ -464,6 +514,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
 
     final_response = accumulated or final_response
     memory.add_message(user_id, "assistant", final_response)
+    asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
 
 async def handle_onboarding(update: Update, user_id, message, user_data):
     """Handle onboarding flow"""
@@ -692,6 +743,62 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(prefix + final_response)
 
 
+async def show_facts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show stored long-term facts about the user."""
+    user_id = update.effective_user.id
+    facts = memory.get_facts(user_id)
+    if facts:
+        lines = "\n".join(f"• {f['key']}: {f['value']}" for f in facts)
+        await update.message.reply_text(f"🧠 Known facts about you:\n\n{lines}")
+    else:
+        await update.message.reply_text("🧠 No facts stored yet. I'll learn about you as we chat!")
+
+
+async def remember_fact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manually store a fact: /remember <key>=<value> or /remember <key> <value>"""
+    user_id = update.effective_user.id
+    if not context.args:
+        await update.message.reply_text("Usage: /remember <key> <value>\nExample: /remember timezone IST")
+        return
+    if "=" in context.args[0]:
+        key, _, value = context.args[0].partition("=")
+        value = value + (" " + " ".join(context.args[1:]) if len(context.args) > 1 else "")
+    else:
+        key = context.args[0]
+        value = " ".join(context.args[1:])
+    if not value.strip():
+        await update.message.reply_text("Usage: /remember <key> <value>")
+        return
+    memory.store_fact(user_id, key.strip(), value.strip())
+    await update.message.reply_text(f"✅ Remembered: {key.strip()} = {value.strip()}")
+
+
+async def forget_fact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete a stored fact: /forget <key>"""
+    user_id = update.effective_user.id
+    if not context.args:
+        await update.message.reply_text("Usage: /forget <key>")
+        return
+    key = " ".join(context.args)
+    memory.delete_fact(user_id, key.strip())
+    await update.message.reply_text(f"✅ Forgot: {key.strip()}")
+
+
+async def show_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show background agent jobs."""
+    from bg_agent import bg_runner
+    user_id = update.effective_user.id
+    jobs = bg_runner.list_jobs(str(user_id))
+    if not jobs:
+        await update.message.reply_text("⚙️ No background jobs yet.")
+        return
+    lines = []
+    for j in jobs:
+        emoji = {"queued": "⏳", "running": "⚙️", "done": "✅", "failed": "❌"}.get(j["status"], "❓")
+        lines.append(f"{emoji} [{j['id']}] {j['goal'][:40]}\n   Status: {j['status']}")
+    await update.message.reply_text("⚙️ Background jobs:\n\n" + "\n\n".join(lines))
+
+
 async def update_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Pull latest code from GitHub and restart — owner only"""
     from updater import check_for_updates, do_update, get_current_version, restart
@@ -735,6 +842,10 @@ def create_bot(token):
     app.add_handler(CommandHandler("cron", cron_command))
     app.add_handler(CommandHandler("timezone", set_timezone))
     app.add_handler(CommandHandler("update", update_bot))
+    app.add_handler(CommandHandler("facts", show_facts))
+    app.add_handler(CommandHandler("remember", remember_fact))
+    app.add_handler(CommandHandler("forget", forget_fact))
+    app.add_handler(CommandHandler("jobs", show_jobs))
 
     # Add message handler for chat
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

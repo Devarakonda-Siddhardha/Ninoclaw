@@ -29,6 +29,14 @@ def _init_db():
             value    TEXT,
             PRIMARY KEY (user_id, key)
         );
+        CREATE TABLE IF NOT EXISTS facts (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id  TEXT NOT NULL,
+            key      TEXT NOT NULL,
+            value    TEXT NOT NULL,
+            ts       TEXT NOT NULL,
+            UNIQUE(user_id, key)
+        );
     """)
     conn.commit()
     conn.close()
@@ -96,3 +104,65 @@ class Memory:
         conn.execute("DELETE FROM conversations WHERE user_id=?", (str(user_id),))
         conn.commit()
         conn.close()
+
+    # ── Long-term facts ───────────────────────────────────────────────────────
+
+    def store_fact(self, user_id, key, value):
+        conn = _get_conn()
+        conn.execute(
+            "INSERT OR REPLACE INTO facts (user_id, key, value, ts) VALUES (?,?,?,?)",
+            (str(user_id), key, value, datetime.now().isoformat())
+        )
+        conn.commit()
+        conn.close()
+
+    def get_facts(self, user_id):
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT key, value FROM facts WHERE user_id=? ORDER BY key",
+            (str(user_id),)
+        ).fetchall()
+        conn.close()
+        return [{"key": r["key"], "value": r["value"]} for r in rows]
+
+    def delete_fact(self, user_id, key):
+        conn = _get_conn()
+        conn.execute("DELETE FROM facts WHERE user_id=? AND key=?", (str(user_id), key))
+        conn.commit()
+        conn.close()
+
+    def facts_as_context(self, user_id):
+        facts = self.get_facts(user_id)
+        if not facts:
+            return ""
+        lines = "\n".join(f"- {f['key']}: {f['value']}" for f in facts)
+        return f"Known facts about user:\n{lines}"
+
+
+memory = Memory()
+
+
+def extract_and_store_facts(user_id, message, ai_response):
+    """Call AI to extract personal facts from a conversation snippet and store them."""
+    from ai import chat
+    try:
+        system = (
+            "Extract any personal facts about the user from this conversation snippet. "
+            "Return ONLY a JSON array of {\"key\": \"...\", \"value\": \"...\"} objects, "
+            "or [] if none found. "
+            "Examples of facts: name, location, timezone, job, preferences, goals, pets, etc."
+        )
+        snippet = f"User: {message}\nAssistant: {ai_response}"
+        result = chat(message=snippet, system_prompt=system)
+        text = result if isinstance(result, str) else (result.get("content") or "")
+        # Extract JSON array from response
+        import re
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            import json
+            facts = json.loads(match.group())
+            for f in facts:
+                if isinstance(f, dict) and f.get("key") and f.get("value"):
+                    memory.store_fact(user_id, f["key"], f["value"])
+    except Exception:
+        pass
