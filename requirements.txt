@@ -6,6 +6,5 @@ youtube-transcript-api
 python-dotenv
 flask>=3.0.0
 paramiko>=3.0.0
-twilio>=8.0.0
 pypdf>=4.0.0
 python-docx>=1.0.0
