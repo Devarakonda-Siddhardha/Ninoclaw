@@ -1,6 +1,6 @@
 """
 Ninoclaw - Personal AI Assistant
-A lightweight AI assistant with memory, tasks, and Telegram integration.
+Core bot startup — use cli.py / ninoclaw command for full CLI experience.
 """
 import os
 import sys
@@ -8,13 +8,6 @@ import sys
 # ── Load .env before importing config ────────────────────────────────────────
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
-
-# ── First-run setup wizard ────────────────────────────────────────────────────
-from wizard import needs_setup, run_wizard
-if needs_setup():
-    run_wizard()
-    # Reload env after wizard writes .env
-    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
 from telegram import BotCommand
 from telegram.ext import Application

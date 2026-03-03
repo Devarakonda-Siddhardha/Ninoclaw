@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Ninoclaw CLI entry point
+# To install: chmod +x ninoclaw && sudo ln -s "$(pwd)/ninoclaw" /usr/local/bin/ninoclaw
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$DIR/cli.py" "$@"
