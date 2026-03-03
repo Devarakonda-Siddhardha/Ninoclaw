@@ -371,7 +371,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         summary_prompt = build_summary_prompt(content, url, is_yt=is_youtube(url))
         response = chat(message=summary_prompt, system_prompt=SYSTEM_PROMPT, history=[])
-        final_response = response if isinstance(response, str) else response.get("content", "")
+        final_response = response if isinstance(response, str) else response.get("content") or ""
         memory.add_message(user_id, "assistant", final_response)
         await update.message.reply_text(f"🔗 Summary of {url}\n\n{final_response}")
         return
@@ -400,7 +400,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
     )
 
     # Handle response (can be string or dict with tool_calls)
-    final_response = response if isinstance(response, str) else response.get("content", "")
+    final_response = response if isinstance(response, str) else response.get("content") or ""
     tool_calls = response.get("tool_calls") if isinstance(response, dict) else None
 
     # Execute tool calls if any
@@ -537,7 +537,7 @@ Your purpose is to {BOT_PURPOSE}."""
         image_b64=image_b64
     )
 
-    final_response = response if isinstance(response, str) else response.get("content", "")
+    final_response = response if isinstance(response, str) else response.get("content") or ""
 
     memory.add_message(user_id, "user", f"[Image] {caption}")
     memory.add_message(user_id, "assistant", final_response)
@@ -629,7 +629,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tools=get_tool_definitions(),
     )
 
-    final_response = response if isinstance(response, str) else response.get("content", "")
+    final_response = response if isinstance(response, str) else response.get("content") or ""
 
     memory.add_message(user_id, "user", f"[File: {filename}] {question}")
     memory.add_message(user_id, "assistant", final_response)
