@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # Ninoclaw CLI entry point
 # Termux install: ln -s "$(pwd)/ninoclaw" "$PREFIX/bin/ninoclaw"
-# Linux install:  sudo ln -s "$(pwd)/ninoclaw" /usr/local/bin/ninoclaw
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve real directory even when called through a symlink
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
 exec python "$DIR/cli.py" "$@"
