@@ -129,25 +129,94 @@ def run_wizard():
 
     cfg = {}
 
-    # ── 1. Telegram ───────────────────────────────────────────────────────────
-    section("Step 1 — Telegram Bot Token")
-    info("Get yours from @BotFather on Telegram")
-    token = ask("Bot Token", default=e.get("TELEGRAM_BOT_TOKEN"), secret=True)
-    if not token or token == "YOUR_BOT_TOKEN_HERE":
-        print(f"  {R}✗  Token is required.{RST}"); sys.exit(1)
-    cfg["TELEGRAM_BOT_TOKEN"] = token
-    ok("Telegram token saved")
+    # ── 1. Messaging Platforms ────────────────────────────────────────────────
+    section("Step 1 — Messaging Platforms")
 
-    # ── 1b. Discord (optional) ────────────────────────────────────────────────
-    section("Step 1b — Discord Bot Token  (optional)")
-    info("Create a bot at https://discord.com/developers/applications")
-    info("Enable: Message Content Intent  |  Bot scope: bot + applications.commands")
-    discord_token = ask("Discord Bot Token", default=e.get("DISCORD_BOT_TOKEN"), optional=True, secret=True)
-    if discord_token:
-        cfg["DISCORD_BOT_TOKEN"] = discord_token
-        ok("Discord token saved — bot will respond to @mentions and DMs")
+    _platforms = [
+        ("Telegram   (recommended — most features)",   "telegram"),
+        ("Discord    (@mention + DM support)",          "discord"),
+    ]
+    # Multi-select: toggle each platform
+    selected = set()
+    # Pre-select based on existing config
+    if e.get("TELEGRAM_BOT_TOKEN") and e["TELEGRAM_BOT_TOKEN"] != "YOUR_BOT_TOKEN_HERE":
+        selected.add("telegram")
+    if e.get("DISCORD_BOT_TOKEN"):
+        selected.add("discord")
+    if not selected:
+        selected.add("telegram")  # default
+
+    # Multi-select menu
+    print(f"\n  {W}Which platforms do you want to use?{RST}")
+    info("Space = toggle  |  Enter = confirm  |  ↑↓ = move")
+    n = len(_platforms)
+    idx = 0
+
+    def _render_platforms():
+        for _ in range(n):
+            sys.stdout.write(UP + CLR)
+        for i, (lbl, val) in enumerate(_platforms):
+            check = f"{G}◉{RST}" if val in selected else f"{DIM}○{RST}"
+            cursor = f"{G}❯ {W}" if i == idx else f"    {DIM}"
+            sys.stdout.write(f"  {cursor}{check}  {lbl}{RST}\n")
+        sys.stdout.flush()
+
+    for _ in _platforms:
+        print()
+    sys.stdout.write(HIDE); sys.stdout.flush()
+    try:
+        _render_platforms()
+        while True:
+            k = _getch()
+            if k in ('\x1b[A', '\x1b[D'):
+                idx = (idx - 1) % n
+            elif k in ('\x1b[B', '\x1b[C'):
+                idx = (idx + 1) % n
+            elif k == ' ':
+                val = _platforms[idx][1]
+                if val in selected:
+                    selected.discard(val)
+                else:
+                    selected.add(val)
+            elif k in ('\r', '\n'):
+                break
+            elif k == '\x03':
+                sys.stdout.write(SHOW); sys.exit(0)
+            _render_platforms()
+    finally:
+        sys.stdout.write(SHOW); sys.stdout.flush()
+
+    if not selected:
+        print(f"  {Y}⚠  No platform selected — defaulting to Telegram{RST}")
+        selected.add("telegram")
+
+    print(f"\n  {G}✓{RST}  Platforms: {', '.join(sorted(selected))}\n")
+
+    # ── 1a. Telegram token ────────────────────────────────────────────────────
+    if "telegram" in selected:
+        section("Step 1a — Telegram Bot Token")
+        info("Get yours from @BotFather on Telegram")
+        token = ask("Bot Token", default=e.get("TELEGRAM_BOT_TOKEN"), secret=True)
+        if not token or token == "YOUR_BOT_TOKEN_HERE":
+            print(f"  {R}✗  Telegram token is required.{RST}"); sys.exit(1)
+        cfg["TELEGRAM_BOT_TOKEN"] = token
+        ok("Telegram token saved")
     else:
-        ok("Skipped")
+        cfg["TELEGRAM_BOT_TOKEN"] = e.get("TELEGRAM_BOT_TOKEN", "")
+
+    # ── 1b. Discord token ─────────────────────────────────────────────────────
+    if "discord" in selected:
+        section("Step 1b — Discord Bot Token")
+        info("Create bot: https://discord.com/developers/applications")
+        info("Enable: Message Content Intent  |  Scope: bot + applications.commands")
+        discord_token = ask("Discord Bot Token", default=e.get("DISCORD_BOT_TOKEN"), secret=True)
+        if discord_token:
+            cfg["DISCORD_BOT_TOKEN"] = discord_token
+            ok("Discord token saved")
+        else:
+            print(f"  {Y}⚠  Skipped Discord (no token entered){RST}")
+    else:
+        cfg["DISCORD_BOT_TOKEN"] = e.get("DISCORD_BOT_TOKEN", "")
 
     # ── 2. AI Provider ────────────────────────────────────────────────────────
     section("Step 2 — AI Provider")
@@ -298,7 +367,10 @@ def run_wizard():
 def needs_setup():
     e = load_existing_env()
     token = e.get("TELEGRAM_BOT_TOKEN", "")
-    return not token or token == "YOUR_BOT_TOKEN_HERE"
+    discord = e.get("DISCORD_BOT_TOKEN", "")
+    has_telegram = token and token != "YOUR_BOT_TOKEN_HERE"
+    has_discord  = bool(discord)
+    return not has_telegram and not has_discord
 
 
 if __name__ == "__main__":
