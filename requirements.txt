@@ -4,3 +4,4 @@ schedule==1.2.0
 croniter==3.0.3
 youtube-transcript-api
 python-dotenv
+flask>=3.0.0

@@ -58,6 +58,18 @@ OPENAI_MODEL   = _primary["model"]
 OLLAMA_HOST    = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL", "llama3.2")
 
+# Plugin feature flags — toggle via dashboard or .env
+ENABLE_WEB_SEARCH  = os.getenv("ENABLE_WEB_SEARCH",  "true")  != "false"
+ENABLE_VISION      = os.getenv("ENABLE_VISION",      "true")  != "false"
+ENABLE_SUMMARIZER  = os.getenv("ENABLE_SUMMARIZER",  "true")  != "false"
+ENABLE_REMINDERS   = os.getenv("ENABLE_REMINDERS",   "true")  != "false"
+ENABLE_CRON        = os.getenv("ENABLE_CRON",        "true")  != "false"
+ENABLE_SELF_UPDATE = os.getenv("ENABLE_SELF_UPDATE", "true")  != "false"
+
+# Dashboard
+DASHBOARD_PORT     = int(os.getenv("DASHBOARD_PORT", "8080"))
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "admin")
+
 # Memory Settings
 MEMORY_FILE    = "memory.json"
 MAX_MEMORY_SIZE = 1000  # max messages stored in DB per user

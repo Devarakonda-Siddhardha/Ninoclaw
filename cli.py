@@ -35,6 +35,7 @@ HELP = f"""
   {G}memory{RST}             Memory management
     {DIM}clear [user_id]{RST}    Clear chat history (all users or specific)
     {DIM}stats{RST}             Show memory usage stats
+  {G}dashboard{RST}          Start the web dashboard (default port 8080)
   {G}version{RST}            Show current version (git commit)
 
 {W}Examples:{RST}
@@ -208,6 +209,12 @@ def cmd_update():
     restart()
 
 
+def cmd_dashboard():
+    """Start the web dashboard"""
+    from dashboard import run_dashboard
+    run_dashboard()
+
+
 def cmd_version():
     """Show current git version"""
     try:
@@ -237,6 +244,8 @@ def main():
         cmd_memory(args[1:])
     elif cmd == "update":
         cmd_update()
+    elif cmd == "dashboard":
+        cmd_dashboard()
     elif cmd == "version":
         cmd_version()
     elif cmd in ("help", "--help", "-h"):
