@@ -159,7 +159,50 @@ _BUILTIN_TOOLS = [
                 "required": ["job_id"]
             }
         }
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_skill",
+            "description": "Create a brand new skill and save it to the skills/ folder. The skill is immediately loaded and usable. Use when user asks you to create/add/build a new skill or capability.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": {
+                        "type": "string",
+                        "description": "Filename for the skill (lowercase, underscores, no .py), e.g. 'jokes' or 'ip_checker'"
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "Complete Python code for the skill file. Must include SKILL_INFO dict, TOOLS list, and execute(tool_name, arguments) function."
+                    }
+                },
+                "required": ["skill_name", "code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_skills",
+            "description": "List all currently loaded skills and their capabilities",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_skill",
+            "description": "Delete a custom skill by name",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "skill_name": {"type": "string", "description": "Name of the skill to delete"}
+                },
+                "required": ["skill_name"]
+            }
+        }
+    },
 ]
 
 # Combined tools list — built-ins + all loaded skills
@@ -283,6 +326,70 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return "❌ Job not found or you don't have permission"
         status = "enabled" if is_active else "disabled"
         return f"✅ Scheduled task {status}!"
+
+    # ── Skill management ────────────────────────────────────────────────────
+    if tool_name == "list_skills":
+        try:
+            import skill_manager as sm
+            skills = sm.list_skills()
+            if not skills:
+                return "No skills loaded yet."
+            lines = ["🧩 **Loaded Skills:**\n"]
+            for key, info in skills.items():
+                lines.append(f"{info.get('icon','🔧')} **{info['name']}** v{info.get('version','1.0')}\n   {info.get('description','')}")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"❌ {e}"
+
+    if tool_name == "delete_skill":
+        from config import OWNER_ID
+        if OWNER_ID and int(user_id) != OWNER_ID:
+            return "❌ Only the owner can delete skills."
+        skill_name = arguments.get("skill_name", "").strip().lower().replace(" ", "_")
+        import os, re
+        if not re.match(r'^[a-z][a-z0-9_]*$', skill_name):
+            return "❌ Invalid skill name."
+        skill_path = os.path.join(os.path.dirname(__file__), "skills", f"{skill_name}.py")
+        if not os.path.exists(skill_path):
+            return f"❌ Skill '{skill_name}' not found."
+        os.remove(skill_path)
+        try:
+            import skill_manager as sm
+            sm.load_skills()
+        except Exception:
+            pass
+        return f"🗑️ Skill '{skill_name}' deleted."
+
+    if tool_name == "create_skill":
+        from config import OWNER_ID
+        if OWNER_ID and int(user_id) != OWNER_ID:
+            return "❌ Only the owner can create skills."
+        import os, re
+        skill_name = arguments.get("skill_name", "").strip().lower().replace(" ", "_").replace("-", "_")
+        code = arguments.get("code", "").strip()
+        if not skill_name or not code:
+            return "❌ Need both skill_name and code."
+        if not re.match(r'^[a-z][a-z0-9_]*$', skill_name):
+            return "❌ Skill name must be lowercase letters/numbers/underscores."
+        # Validate required structure
+        if "SKILL_INFO" not in code or "TOOLS" not in code or "def execute" not in code:
+            return "❌ Skill code must contain SKILL_INFO, TOOLS, and execute() function."
+        skills_dir = os.path.join(os.path.dirname(__file__), "skills")
+        os.makedirs(skills_dir, exist_ok=True)
+        skill_path = os.path.join(skills_dir, f"{skill_name}.py")
+        with open(skill_path, "w") as f:
+            f.write(code)
+        # Hot-reload skills
+        try:
+            import skill_manager as sm
+            sm.load_skills()
+            # Also update TOOLS so new tool is available immediately
+            import tools as _t
+            _t.TOOLS = _t._BUILTIN_TOOLS + sm.get_tools()
+            return (f"✅ Skill **{skill_name}** created and loaded!\n"
+                    f"You can now use it — just ask me to use it.")
+        except Exception as e:
+            return f"⚠️ Skill saved to skills/{skill_name}.py but reload failed: {e}\nRestart bot to activate."
 
     # Try skill tools
     try:
