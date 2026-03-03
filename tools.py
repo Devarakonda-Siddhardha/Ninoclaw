@@ -27,6 +27,27 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "schedule_reminder",
+            "description": "Schedule a one-time reminder or task that fires once at a specific time. Use this when the user says things like 'remind me in 10 minutes', 'remind me at 3pm', 'remind me tomorrow'. NOT for recurring tasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "What to remind the user about"
+                    },
+                    "when": {
+                        "type": "string",
+                        "description": "When to send the reminder. Examples: 'in 10 minutes', 'in 2 hours', 'in 1 day'. Use 'in X minutes/hours/days' format."
+                    }
+                },
+                "required": ["message", "when"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_timezone",
             "description": "Get the user's configured timezone. Use to check if timezone is set before scheduling.",
             "parameters": {
@@ -167,6 +188,14 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return f"🔍 Search results for \"{query}\":\n\n" + "\n\n".join(results)
         except Exception as e:
             return f"❌ Search failed: {e}"
+
+    if tool_name == "schedule_reminder":
+        message = arguments.get("message", "Reminder!")
+        when = arguments.get("when", "in 5 minutes")
+        ts = task_manager.parse_time(when)
+        task_manager.add_task(user_id, f"⏰ {message}", ts)
+        time_str = task_manager.format_timestamp(ts)
+        return f"⏰ Reminder set!\n\n📝 {message}\n📅 {time_str}"
 
     if tool_name == "get_timezone":
         tz = user_timezone or "Not set (using server time)"

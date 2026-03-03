@@ -85,24 +85,21 @@ class TaskManager:
         self._save()
 
     def parse_time(self, time_str):
-        """
-        Parse time string like:
-        - "in 5 minutes"
-        - "at 3:00 PM"
-        - "tomorrow at 9:00 AM"
-        """
-        # Simple implementation - expand as needed
+        """Parse 'in X minutes/hours/days' into a timestamp"""
         time_str = time_str.lower().strip()
 
-        # "in X minutes"
-        if time_str.startswith("in "):
-            try:
-                minutes = int(time_str.split()[1])
-                return datetime.now().timestamp() + (minutes * 60)
-            except:
-                pass
+        match = re.search(r'in (\d+)\s*(minute|minutes|min|hour|hours|hr|day|days)', time_str)
+        if match:
+            amount = int(match.group(1))
+            unit = match.group(2)
+            if unit in ('hour', 'hours', 'hr'):
+                return datetime.now().timestamp() + amount * 3600
+            elif unit in ('day', 'days'):
+                return datetime.now().timestamp() + amount * 86400
+            else:
+                return datetime.now().timestamp() + amount * 60
 
-        # For now, return current time + 5 minutes as default
+        # Default: 5 minutes
         return datetime.now().timestamp() + 300
 
     def format_timestamp(self, ts):
