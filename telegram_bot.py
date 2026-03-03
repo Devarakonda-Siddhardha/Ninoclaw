@@ -389,9 +389,10 @@ Remember these details and use them in your responses.
 
 You have access to tools to schedule and manage recurring tasks. When the user wants to schedule something (like "remind me every day at 9am"), use the schedule_cron tool."""
 
-    # Get AI response - show typing indicator
+    # Get AI response — use streaming for plain messages, non-streaming when tools needed
     await update.message.chat.send_action(action="typing")
 
+    # First check if tools are needed (non-streaming path)
     response = chat(
         message=user_message,
         system_prompt=personalized_prompt,
@@ -399,7 +400,6 @@ You have access to tools to schedule and manage recurring tasks. When the user w
         tools=get_tool_definitions()
     )
 
-    # Handle response (can be string or dict with tool_calls)
     final_response = response if isinstance(response, str) else response.get("content") or ""
     tool_calls = response.get("tool_calls") if isinstance(response, dict) else None
 
@@ -408,7 +408,6 @@ You have access to tools to schedule and manage recurring tasks. When the user w
     if tool_calls:
         for tool_call in tool_calls:
             tool_name = tool_call.get("function", {}).get("name")
-            # Arguments can be JSON string or dict
             raw_args = tool_call.get("function", {}).get("arguments", "{}")
             if isinstance(raw_args, str):
                 import json
@@ -419,16 +418,52 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                 result = await execute_tool(tool_name, tool_args, user_id, task_manager)
                 tool_results.append(result)
 
-        # Combine AI response with tool results
         if tool_results:
             if final_response:
                 final_response += "\n\n"
             final_response += "\n\n".join(tool_results)
 
-    # Save AI response to memory
-    memory.add_message(user_id, "assistant", final_response)
+        memory.add_message(user_id, "assistant", final_response)
+        await update.message.reply_text(final_response)
+        return
 
-    await update.message.reply_text(final_response)
+    # No tool calls — use streaming response
+    from ai import chat_stream
+    import asyncio
+
+    sent_msg = await update.message.reply_text("⏳")
+    accumulated = ""
+    last_edit = 0
+    EDIT_INTERVAL = 0.8  # seconds between edits (Telegram rate limit)
+
+    try:
+        async for chunk in chat_stream(
+            message=user_message,
+            system_prompt=personalized_prompt,
+            history=conv_history,
+        ):
+            accumulated += chunk
+            now = asyncio.get_event_loop().time()
+            if now - last_edit >= EDIT_INTERVAL and accumulated.strip():
+                try:
+                    await sent_msg.edit_text(accumulated)
+                    last_edit = now
+                except Exception:
+                    pass
+
+        # Final edit with complete response
+        if accumulated.strip() and accumulated != (await sent_msg.text if hasattr(sent_msg, 'text') else ""):
+            try:
+                await sent_msg.edit_text(accumulated)
+            except Exception:
+                pass
+    except Exception:
+        # Fallback: just use the non-streamed response
+        accumulated = final_response
+        await sent_msg.edit_text(accumulated or "⚠️ No response.")
+
+    final_response = accumulated or final_response
+    memory.add_message(user_id, "assistant", final_response)
 
 async def handle_onboarding(update: Update, user_id, message, user_data):
     """Handle onboarding flow"""

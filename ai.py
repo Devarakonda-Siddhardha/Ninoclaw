@@ -24,6 +24,64 @@ def chat(message, system_prompt=None, history=None, tools=None, image_b64=None):
     return f"⚠️ All models failed. Last error: {last_error}"
 
 
+async def chat_stream(message, system_prompt=None, history=None):
+    """
+    Async generator that yields text chunks as they stream in.
+    Falls back to non-streaming chat() if streaming fails.
+    Only used when no tool calls needed (plain conversation).
+    """
+    import asyncio, httpx
+    last_error = "No models configured."
+
+    for model_cfg in MODELS:
+        url = f"{model_cfg['api_url']}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {model_cfg['api_key']}",
+            "Content-Type": "application/json",
+        }
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": message})
+
+        payload = {
+            "model": model_cfg["model"],
+            "messages": messages,
+            "temperature": 0.7,
+            "stream": True,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                    if resp.status_code >= 400:
+                        last_error = f"HTTP {resp.status_code}"
+                        continue
+                    async for line in resp.aiter_lines():
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data = line[6:]
+                        if data.strip() == "[DONE]":
+                            return
+                        try:
+                            chunk = json.loads(data)
+                            delta = chunk["choices"][0]["delta"].get("content") or ""
+                            if delta:
+                                yield delta
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
+            return  # success
+        except Exception as e:
+            last_error = str(e)
+            print(f"[AI] Stream failed for {model_cfg['model']} ({e}), trying next...")
+            continue
+
+    # All models failed — yield error as plain text
+    yield f"⚠️ All models failed. Last error: {last_error}"
+
+
 def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64):
     """
     Single attempt against one model config.
