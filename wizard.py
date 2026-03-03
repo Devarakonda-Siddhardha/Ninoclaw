@@ -174,7 +174,14 @@ def run_wizard():
     section("AI Provider")
     provider = choose("Which AI provider?", [
         ("Google Gemini       (free tier available)",  "gemini"),
+        ("Groq                (free, very fast — llama/mixtral)", "groq"),
         ("OpenAI              (GPT-4o, GPT-4o-mini)", "openai"),
+        ("Mistral             (mistral-small free)",  "mistral"),
+        ("xAI Grok            (grok-3-mini)",         "xai"),
+        ("ZhipuAI GLM         (glm-4-flash free)",    "glm"),
+        ("MiniMax             (MiniMax-Text-01)",      "minimax"),
+        ("Together AI         (100+ open models)",    "together"),
+        ("OpenRouter          (all providers in one)", "openrouter"),
         ("Anthropic Claude    (claude-3-5-sonnet)",   "anthropic"),
         ("Custom OpenAI-compatible endpoint",         "custom"),
     ])
@@ -184,10 +191,19 @@ def run_wizard():
         config["OPENAI_API_URL"] = "https://generativelanguage.googleapis.com/v1beta/openai"
         config["OPENAI_API_KEY"] = ask("Gemini API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
         config["OPENAI_MODEL"]   = choose("Model", [
-            ("gemini-3-flash-preview   (latest, smartest)", "gemini-3-flash-preview"),
             ("gemini-2.0-flash         (fast, stable)",     "gemini-2.0-flash"),
             ("gemini-1.5-flash         (stable)",           "gemini-1.5-flash"),
             ("gemini-1.5-pro           (smarter, slower)",  "gemini-1.5-pro"),
+        ])
+
+    elif provider == "groq":
+        print(f"  {DIM}  Get key: https://console.groq.com{RST}\n")
+        config["OPENAI_API_URL"] = "https://api.groq.com/openai/v1"
+        config["OPENAI_API_KEY"] = ask("Groq API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = choose("Model", [
+            ("llama-3.3-70b-versatile  (best quality)", "llama-3.3-70b-versatile"),
+            ("llama-3.1-8b-instant     (fastest)",      "llama-3.1-8b-instant"),
+            ("mixtral-8x7b-32768       (good balance)", "mixtral-8x7b-32768"),
         ])
 
     elif provider == "openai":
@@ -198,6 +214,48 @@ def run_wizard():
             ("gpt-4o-mini   (cheap, fast)",  "gpt-4o-mini"),
             ("gpt-4o        (best quality)", "gpt-4o"),
         ])
+
+    elif provider == "mistral":
+        print(f"  {DIM}  Get key: https://console.mistral.ai{RST}\n")
+        config["OPENAI_API_URL"] = "https://api.mistral.ai/v1"
+        config["OPENAI_API_KEY"] = ask("Mistral API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = choose("Model", [
+            ("mistral-small-latest  (free tier)", "mistral-small-latest"),
+            ("mistral-large-latest  (best)",      "mistral-large-latest"),
+        ])
+
+    elif provider == "xai":
+        print(f"  {DIM}  Get key: https://console.x.ai{RST}\n")
+        config["OPENAI_API_URL"] = "https://api.x.ai/v1"
+        config["OPENAI_API_KEY"] = ask("xAI API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = ask("Model", default="grok-3-mini") or "grok-3-mini"
+
+    elif provider == "glm":
+        print(f"  {DIM}  Get key: https://open.bigmodel.cn{RST}\n")
+        config["OPENAI_API_URL"] = "https://open.bigmodel.cn/api/paas/v4"
+        config["OPENAI_API_KEY"] = ask("GLM API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = choose("Model", [
+            ("glm-4-flash  (free tier)", "glm-4-flash"),
+            ("glm-4-plus   (best)",      "glm-4-plus"),
+        ])
+
+    elif provider == "minimax":
+        print(f"  {DIM}  Get key: https://api.minimax.chat{RST}\n")
+        config["OPENAI_API_URL"] = "https://api.minimax.chat/v1"
+        config["OPENAI_API_KEY"] = ask("MiniMax API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = ask("Model", default="MiniMax-Text-01") or "MiniMax-Text-01"
+
+    elif provider == "together":
+        print(f"  {DIM}  Get key: https://api.together.xyz{RST}\n")
+        config["OPENAI_API_URL"] = "https://api.together.xyz/v1"
+        config["OPENAI_API_KEY"] = ask("Together API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = ask("Model", default="meta-llama/Llama-3-70b-chat-hf") or ""
+
+    elif provider == "openrouter":
+        print(f"  {DIM}  Get key: https://openrouter.ai/keys{RST}\n")
+        config["OPENAI_API_URL"] = "https://openrouter.ai/api/v1"
+        config["OPENAI_API_KEY"] = ask("OpenRouter API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = ask("Model", default="openai/gpt-4o-mini") or ""
 
     elif provider == "anthropic":
         print(f"  {DIM}  Get key: https://console.anthropic.com/{RST}\n")
@@ -212,21 +270,26 @@ def run_wizard():
 
     ok(f"Primary model: {config['OPENAI_MODEL']}")
 
-    # ── Fallback model ────────────────────────────────────────────────────────
-    section("Fallback Model")
-    print(f"  {DIM}  Auto-used if primary hits rate limits or errors{RST}\n")
-    if confirm("Add a fallback model?"):
-        config["FALLBACK_MODEL"] = ask("Fallback model name", default=existing.get("FALLBACK_MODEL")) or ""
-        fb_key = ask("Fallback API key", default=existing.get("FALLBACK_API_KEY"), optional=True, secret=True)
-        if fb_key:
-            config["FALLBACK_API_KEY"] = fb_key
-        fb_url = ask("Fallback API URL", default=existing.get("FALLBACK_API_URL"), optional=True)
-        if fb_url:
-            config["FALLBACK_API_URL"] = fb_url
-        if config["FALLBACK_MODEL"]:
-            ok(f"Fallback model: {config['FALLBACK_MODEL']}")
-    else:
-        ok("Skipped")
+    # ── Extra providers (fallback chain) ──────────────────────────────────────
+    section("Extra Providers  (fallback chain — optional)")
+    print(f"  {DIM}  Bot tries these in order if primary fails/rate-limits. Skip any with Enter.{RST}\n")
+    _extra = [
+        ("Groq",       "GROQ_API_KEY",       "https://console.groq.com"),
+        ("Mistral",    "MISTRAL_API_KEY",     "https://console.mistral.ai"),
+        ("xAI Grok",   "XAI_API_KEY",         "https://console.x.ai"),
+        ("ZhipuAI GLM","GLM_API_KEY",         "https://open.bigmodel.cn"),
+        ("MiniMax",    "MINIMAX_API_KEY",     "https://api.minimax.chat"),
+        ("Together AI","TOGETHER_API_KEY",    "https://api.together.xyz"),
+        ("OpenRouter", "OPENROUTER_API_KEY",  "https://openrouter.ai"),
+        ("Ollama (local)", "OLLAMA_MODEL",    "ollama serve"),
+    ]
+    for name, key_var, hint in _extra:
+        val = ask(f"{name} key/model ({hint})", default=existing.get(key_var), optional=True, secret=(key_var != "OLLAMA_MODEL"))
+        if val:
+            config[key_var] = val
+            ok(f"{name} added to fallback chain")
+        else:
+            ok(f"{name} skipped")
 
     # ── Web Search ────────────────────────────────────────────────────────────
     section("Web Search  (Serper API)")
@@ -381,8 +444,13 @@ def run_wizard():
     section("AI Model (Primary)")
     provider = choose("Which AI provider?", [
         ("Google Gemini  (free tier available)",        "gemini"),
-        ("OpenAI  (GPT-4o, GPT-4o-mini, etc.)",        "openai"),
-        ("Anthropic Claude (claude-3-5-sonnet, etc.)", "anthropic"),
+        ("Groq           (free, very fast)",            "groq"),
+        ("OpenAI         (GPT-4o, GPT-4o-mini)",       "openai"),
+        ("Mistral        (mistral-small free)",         "mistral"),
+        ("xAI Grok       (grok-3-mini)",                "xai"),
+        ("ZhipuAI GLM    (glm-4-flash free)",           "glm"),
+        ("OpenRouter     (all providers in one)",       "openrouter"),
+        ("Anthropic Claude (claude-3-5-sonnet)",        "anthropic"),
         ("Custom OpenAI-compatible endpoint",           "custom"),
     ])
 
@@ -391,11 +459,19 @@ def run_wizard():
         config["OPENAI_API_URL"] = "https://generativelanguage.googleapis.com/v1beta/openai"
         config["OPENAI_API_KEY"] = ask("Gemini API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
         config["OPENAI_MODEL"]   = choose("Model", [
-            ("gemini-3-flash-preview  (latest, smartest)", "gemini-3-flash-preview"),
             ("gemini-2.0-flash  (fast, stable)",           "gemini-2.0-flash"),
             ("gemini-1.5-flash  (stable)",                 "gemini-1.5-flash"),
             ("gemini-1.5-pro   (smarter, slower)",         "gemini-1.5-pro"),
-        ]) or "gemini-3-flash-preview"
+        ]) or "gemini-2.0-flash"
+
+    elif provider == "groq":
+        print(f"  {DIM}Get API key: https://console.groq.com{RST}")
+        config["OPENAI_API_URL"] = "https://api.groq.com/openai/v1"
+        config["OPENAI_API_KEY"] = ask("Groq API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = choose("Model", [
+            ("llama-3.3-70b-versatile  (best)", "llama-3.3-70b-versatile"),
+            ("llama-3.1-8b-instant     (fastest)", "llama-3.1-8b-instant"),
+        ]) or "llama-3.3-70b-versatile"
 
     elif provider == "openai":
         print(f"  {DIM}Get API key: https://platform.openai.com/api-keys{RST}")
@@ -405,6 +481,30 @@ def run_wizard():
             ("gpt-4o-mini  (cheap, fast)",   "gpt-4o-mini"),
             ("gpt-4o       (best quality)",  "gpt-4o"),
         ]) or "gpt-4o-mini"
+
+    elif provider == "mistral":
+        print(f"  {DIM}Get API key: https://console.mistral.ai{RST}")
+        config["OPENAI_API_URL"] = "https://api.mistral.ai/v1"
+        config["OPENAI_API_KEY"] = ask("Mistral API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = ask("Model", default="mistral-small-latest") or "mistral-small-latest"
+
+    elif provider == "xai":
+        print(f"  {DIM}Get API key: https://console.x.ai{RST}")
+        config["OPENAI_API_URL"] = "https://api.x.ai/v1"
+        config["OPENAI_API_KEY"] = ask("xAI API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = ask("Model", default="grok-3-mini") or "grok-3-mini"
+
+    elif provider == "glm":
+        print(f"  {DIM}Get API key: https://open.bigmodel.cn{RST}")
+        config["OPENAI_API_URL"] = "https://open.bigmodel.cn/api/paas/v4"
+        config["OPENAI_API_KEY"] = ask("GLM API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = ask("Model", default="glm-4-flash") or "glm-4-flash"
+
+    elif provider == "openrouter":
+        print(f"  {DIM}Get API key: https://openrouter.ai/keys{RST}")
+        config["OPENAI_API_URL"] = "https://openrouter.ai/api/v1"
+        config["OPENAI_API_KEY"] = ask("OpenRouter API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
+        config["OPENAI_MODEL"]   = ask("Model", default="openai/gpt-4o-mini") or ""
 
     elif provider == "anthropic":
         print(f"  {DIM}Get API key: https://console.anthropic.com/{RST}")
@@ -420,21 +520,23 @@ def run_wizard():
     ok(f"Primary model: {config['OPENAI_MODEL']}")
 
     # ── Fallback model ───────────────────────────────────────────────────────
-    section("Fallback Model (optional)")
-    print(f"  {DIM}Used automatically if the primary model fails or hits rate limits{RST}")
-    want_fallback = input(f"  {B}>{RST} Add a fallback model? (y/N): ").strip().lower()
-    if want_fallback == "y":
-        config["FALLBACK_MODEL"]   = ask("Fallback model name", default=existing.get("FALLBACK_MODEL")) or ""
-        fb_key = ask("Fallback API key (leave blank to reuse primary key)", optional=True, secret=True)
-        if fb_key:
-            config["FALLBACK_API_KEY"] = fb_key
-        fb_url = ask("Fallback API URL (leave blank to reuse primary URL)", optional=True)
-        if fb_url:
-            config["FALLBACK_API_URL"] = fb_url
-        if config["FALLBACK_MODEL"]:
-            ok(f"Fallback model: {config['FALLBACK_MODEL']}")
-    else:
-        ok("Skipped")
+    section("Fallback Providers (optional)")
+    print(f"  {DIM}Used automatically if the primary model fails or hits rate limits. Press Enter to skip any.{RST}")
+    _extra = [
+        ("Groq",        "GROQ_API_KEY",       "https://console.groq.com"),
+        ("Mistral",     "MISTRAL_API_KEY",     "https://console.mistral.ai"),
+        ("xAI Grok",    "XAI_API_KEY",         "https://console.x.ai"),
+        ("ZhipuAI GLM", "GLM_API_KEY",         "https://open.bigmodel.cn"),
+        ("OpenRouter",  "OPENROUTER_API_KEY",  "https://openrouter.ai"),
+        ("Ollama (local)", "OLLAMA_MODEL",     "model name e.g. llama3.2"),
+    ]
+    added = 0
+    for name, key_var, hint in _extra:
+        val = ask(f"{name} ({hint})", default=existing.get(key_var), optional=True, secret=(key_var != "OLLAMA_MODEL"))
+        if val:
+            config[key_var] = val
+            added += 1
+    ok(f"{added} fallback provider(s) configured" if added else "Skipped")
 
     # ── Web Search ───────────────────────────────────────────────────────────
     section("Web Search — Serper API (optional)")
