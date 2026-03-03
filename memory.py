@@ -4,7 +4,7 @@ Memory management for Ninoclaw — SQLite backend
 import sqlite3
 import json
 from datetime import datetime
-from config import MAX_MEMORY_SIZE
+from config import MAX_MEMORY_SIZE, CONTEXT_WINDOW
 
 DB_FILE = "ninoclaw.db"
 
@@ -82,7 +82,7 @@ class Memory:
         conn.close()
 
     def get_conversation_context(self, user_id):
-        conv = self.get_conversation(user_id)
+        conv = self.get_conversation(user_id, limit=CONTEXT_WINDOW)
         return [{"role": m["role"], "content": m["content"]} for m in conv]
 
     def get_timezone(self, user_id):

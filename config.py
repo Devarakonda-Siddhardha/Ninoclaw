@@ -60,7 +60,8 @@ OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL", "llama3.2")
 
 # Memory Settings
 MEMORY_FILE    = "memory.json"
-MAX_MEMORY_SIZE = 1000
+MAX_MEMORY_SIZE = 1000  # max messages stored in DB per user
+CONTEXT_WINDOW  = int(os.getenv("CONTEXT_WINDOW", "20"))  # messages sent to AI per request
 
 # Task Settings
 TASKS_FILE = "tasks.json"
