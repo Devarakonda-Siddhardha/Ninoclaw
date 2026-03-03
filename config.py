@@ -54,7 +54,7 @@ def _provider(url, key_env, model, default_model=None):
 _primary = {
     "api_url": _env("OPENAI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
     "api_key": os.getenv("OPENAI_API_KEY", "your-api-key-here"),
-    "model":   os.getenv("OPENAI_MODEL", "gemini-2.5-flash-preview-04-17"),
+    "model":   os.getenv("OPENAI_MODEL", "gemini-3-flash-preview"),
 }
 
 _provider_chain = [
