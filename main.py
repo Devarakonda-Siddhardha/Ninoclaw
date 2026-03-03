@@ -107,8 +107,26 @@ def start_dashboard():
         print(f"⚠️  Dashboard failed to start: {e}")
 
 
+def acquire_lock():
+    """Ensure only one instance runs. Returns lock file path or exits."""
+    import fcntl
+    lock_path = os.path.join(os.path.dirname(__file__), ".ninoclaw.lock")
+    lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+        return lock_file  # keep reference alive
+    except OSError:
+        print("❌ Another Ninoclaw instance is already running!")
+        print("   Stop it first: pkill -f 'python.*main.py'")
+        sys.exit(1)
+
+
 def main():
     """Main entry point"""
+    lock = acquire_lock()  # noqa: F841 — keep lock held
+
     print_banner()
 
     # Check environment
