@@ -1,132 +1,96 @@
 """
-Ninoclaw Setup Wizard — interactive first-run CLI with arrow-key navigation
+Ninoclaw Setup Wizard — clean single-flow interactive CLI
 """
-import os
-import sys
-import tty
-import termios
+import os, sys, tty, termios, getpass, select
 
-# ANSI codes
-G    = "\033[92m"
-B    = "\033[94m"
-Y    = "\033[93m"
-R    = "\033[91m"
-C    = "\033[96m"
-M    = "\033[95m"
-W    = "\033[1;97m"
-DIM  = "\033[2m"
-RST  = "\033[0m"
-HIDE = "\033[?25l"   # hide cursor
-SHOW = "\033[?25h"   # show cursor
-UP   = "\033[1A"
-CLR  = "\033[2K"
+G   = "\033[92m";  B  = "\033[94m";  Y  = "\033[93m"
+R   = "\033[91m";  C  = "\033[96m";  W  = "\033[1;97m"
+DIM = "\033[2m";   RST= "\033[0m";   M  = "\033[95m"
+HIDE= "\033[?25l"; SHOW="\033[?25h"; UP = "\033[1A"; CLR="\033[2K"
 
 ENV_FILE = os.path.join(os.path.dirname(__file__), ".env")
 
-BANNER = f"""
-{C}
+BANNER = f"""{C}
   ███╗   ██╗██╗███╗   ██╗ ██████╗  ██████╗██╗      █████╗ ██╗    ██╗
   ████╗  ██║██║████╗  ██║██╔═══██╗██╔════╝██║     ██╔══██╗██║    ██║
   ██╔██╗ ██║██║██╔██╗ ██║██║   ██║██║     ██║     ███████║██║ █╗ ██║
   ██║╚██╗██║██║██║╚██╗██║██║   ██║██║     ██║     ██╔══██║██║███╗██║
   ██║ ╚████║██║██║ ╚████║╚██████╔╝╚██████╗███████╗██║  ██║╚███╔███╔╝
-  ╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝
-{RST}
+  ╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝{RST}
 {DIM}  Personal AI Assistant — Setup Wizard{RST}
 """
 
+# ── helpers ──────────────────────────────────────────────────────────────────
 
 def _getch():
-    """Read a single keypress (including arrow keys)"""
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        ch = sys.stdin.read(1)
+        ch = os.read(fd, 1).decode('latin-1')
         if ch == '\x1b':
-            ch2 = sys.stdin.read(1)
-            ch3 = sys.stdin.read(1)
-            return ch + ch2 + ch3
+            # wait up to 50ms for rest of escape sequence
+            if select.select([fd], [], [], 0.05)[0]:
+                ch += os.read(fd, 2).decode('latin-1')
         return ch
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def choose(prompt, options, default_idx=0):
-    """Arrow-key navigable menu. Returns chosen value."""
-    idx = default_idx
+def choose(prompt, options, default=0):
+    """Arrow-key menu. options = list of (label, value)."""
+    idx = default
     n   = len(options)
-
-    print(f"\n  {W}{prompt}{RST}")
-    # Print all options first
-    for i, (label, _) in enumerate(options):
+    print(f"\n  {W}{prompt}{RST}\n")
+    for _ in options:
         print()
+    sys.stdout.write(HIDE); sys.stdout.flush()
 
-    print(HIDE, end="", flush=True)
-
-    def render():
-        # Move cursor up to start of options
+    def _render():
         for _ in range(n):
             sys.stdout.write(UP + CLR)
-        for i, (label, _) in enumerate(options):
+        for i, (lbl, _) in enumerate(options):
             if i == idx:
-                sys.stdout.write(f"  {G}❯{RST} {W}{label}{RST}\n")
+                sys.stdout.write(f"  {G}❯ {W}{lbl}{RST}\n")
             else:
-                sys.stdout.write(f"  {DIM}  {label}{RST}\n")
+                sys.stdout.write(f"    {DIM}{lbl}{RST}\n")
         sys.stdout.flush()
 
-    render()
-
     try:
+        _render()
         while True:
-            key = _getch()
-            if key in ('\x1b[A', '\x1b[D'):   # up / left
-                idx = (idx - 1) % n
-            elif key in ('\x1b[B', '\x1b[C'): # down / right
-                idx = (idx + 1) % n
-            elif key in ('\r', '\n', ' '):     # enter / space
-                break
-            elif key == '\x03':                # ctrl-c
-                print(SHOW)
-                print(f"\n{Y}Setup cancelled.{RST}")
-                sys.exit(0)
-            render()
+            k = _getch()
+            if   k in ('\x1b[A', '\x1b[D'): idx = (idx-1) % n
+            elif k in ('\x1b[B', '\x1b[C'): idx = (idx+1) % n
+            elif k in ('\r','\n',' '):       break
+            elif k == '\x03':
+                sys.stdout.write(SHOW); sys.exit(0)
+            _render()
     finally:
-        print(SHOW, end="", flush=True)
+        sys.stdout.write(SHOW); sys.stdout.flush()
 
-    label, value = options[idx]
-    print(f"\n  {G}✓{RST} {label}\n")
-    return value
+    print(f"\n  {G}✓{RST}  {options[idx][0]}\n")
+    return options[idx][1]
 
 
 def ask(prompt, default=None, secret=False, optional=False):
-    """Prompt for text input"""
-    hint = f" {DIM}[{default}]{RST}" if default else (f" {DIM}(optional){RST}" if optional else "")
+    hint = f" {DIM}[{default}]{RST}" if default else (f" {DIM}(optional — press Enter to skip){RST}" if optional else "")
     try:
         if secret:
-            import getpass
-            val = getpass.getpass(f"  {B}❯{RST} {W}{prompt}{RST}{hint} ")
+            val = getpass.getpass(f"  {C}❯{RST} {prompt}{hint}: ")
         else:
-            val = input(f"  {B}❯{RST} {W}{prompt}{RST}{hint} ").strip()
+            val = input(f"  {C}❯{RST} {prompt}{hint}: ").strip()
     except (KeyboardInterrupt, EOFError):
-        print(f"\n{Y}Setup cancelled.{RST}")
-        sys.exit(0)
-    return val.strip() if val else (default or None)
-
-
-def confirm(prompt):
-    """Yes/No using arrow keys"""
-    return choose(prompt, [("Yes", True), ("No", False)], default_idx=0)
+        print(f"\n{Y}Cancelled.{RST}"); sys.exit(0)
+    return (val.strip() or default) if val.strip() else (default if not optional else None)
 
 
 def section(title):
-    w = 48
-    pad = w - len(title) - 4
-    print(f"\n{M}  ┌─ {title} {'─' * pad}┐{RST}")
+    print(f"\n{M}  ── {W}{title}{RST}")
 
 
-def ok(msg):
-    print(f"  {G}✔{RST}  {msg}")
+def ok(msg): print(f"  {G}✔{RST}  {msg}")
+def info(msg): print(f"  {DIM}  {msg}{RST}")
 
 
 def load_existing_env():
@@ -142,481 +106,189 @@ def load_existing_env():
 
 
 def save_env(data):
-    lines = ["# Ninoclaw configuration — generated by setup wizard\n"]
+    lines = ["# Ninoclaw config — generated by wizard\n"]
     for k, v in data.items():
-        lines.append(f'{k}="{v}"\n')
+        if v:
+            lines.append(f'{k}="{v}"\n')
     with open(ENV_FILE, "w") as f:
         f.writelines(lines)
 
 
-def run_wizard():
-    existing = load_existing_env()
-    print(BANNER)
-
-    if existing:
-        print(f"  {Y}Existing config found.{RST}")
-        if not confirm("Re-run setup and overwrite it?"):
-            return existing
-
-    config = {}
-
-    # ── Telegram ─────────────────────────────────────────────────────────────
-    section("Telegram Bot Token")
-    print(f"  {DIM}  Get yours from @BotFather on Telegram{RST}\n")
-    token = ask("Bot Token", default=existing.get("TELEGRAM_BOT_TOKEN"), secret=True)
-    if not token or token == "YOUR_BOT_TOKEN_HERE":
-        print(f"  {R}✗ Telegram token is required.{RST}")
-        sys.exit(1)
-    config["TELEGRAM_BOT_TOKEN"] = token
-    ok("Telegram token saved")
-
-    # ── AI Provider ───────────────────────────────────────────────────────────
-    section("AI Provider")
-    provider = choose("Which AI provider?", [
-        ("Google Gemini       (free tier available)",  "gemini"),
-        ("Groq                (free, very fast — llama/mixtral)", "groq"),
-        ("OpenAI              (GPT-4o, GPT-4o-mini)", "openai"),
-        ("Mistral             (mistral-small free)",  "mistral"),
-        ("xAI Grok            (grok-3-mini)",         "xai"),
-        ("ZhipuAI GLM         (glm-4-flash free)",    "glm"),
-        ("MiniMax             (MiniMax-Text-01)",      "minimax"),
-        ("Together AI         (100+ open models)",    "together"),
-        ("OpenRouter          (all providers in one)", "openrouter"),
-        ("Anthropic Claude    (claude-3-5-sonnet)",   "anthropic"),
-        ("Custom OpenAI-compatible endpoint",         "custom"),
-    ])
-
-    if provider == "gemini":
-        print(f"  {DIM}  Get key: https://aistudio.google.com/app/apikey{RST}\n")
-        config["OPENAI_API_URL"] = "https://generativelanguage.googleapis.com/v1beta/openai"
-        config["OPENAI_API_KEY"] = ask("Gemini API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = choose("Model", [
-            ("gemini-2.0-flash         (fast, stable)",     "gemini-2.0-flash"),
-            ("gemini-1.5-flash         (stable)",           "gemini-1.5-flash"),
-            ("gemini-1.5-pro           (smarter, slower)",  "gemini-1.5-pro"),
-        ])
-
-    elif provider == "groq":
-        print(f"  {DIM}  Get key: https://console.groq.com{RST}\n")
-        config["OPENAI_API_URL"] = "https://api.groq.com/openai/v1"
-        config["OPENAI_API_KEY"] = ask("Groq API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = choose("Model", [
-            ("llama-3.3-70b-versatile  (best quality)", "llama-3.3-70b-versatile"),
-            ("llama-3.1-8b-instant     (fastest)",      "llama-3.1-8b-instant"),
-            ("mixtral-8x7b-32768       (good balance)", "mixtral-8x7b-32768"),
-        ])
-
-    elif provider == "openai":
-        print(f"  {DIM}  Get key: https://platform.openai.com/api-keys{RST}\n")
-        config["OPENAI_API_URL"] = "https://api.openai.com/v1"
-        config["OPENAI_API_KEY"] = ask("OpenAI API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = choose("Model", [
-            ("gpt-4o-mini   (cheap, fast)",  "gpt-4o-mini"),
-            ("gpt-4o        (best quality)", "gpt-4o"),
-        ])
-
-    elif provider == "mistral":
-        print(f"  {DIM}  Get key: https://console.mistral.ai{RST}\n")
-        config["OPENAI_API_URL"] = "https://api.mistral.ai/v1"
-        config["OPENAI_API_KEY"] = ask("Mistral API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = choose("Model", [
-            ("mistral-small-latest  (free tier)", "mistral-small-latest"),
-            ("mistral-large-latest  (best)",      "mistral-large-latest"),
-        ])
-
-    elif provider == "xai":
-        print(f"  {DIM}  Get key: https://console.x.ai{RST}\n")
-        config["OPENAI_API_URL"] = "https://api.x.ai/v1"
-        config["OPENAI_API_KEY"] = ask("xAI API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default="grok-3-mini") or "grok-3-mini"
-
-    elif provider == "glm":
-        print(f"  {DIM}  Get key: https://open.bigmodel.cn{RST}\n")
-        config["OPENAI_API_URL"] = "https://open.bigmodel.cn/api/paas/v4"
-        config["OPENAI_API_KEY"] = ask("GLM API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = choose("Model", [
-            ("glm-4-flash  (free tier)", "glm-4-flash"),
-            ("glm-4-plus   (best)",      "glm-4-plus"),
-        ])
-
-    elif provider == "minimax":
-        print(f"  {DIM}  Get key: https://api.minimax.chat{RST}\n")
-        config["OPENAI_API_URL"] = "https://api.minimax.chat/v1"
-        config["OPENAI_API_KEY"] = ask("MiniMax API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default="MiniMax-Text-01") or "MiniMax-Text-01"
-
-    elif provider == "together":
-        print(f"  {DIM}  Get key: https://api.together.xyz{RST}\n")
-        config["OPENAI_API_URL"] = "https://api.together.xyz/v1"
-        config["OPENAI_API_KEY"] = ask("Together API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default="meta-llama/Llama-3-70b-chat-hf") or ""
-
-    elif provider == "openrouter":
-        print(f"  {DIM}  Get key: https://openrouter.ai/keys{RST}")
-        print(f"  {DIM}  Free models: google/gemini-2.0-flash-exp:free  |  meta-llama/llama-3.3-70b-instruct:free{RST}\n")
-        config["OPENAI_API_URL"] = "https://openrouter.ai/api/v1"
-        config["OPENAI_API_KEY"] = ask("OpenRouter API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default=existing.get("OPENAI_MODEL", "google/gemini-2.0-flash-exp:free")) or ""
-        config["OPENROUTER_API_KEY"] = config["OPENAI_API_KEY"]
-
-    elif provider == "anthropic":
-        print(f"  {DIM}  Get key: https://console.anthropic.com/{RST}\n")
-        config["OPENAI_API_URL"] = "https://api.anthropic.com/v1"
-        config["OPENAI_API_KEY"] = ask("Anthropic API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default="claude-3-5-sonnet-20241022") or ""
-
-    else:
-        config["OPENAI_API_URL"] = ask("API base URL", default=existing.get("OPENAI_API_URL")) or ""
-        config["OPENAI_API_KEY"] = ask("API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model name", default=existing.get("OPENAI_MODEL")) or ""
-
-    ok(f"Primary model: {config['OPENAI_MODEL']}")
-
-    # ── Extra providers (fallback chain) ──────────────────────────────────────
-    section("Extra Providers  (fallback chain — optional)")
-    print(f"  {DIM}  Bot tries these in order if primary fails/rate-limits. Skip any with Enter.{RST}\n")
-    _extra = [
-        ("Groq",       "GROQ_API_KEY",       "https://console.groq.com"),
-        ("Mistral",    "MISTRAL_API_KEY",     "https://console.mistral.ai"),
-        ("xAI Grok",   "XAI_API_KEY",         "https://console.x.ai"),
-        ("ZhipuAI GLM","GLM_API_KEY",         "https://open.bigmodel.cn"),
-        ("MiniMax",    "MINIMAX_API_KEY",     "https://api.minimax.chat"),
-        ("Together AI","TOGETHER_API_KEY",    "https://api.together.xyz"),
-        ("OpenRouter", "OPENROUTER_API_KEY",  "https://openrouter.ai — free models available"),
-        ("Ollama (local)", "OLLAMA_MODEL",    "ollama serve"),
-    ]
-    for name, key_var, hint in _extra:
-        val = ask(f"{name} key/model ({hint})", default=existing.get(key_var), optional=True, secret=(key_var != "OLLAMA_MODEL"))
-        if val:
-            config[key_var] = val
-            ok(f"{name} added to fallback chain")
-        else:
-            ok(f"{name} skipped")
-
-    # ── Web Search ────────────────────────────────────────────────────────────
-    section("Web Search  (Serper API)")
-    print(f"  {DIM}  Free tier at https://serper.dev — enables real-time Google search{RST}\n")
-    serper = ask("Serper API Key", default=existing.get("SERPER_API_KEY"), optional=True, secret=True)
-    if serper:
-        config["SERPER_API_KEY"] = serper
-        ok("Web search enabled")
-    else:
-        ok("Skipped — web search disabled")
-
-    # ── Owner ID ──────────────────────────────────────────────────────────────
-    section("Bot Owner ID")
-    print(f"  {DIM}  Message @userinfobot on Telegram to get your ID{RST}\n")
-    owner = ask("Your Telegram user ID", default=existing.get("OWNER_ID"), optional=True)
-    if owner:
-        config["OWNER_ID"] = owner
-        ok(f"Owner locked to ID {owner}")
-    else:
-        ok("Skipped — admin commands open to all users!")
-
-    # ── Personalization ───────────────────────────────────────────────────────
-    section("Personalization")
-    print(f"  {DIM}  Name your bot and tell it who you are.{RST}\n")
-    agent_name = ask("Bot name", default=existing.get("AGENT_NAME", "Ninoclaw"))
-    config["AGENT_NAME"] = agent_name or "Ninoclaw"
-    user_name = ask("Your name", default=existing.get("USER_NAME", "friend"))
-    config["USER_NAME"] = user_name or "friend"
-    purpose = ask("Bot's purpose  (e.g. 'help me code and stay productive')", default=existing.get("BOT_PURPOSE", "be your personal AI assistant"))
-    config["BOT_PURPOSE"] = purpose or "be your personal AI assistant"
-    timezone = ask("Your timezone  (e.g. Asia/Kolkata, UTC, America/New_York)", default=existing.get("TIMEZONE", "UTC"))
-    config["TIMEZONE"] = timezone or "UTC"
-    ok(f"Bot: {config['AGENT_NAME']} | You: {config['USER_NAME']} | TZ: {config['TIMEZONE']}")
-
-    # ── Resend Email ──────────────────────────────────────────────────────────
-    section("Resend Email  (optional skill)")
-    print(f"  {DIM}  Send emails from the bot. Free tier: 100/day at https://resend.com{RST}\n")
-    resend_key = ask("Resend API Key", default=existing.get("RESEND_API_KEY"), optional=True, secret=True)
-    if resend_key:
-        config["RESEND_API_KEY"] = resend_key
-        config["RESEND_FROM"]    = ask("From address (verified in Resend)", default=existing.get("RESEND_FROM")) or ""
-        config["OWNER_EMAIL"]    = ask("Your email  (default recipient)",   default=existing.get("OWNER_EMAIL")) or ""
-        ok("Resend configured — tell bot 'load resend email skill' to activate")
-    else:
-        ok("Skipped")
-
-    # ── Done ──────────────────────────────────────────────────────────────────
-    save_env(config)
-    print(f"\n{G}  ✔  Config saved to .env{RST}\n")
-    print(f"{C}  🦀 Starting Ninoclaw...{RST}\n")
-    return config
-    existing = load_existing_env()
-    token = existing.get("TELEGRAM_BOT_TOKEN", "")
-    return not token or token == "YOUR_BOT_TOKEN_HERE"
-
-
-# ANSI colors
-G  = "\033[92m"   # green
-B  = "\033[94m"   # blue
-Y  = "\033[93m"   # yellow
-R  = "\033[91m"   # red
-C  = "\033[96m"   # cyan
-W  = "\033[97m"   # white bold
-DIM = "\033[2m"
-RST = "\033[0m"
-
-ENV_FILE = os.path.join(os.path.dirname(__file__), ".env")
-
-BANNER = f"""
-{C}╔══════════════════════════════════════════╗
-║         🦀  NINOCLAW  SETUP  🦀          ║
-║     Personal AI Assistant Gateway        ║
-╚══════════════════════════════════════════╝{RST}
-"""
-
-def ask(prompt, default=None, secret=False, optional=False):
-    """Prompt user for input with optional default"""
-    hint = ""
-    if default:
-        hint = f" {DIM}[{default}]{RST}"
-    elif optional:
-        hint = f" {DIM}[skip]{RST}"
-
-    try:
-        if secret:
-            import getpass
-            val = getpass.getpass(f"  {B}>{RST} {prompt}{hint}: ")
-        else:
-            val = input(f"  {B}>{RST} {prompt}{hint}: ").strip()
-    except (KeyboardInterrupt, EOFError):
-        print(f"\n{Y}Setup cancelled.{RST}")
-        sys.exit(0)
-
-    if not val and default:
-        return default
-    return val or None
-
-
-def choose(prompt, options, default_idx=0):
-    """Show a numbered menu and return chosen value"""
-    print(f"\n  {W}{prompt}{RST}")
-    for i, (label, _) in enumerate(options):
-        marker = f"{G}▶{RST}" if i == default_idx else " "
-        print(f"  {marker} {i+1}. {label}")
-    while True:
-        try:
-            raw = input(f"  {B}>{RST} Choice [{default_idx+1}]: ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print(f"\n{Y}Setup cancelled.{RST}")
-            sys.exit(0)
-        if not raw:
-            return options[default_idx][1]
-        if raw.isdigit() and 1 <= int(raw) <= len(options):
-            return options[int(raw)-1][1]
-        print(f"  {R}Invalid choice.{RST}")
-
-
-def section(title):
-    print(f"\n{Y}── {title} {'─' * (40 - len(title))}{RST}")
-
-
-def ok(msg):
-    print(f"  {G}✓{RST} {msg}")
-
-
-def load_existing_env():
-    """Load existing .env into a dict"""
-    data = {}
-    if os.path.exists(ENV_FILE):
-        with open(ENV_FILE) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, _, v = line.partition("=")
-                    data[k.strip()] = v.strip().strip('"')
-    return data
-
-
-def save_env(data):
-    """Write dict to .env file"""
-    lines = ["# Ninoclaw configuration — generated by setup wizard\n"]
-    for k, v in data.items():
-        lines.append(f'{k}="{v}"\n')
-    with open(ENV_FILE, "w") as f:
-        f.writelines(lines)
-
+# ── wizard ───────────────────────────────────────────────────────────────────
 
 def run_wizard():
-    existing = load_existing_env()
+    e = load_existing_env()  # existing values
     print(BANNER)
 
-    if existing:
-        print(f"  {Y}Existing config found.{RST} Re-running wizard will overwrite it.\n")
-        try:
-            confirm = input(f"  {B}>{RST} Continue? (y/N): ").strip().lower()
-        except (KeyboardInterrupt, EOFError):
-            sys.exit(0)
-        if confirm != "y":
-            return existing
+    if e.get("TELEGRAM_BOT_TOKEN") and e["TELEGRAM_BOT_TOKEN"] != "YOUR_BOT_TOKEN_HERE":
+        redo = choose("Existing config found. Re-run setup?",
+                      [("Yes — reconfigure everything", True),
+                       ("No  — keep current config",    False)])
+        if not redo:
+            return e
 
-    config = {}
+    cfg = {}
 
-    # ── Telegram ────────────────────────────────────────────────────────────
-    section("Telegram Bot Token")
-    print(f"  {DIM}Get yours from @BotFather on Telegram{RST}")
-    token = ask("Bot Token", default=existing.get("TELEGRAM_BOT_TOKEN"), secret=True)
+    # ── 1. Telegram ───────────────────────────────────────────────────────────
+    section("Step 1 — Telegram Bot Token")
+    info("Get yours from @BotFather on Telegram")
+    token = ask("Bot Token", default=e.get("TELEGRAM_BOT_TOKEN"), secret=True)
     if not token or token == "YOUR_BOT_TOKEN_HERE":
-        print(f"  {R}✗ Telegram token is required.{RST}")
-        sys.exit(1)
-    config["TELEGRAM_BOT_TOKEN"] = token
+        print(f"  {R}✗  Token is required.{RST}"); sys.exit(1)
+    cfg["TELEGRAM_BOT_TOKEN"] = token
     ok("Telegram token saved")
 
-    # ── AI Provider ─────────────────────────────────────────────────────────
-    section("AI Model (Primary)")
+    # ── 2. AI Provider ────────────────────────────────────────────────────────
+    section("Step 2 — AI Provider")
     provider = choose("Which AI provider?", [
-        ("Google Gemini  (free tier available)",        "gemini"),
-        ("Groq           (free, very fast)",            "groq"),
-        ("OpenAI         (GPT-4o, GPT-4o-mini)",       "openai"),
-        ("Mistral        (mistral-small free)",         "mistral"),
-        ("xAI Grok       (grok-3-mini)",                "xai"),
-        ("ZhipuAI GLM    (glm-4-flash free)",           "glm"),
-        ("OpenRouter     (all providers in one)",       "openrouter"),
-        ("Anthropic Claude (claude-3-5-sonnet)",        "anthropic"),
-        ("Custom OpenAI-compatible endpoint",           "custom"),
+        ("OpenRouter      (100+ models, free tier available)",  "openrouter"),
+        ("Google Gemini   (free tier available)",               "gemini"),
+        ("Groq            (free, very fast)",                   "groq"),
+        ("OpenAI          (GPT-4o, GPT-4o-mini)",              "openai"),
+        ("Mistral         (mistral-small free)",                "mistral"),
+        ("xAI Grok        (grok-3-mini)",                       "xai"),
+        ("ZhipuAI GLM     (glm-4-flash free)",                  "glm"),
+        ("Anthropic Claude",                                    "anthropic"),
+        ("Ollama          (local, offline)",                    "ollama"),
+        ("Custom endpoint",                                     "custom"),
     ])
 
-    if provider == "gemini":
-        print(f"  {DIM}Get API key: https://aistudio.google.com/app/apikey{RST}")
-        config["OPENAI_API_URL"] = "https://generativelanguage.googleapis.com/v1beta/openai"
-        config["OPENAI_API_KEY"] = ask("Gemini API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = choose("Model", [
-            ("gemini-2.0-flash  (fast, stable)",           "gemini-2.0-flash"),
-            ("gemini-1.5-flash  (stable)",                 "gemini-1.5-flash"),
-            ("gemini-1.5-pro   (smarter, slower)",         "gemini-1.5-pro"),
-        ]) or "gemini-2.0-flash"
+    if provider == "openrouter":
+        info("Get key: https://openrouter.ai/keys  (free signup)")
+        info("Free models end with :free  e.g.  google/gemini-2.0-flash-exp:free")
+        cfg["OPENAI_API_URL"] = "https://openrouter.ai/api/v1"
+        cfg["OPENAI_API_KEY"] = ask("OpenRouter API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "google/gemini-2.0-flash-exp:free")) or ""
+        cfg["OPENROUTER_API_KEY"] = cfg["OPENAI_API_KEY"]
+
+    elif provider == "gemini":
+        info("Get key: https://aistudio.google.com/app/apikey")
+        cfg["OPENAI_API_URL"] = "https://generativelanguage.googleapis.com/v1beta/openai"
+        cfg["OPENAI_API_KEY"] = ask("Gemini API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "gemini-3-flash-preview")) or ""
 
     elif provider == "groq":
-        print(f"  {DIM}Get API key: https://console.groq.com{RST}")
-        config["OPENAI_API_URL"] = "https://api.groq.com/openai/v1"
-        config["OPENAI_API_KEY"] = ask("Groq API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = choose("Model", [
-            ("llama-3.3-70b-versatile  (best)", "llama-3.3-70b-versatile"),
-            ("llama-3.1-8b-instant     (fastest)", "llama-3.1-8b-instant"),
-        ]) or "llama-3.3-70b-versatile"
+        info("Get key: https://console.groq.com")
+        cfg["OPENAI_API_URL"] = "https://api.groq.com/openai/v1"
+        cfg["OPENAI_API_KEY"] = ask("Groq API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "llama-3.3-70b-versatile")) or ""
 
     elif provider == "openai":
-        print(f"  {DIM}Get API key: https://platform.openai.com/api-keys{RST}")
-        config["OPENAI_API_URL"] = "https://api.openai.com/v1"
-        config["OPENAI_API_KEY"] = ask("OpenAI API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = choose("Model", [
-            ("gpt-4o-mini  (cheap, fast)",   "gpt-4o-mini"),
-            ("gpt-4o       (best quality)",  "gpt-4o"),
-        ]) or "gpt-4o-mini"
+        cfg["OPENAI_API_URL"] = "https://api.openai.com/v1"
+        cfg["OPENAI_API_KEY"] = ask("OpenAI API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "gpt-4o-mini")) or ""
 
     elif provider == "mistral":
-        print(f"  {DIM}Get API key: https://console.mistral.ai{RST}")
-        config["OPENAI_API_URL"] = "https://api.mistral.ai/v1"
-        config["OPENAI_API_KEY"] = ask("Mistral API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default="mistral-small-latest") or "mistral-small-latest"
+        cfg["OPENAI_API_URL"] = "https://api.mistral.ai/v1"
+        cfg["OPENAI_API_KEY"] = ask("Mistral API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "mistral-small-latest")) or ""
 
     elif provider == "xai":
-        print(f"  {DIM}Get API key: https://console.x.ai{RST}")
-        config["OPENAI_API_URL"] = "https://api.x.ai/v1"
-        config["OPENAI_API_KEY"] = ask("xAI API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default="grok-3-mini") or "grok-3-mini"
+        cfg["OPENAI_API_URL"] = "https://api.x.ai/v1"
+        cfg["OPENAI_API_KEY"] = ask("xAI API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "grok-3-mini")) or ""
 
     elif provider == "glm":
-        print(f"  {DIM}Get API key: https://open.bigmodel.cn{RST}")
-        config["OPENAI_API_URL"] = "https://open.bigmodel.cn/api/paas/v4"
-        config["OPENAI_API_KEY"] = ask("GLM API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default="glm-4-flash") or "glm-4-flash"
-
-    elif provider == "openrouter":
-        print(f"  {DIM}Get API key: https://openrouter.ai/keys{RST}")
-        print(f"  {DIM}Free models: google/gemini-2.0-flash-exp:free  |  meta-llama/llama-3.3-70b-instruct:free{RST}")
-        config["OPENAI_API_URL"] = "https://openrouter.ai/api/v1"
-        config["OPENAI_API_KEY"] = ask("OpenRouter API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default=existing.get("OPENAI_MODEL", "google/gemini-2.0-flash-exp:free")) or ""
-        config["OPENROUTER_API_KEY"] = config["OPENAI_API_KEY"]
+        cfg["OPENAI_API_URL"] = "https://open.bigmodel.cn/api/paas/v4"
+        cfg["OPENAI_API_KEY"] = ask("ZhipuAI API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "glm-4-flash")) or ""
 
     elif provider == "anthropic":
-        print(f"  {DIM}Get API key: https://console.anthropic.com/{RST}")
-        config["OPENAI_API_URL"] = "https://api.anthropic.com/v1"
-        config["OPENAI_API_KEY"] = ask("Anthropic API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model", default="claude-3-5-sonnet-20241022") or "claude-3-5-sonnet-20241022"
+        cfg["OPENAI_API_URL"] = "https://api.anthropic.com/v1"
+        cfg["OPENAI_API_KEY"] = ask("Anthropic API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "claude-3-5-sonnet-20241022")) or ""
+
+    elif provider == "ollama":
+        info("Make sure Ollama is running: ollama serve")
+        cfg["OPENAI_API_URL"] = ask("Ollama URL", default=e.get("OPENAI_API_URL", "http://localhost:11434/v1")) or ""
+        cfg["OPENAI_API_KEY"] = "ollama"
+        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "llama3.2")) or ""
 
     else:  # custom
-        config["OPENAI_API_URL"] = ask("API base URL", default=existing.get("OPENAI_API_URL")) or ""
-        config["OPENAI_API_KEY"] = ask("API Key", default=existing.get("OPENAI_API_KEY"), secret=True) or ""
-        config["OPENAI_MODEL"]   = ask("Model name", default=existing.get("OPENAI_MODEL")) or ""
+        cfg["OPENAI_API_URL"] = ask("API Base URL", default=e.get("OPENAI_API_URL")) or ""
+        cfg["OPENAI_API_KEY"] = ask("API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        cfg["OPENAI_MODEL"]   = ask("Model name", default=e.get("OPENAI_MODEL")) or ""
 
-    ok(f"Primary model: {config['OPENAI_MODEL']}")
+    ok(f"Provider: {provider}  |  Model: {cfg['OPENAI_MODEL']}")
 
-    # ── Fallback model ───────────────────────────────────────────────────────
-    section("Fallback Providers (optional)")
-    print(f"  {DIM}Used automatically if the primary model fails or hits rate limits. Press Enter to skip any.{RST}")
-    _extra = [
-        ("Groq",        "GROQ_API_KEY",       "https://console.groq.com"),
-        ("Mistral",     "MISTRAL_API_KEY",     "https://console.mistral.ai"),
-        ("xAI Grok",    "XAI_API_KEY",         "https://console.x.ai"),
-        ("ZhipuAI GLM", "GLM_API_KEY",         "https://open.bigmodel.cn"),
-        ("OpenRouter",  "OPENROUTER_API_KEY",  "https://openrouter.ai — free models available"),
-        ("Ollama (local)", "OLLAMA_MODEL",     "model name e.g. llama3.2"),
+    # ── 3. Fallback providers ─────────────────────────────────────────────────
+    section("Step 3 — Fallback Providers  (optional)")
+    info("Bot tries these in order if primary fails. Press Enter to skip any.")
+    _fallbacks = [
+        ("OpenRouter API Key", "OPENROUTER_API_KEY", "https://openrouter.ai — free models available"),
+        ("Groq API Key",       "GROQ_API_KEY",        "https://console.groq.com — free"),
+        ("Mistral API Key",    "MISTRAL_API_KEY",      "https://console.mistral.ai"),
+        ("xAI Grok API Key",   "XAI_API_KEY",          "https://console.x.ai"),
+        ("GLM API Key",        "GLM_API_KEY",           "https://open.bigmodel.cn"),
+        ("Ollama model name",  "OLLAMA_MODEL",          "e.g. llama3.2 — local"),
     ]
-    added = 0
-    for name, key_var, hint in _extra:
-        val = ask(f"{name} ({hint})", default=existing.get(key_var), optional=True, secret=(key_var != "OLLAMA_MODEL"))
+    for label, key, hint in _fallbacks:
+        if cfg.get(key): continue  # already set as primary
+        info(hint)
+        val = ask(label, default=e.get(key), optional=True,
+                  secret=(key != "OLLAMA_MODEL"))
         if val:
-            config[key_var] = val
-            added += 1
-    ok(f"{added} fallback provider(s) configured" if added else "Skipped")
+            cfg[key] = val
+            ok(f"{label.split()[0]} added")
 
-    # ── Web Search ───────────────────────────────────────────────────────────
-    section("Web Search — Serper API (optional)")
-    print(f"  {DIM}Enables real-time Google search. Free tier: https://serper.dev{RST}")
-    serper = ask("Serper API Key", default=existing.get("SERPER_API_KEY"), optional=True, secret=True)
+    # ── 4. Web Search ─────────────────────────────────────────────────────────
+    section("Step 4 — Web Search  (optional)")
+    info("Free at https://serper.dev — 2500 searches/month")
+    serper = ask("Serper API Key", default=e.get("SERPER_API_KEY"), optional=True, secret=True)
     if serper:
-        config["SERPER_API_KEY"] = serper
+        cfg["SERPER_API_KEY"] = serper
         ok("Web search enabled")
-    else:
-        ok("Skipped — web search will be disabled")
-
-    # ── Owner ID ─────────────────────────────────────────────────────────────
-    section("Bot Owner Telegram ID (recommended)")
-    print(f"  {DIM}Only you can run /update and admin commands. Message @userinfobot to get your ID.{RST}")
-    owner = ask("Your Telegram user ID", default=existing.get("OWNER_ID"), optional=True)
-    if owner:
-        config["OWNER_ID"] = owner
-        ok(f"Owner ID: {owner}")
-    else:
-        ok("Skipped — anyone can run admin commands!")
-
-    # ── Personalization ───────────────────────────────────────────────────────
-    section("Personalization")
-    print(f"  {DIM}Name your bot and tell it who you are.{RST}")
-    agent_name = ask("Bot name", default=existing.get("AGENT_NAME", "Ninoclaw"))
-    config["AGENT_NAME"] = agent_name or "Ninoclaw"
-    user_name = ask("Your name", default=existing.get("USER_NAME", "friend"))
-    config["USER_NAME"] = user_name or "friend"
-    purpose = ask("Bot's purpose  (e.g. 'help me code and stay productive')", default=existing.get("BOT_PURPOSE", "be your personal AI assistant"))
-    config["BOT_PURPOSE"] = purpose or "be your personal AI assistant"
-    timezone = ask("Your timezone  (e.g. Asia/Kolkata, UTC, America/New_York)", default=existing.get("TIMEZONE", "UTC"))
-    config["TIMEZONE"] = timezone or "UTC"
-    ok(f"Bot: {config['AGENT_NAME']} | You: {config['USER_NAME']} | TZ: {config['TIMEZONE']}")
-
-    # ── Resend Email ──────────────────────────────────────────────────────────
-    section("Resend Email  (optional skill)")
-    print(f"  {DIM}Send emails from the bot. Free tier: 100/day at https://resend.com{RST}")
-    resend_key = ask("Resend API Key", default=existing.get("RESEND_API_KEY"), optional=True, secret=True)
-    if resend_key:
-        config["RESEND_API_KEY"] = resend_key
-        config["RESEND_FROM"]    = ask("From address (verified in Resend)", default=existing.get("RESEND_FROM")) or ""
-        config["OWNER_EMAIL"]    = ask("Your email  (default recipient)",   default=existing.get("OWNER_EMAIL")) or ""
-        ok("Resend configured — tell bot 'load resend email skill' to activate")
     else:
         ok("Skipped")
 
-    # ── Save ─────────────────────────────────────────────────────────────────
-    save_env(config)
-    print(f"\n{G}✅ Config saved to .env — starting Ninoclaw...{RST}\n")
-    return config
+    # ── 5. Owner ID ───────────────────────────────────────────────────────────
+    section("Step 5 — Your Telegram User ID  (recommended)")
+    info("Message @userinfobot on Telegram to get your ID")
+    owner = ask("Your Telegram user ID", default=e.get("OWNER_ID"), optional=True)
+    if owner:
+        cfg["OWNER_ID"] = owner
+        ok(f"Owner locked to {owner}")
+    else:
+        ok("Skipped")
+
+    # ── 6. Personalization ────────────────────────────────────────────────────
+    section("Step 6 — Personalization")
+    cfg["AGENT_NAME"]  = ask("Bot name",    default=e.get("AGENT_NAME",  "Ninoclaw")) or "Ninoclaw"
+    cfg["USER_NAME"]   = ask("Your name",   default=e.get("USER_NAME",   "friend"))   or "friend"
+    cfg["BOT_PURPOSE"] = ask("Bot purpose", default=e.get("BOT_PURPOSE", "be your personal AI assistant")) or "be your personal AI assistant"
+    cfg["TIMEZONE"]    = ask("Timezone",    default=e.get("TIMEZONE",    "UTC"))       or "UTC"
+    ok(f"{cfg['AGENT_NAME']} ready for {cfg['USER_NAME']} ({cfg['TIMEZONE']})")
+
+    # ── 7. Email (Resend) ─────────────────────────────────────────────────────
+    section("Step 7 — Email via Resend  (optional)")
+    info("Free at https://resend.com — 100 emails/day")
+    resend_key = ask("Resend API Key", default=e.get("RESEND_API_KEY"), optional=True, secret=True)
+    if resend_key:
+        cfg["RESEND_API_KEY"] = resend_key
+        cfg["RESEND_FROM"]    = ask("From address", default=e.get("RESEND_FROM", "onboarding@resend.dev")) or ""
+        cfg["OWNER_EMAIL"]    = ask("Your email",   default=e.get("OWNER_EMAIL")) or ""
+        ok("Resend configured — load skill in Telegram to activate")
+    else:
+        ok("Skipped")
+
+    # ── 8. Dashboard ──────────────────────────────────────────────────────────
+    section("Step 8 — Web Dashboard")
+    cfg["DASHBOARD_PASSWORD"] = ask("Dashboard password", default=e.get("DASHBOARD_PASSWORD", "admin")) or "admin"
+    cfg["DASHBOARD_PORT"]     = ask("Dashboard port",     default=e.get("DASHBOARD_PORT", "8080"))       or "8080"
+    ok(f"Dashboard at http://localhost:{cfg['DASHBOARD_PORT']}")
+
+    # ── Save ──────────────────────────────────────────────────────────────────
+    save_env(cfg)
+    print(f"\n{G}  ✔  Config saved to .env{RST}")
+    print(f"{C}  🦀 Run: ninoclaw start{RST}\n")
+    return cfg
 
 
 def needs_setup():
-    """Returns True if .env is missing or has no valid token"""
-    existing = load_existing_env()
-    token = existing.get("TELEGRAM_BOT_TOKEN", "")
+    e = load_existing_env()
+    token = e.get("TELEGRAM_BOT_TOKEN", "")
     return not token or token == "YOUR_BOT_TOKEN_HERE"
+
+
+if __name__ == "__main__":
+    run_wizard()
