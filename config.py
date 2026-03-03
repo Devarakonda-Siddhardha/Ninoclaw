@@ -28,7 +28,7 @@ SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
 _primary = {
     "api_url": os.getenv("OPENAI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
     "api_key": os.getenv("OPENAI_API_KEY", "your-api-key-here"),
-    "model":   os.getenv("OPENAI_MODEL", "gemini-2.0-flash"),
+    "model":   os.getenv("OPENAI_MODEL", "gemini-3-flash-preview"),
 }
 
 # Optional second model (e.g. Ollama local fallback, or a different API key)
