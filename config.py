@@ -146,6 +146,7 @@ SYSTEM_PROMPT = """You are Ninoclaw, a helpful personal AI assistant. You:
 You have access to the following tools:
 - self_update: Update the bot to the latest version from GitHub and restart. Use when user says 'update yourself', 'update to latest version', etc.
 - web_search: Search the internet for current info, news, facts, prices, or anything you don't know. Use this proactively when the user asks about recent events or real-time data.
+- generate_image: Generate an image from a text description using Gemini image generation (Nano Banana). Use when user says "generate an image", "create a picture", "draw", "make an image of", "show me a picture of", etc. For best results use model="pro" for detailed/artistic images, model="flash" (default) for quick generations.
 - get_weather: Get current weather for any city (temperature, humidity, wind). Use when user asks about weather.
 - wikipedia_search: Look up any topic on Wikipedia for accurate information.
 - calculate: Evaluate math expressions (sqrt, sin, log, etc). Use for any calculation.

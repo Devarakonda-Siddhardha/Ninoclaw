@@ -271,7 +271,32 @@ def cmd_model(args):
     print(f"{DIM}Restart the bot for changes to take effect: ninoclaw start{RST}\n")
 
 
-def cmd_route(args):
+def cmd_imagegen(args):
+    """Set up or show image generation config"""
+    from dotenv import dotenv_values, set_key
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    env = dotenv_values(env_path)
+    key = env.get("GEMINI_API_KEY", "")
+
+    if not args:
+        if key:
+            print(f"\n{C}🎨 Image Generation{RST}")
+            print(f"  {G}●{RST} Enabled — GEMINI_API_KEY set ({key[:8]}...)")
+            print(f"  {DIM}Say 'generate an image of...' in Telegram to use it{RST}\n")
+        else:
+            print(f"\n{C}🎨 Image Generation{RST}")
+            print(f"  {R}●{RST} Not configured")
+            print(f"  {DIM}Get a free key at https://aistudio.google.com/apikey")
+            print(f"  Usage: ninoclaw imagegen <your-api-key>{RST}\n")
+        return
+
+    new_key = args[0].strip()
+    set_key(env_path, "GEMINI_API_KEY", new_key)
+    print(f"\n{G}✔  Gemini API key saved{RST}")
+    print(f"{DIM}Restart the bot: ninoclaw start{RST}\n")
+
+
+
     """Show or configure smart model routing (fast vs smart model)"""
     from dotenv import dotenv_values, set_key
     env_path = os.path.join(os.path.dirname(__file__), ".env")
@@ -365,6 +390,8 @@ def main():
         cmd_think(args[1:])
     elif cmd == "route":
         cmd_route(args[1:])
+    elif cmd in ("imagegen", "image"):
+        cmd_imagegen(args[1:])
     elif cmd == "version":
         cmd_version()
     elif cmd in ("help", "--help", "-h"):
