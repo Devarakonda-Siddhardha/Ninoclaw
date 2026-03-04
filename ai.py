@@ -4,7 +4,7 @@ AI integration — supports a chain of models with automatic fallback
 import requests
 import json
 import time
-from config import MODELS, OLLAMA_HOST, OLLAMA_MODEL
+from config import MODELS, OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_THINK
 
 
 def chat(message, system_prompt=None, history=None, tools=None, image_b64=None):
@@ -53,7 +53,7 @@ async def chat_stream(message, system_prompt=None, history=None):
             "stream": True,
         }
         if model_cfg.get("api_key") == "ollama" or "localhost:11434" in url:
-            payload["think"] = False
+            payload["think"] = OLLAMA_THINK
 
         try:
             _timeout = 180 if (model_cfg.get("api_key") == "ollama" or "localhost:11434" in url) else 60
@@ -116,7 +116,7 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64):
 
     payload = {"model": model_cfg["model"], "messages": messages, "temperature": 0.7}
     if _is_ollama:
-        payload["think"] = False  # disable Qwen3 thinking mode (faster on small/slow hardware)
+        payload["think"] = OLLAMA_THINK  # Qwen3 thinking mode (toggle via: ninoclaw think on/off)
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"

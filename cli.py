@@ -39,6 +39,9 @@ HELP = f"""
   {G}model{RST}              Show or change the AI model
     {DIM}ninoclaw model{RST}          Show current model
     {DIM}ninoclaw model <name>{RST}   Switch to a different model
+  {G}think{RST}              Toggle Ollama thinking mode (Qwen3 only)
+    {DIM}ninoclaw think{RST}          Show current state
+    {DIM}ninoclaw think on|off{RST}   Enable/disable thinking
   {G}version{RST}            Show current version (git commit)
 
 {W}Examples:{RST}
@@ -263,7 +266,32 @@ def cmd_model(args):
     print(f"{DIM}Restart the bot for changes to take effect: ninoclaw start{RST}\n")
 
 
-def main():
+def cmd_think(args):
+    """Toggle Ollama thinking mode on/off"""
+    from dotenv import dotenv_values, set_key
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    env = dotenv_values(env_path)
+    current = env.get("OLLAMA_THINK", "false").lower() == "true"
+
+    if not args:
+        state = f"{G}ON{RST}" if current else f"{R}OFF{RST}"
+        print(f"\n{C}🧠 Ollama thinking mode:{RST} {state}")
+        print(f"{DIM}Usage: ninoclaw think on|off{RST}\n")
+        return
+
+    val = args[0].lower()
+    if val in ("on", "true", "1", "yes"):
+        set_key(env_path, "OLLAMA_THINK", "true")
+        print(f"\n{G}✔  Thinking mode ON{RST} — Qwen3 will reason before answering")
+    elif val in ("off", "false", "0", "no"):
+        set_key(env_path, "OLLAMA_THINK", "false")
+        print(f"\n{G}✔  Thinking mode OFF{RST} — faster responses")
+    else:
+        print(f"\n{R}Usage: ninoclaw think on|off{RST}\n")
+        return
+    print(f"{DIM}Restart the bot for changes to take effect: ninoclaw start{RST}\n")
+
+
     args = sys.argv[1:]
     cmd  = args[0].lower() if args else "start"
 
@@ -283,6 +311,8 @@ def main():
         cmd_dashboard()
     elif cmd == "model":
         cmd_model(args[1:])
+    elif cmd == "think":
+        cmd_think(args[1:])
     elif cmd == "version":
         cmd_version()
     elif cmd in ("help", "--help", "-h"):

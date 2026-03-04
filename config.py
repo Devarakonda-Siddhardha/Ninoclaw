@@ -95,6 +95,7 @@ OPENAI_API_URL = _primary["api_url"]
 OPENAI_MODEL   = _primary["model"]
 OLLAMA_HOST    = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL", "llama3.2")
+OLLAMA_THINK   = os.getenv("OLLAMA_THINK", "false").lower() == "true"
 
 # Plugin feature flags — toggle via dashboard or .env
 ENABLE_WEB_SEARCH  = os.getenv("ENABLE_WEB_SEARCH",  "true")  != "false"
