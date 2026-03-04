@@ -110,17 +110,24 @@ def start_dashboard():
 
 def acquire_lock():
     """Ensure only one instance runs. Returns lock file path or exits."""
-    import fcntl
     lock_path = os.path.join(os.path.dirname(__file__), ".ninoclaw.lock")
     lock_file = open(lock_path, "w")
     try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         lock_file.write(str(os.getpid()))
         lock_file.flush()
         return lock_file  # keep reference alive
     except OSError:
         print("❌ Another Ninoclaw instance is already running!")
-        print("   Stop it first: pkill -f 'python.*main.py'")
+        if sys.platform == "win32":
+            print("   Stop it first via Task Manager or close the other terminal.")
+        else:
+            print("   Stop it first: pkill -f 'python.*main.py'")
         sys.exit(1)
 
 
