@@ -178,8 +178,24 @@ def test_connection():
     try:
         url = f"{cfg['api_url']}/models"
         headers = {"Authorization": f"Bearer {cfg['api_key']}"}
-        return requests.get(url, headers=headers, timeout=10).status_code == 200
+        r = requests.get(url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            return True
+        # Ollama fallback: try native /api/tags endpoint
+        if cfg.get("api_key") == "ollama" or "localhost:11434" in cfg["api_url"]:
+            base = cfg["api_url"].rstrip("/").removesuffix("/v1")
+            r2 = requests.get(f"{base}/api/tags", timeout=10)
+            return r2.status_code == 200
+        return False
     except requests.RequestException:
+        # Ollama fallback on connection error too
+        try:
+            if cfg.get("api_key") == "ollama" or "localhost:11434" in cfg["api_url"]:
+                base = cfg["api_url"].rstrip("/").removesuffix("/v1")
+                r2 = requests.get(f"{base}/api/tags", timeout=10)
+                return r2.status_code == 200
+        except Exception:
+            pass
         return False
 
 
