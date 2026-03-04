@@ -63,12 +63,12 @@ def choose(prompt, options, default=0):
 
     def _render():
         for _ in range(n):
-            sys.stdout.write(UP + CLR)
+            sys.stdout.write(UP + "\r" + CLR)
         for i, (lbl, _) in enumerate(options):
             if i == idx:
-                sys.stdout.write(f"  {G}❯ {W}{lbl}{RST}\n")
+                sys.stdout.write(f"\r  {G}❯ {W}{lbl}{RST}\n")
             else:
-                sys.stdout.write(f"    {DIM}{lbl}{RST}\n")
+                sys.stdout.write(f"\r    {DIM}{lbl}{RST}\n")
         sys.stdout.flush()
 
     try:
@@ -169,11 +169,11 @@ def run_wizard():
 
     def _render_platforms():
         for _ in range(n):
-            sys.stdout.write(UP + CLR)
+            sys.stdout.write(UP + "\r" + CLR)
         for i, (lbl, val) in enumerate(_platforms):
             check = f"{G}◉{RST}" if val in selected else f"{DIM}○{RST}"
             cursor = f"{G}❯ {W}" if i == idx else f"    {DIM}"
-            sys.stdout.write(f"  {cursor}{check}  {lbl}{RST}\n")
+            sys.stdout.write(f"\r  {cursor}{check}  {lbl}{RST}\n")
         sys.stdout.flush()
 
     for _ in _platforms:
