@@ -39,6 +39,11 @@ HELP = f"""
   {G}model{RST}              Show or change the AI model
     {DIM}ninoclaw model{RST}          Show current model
     {DIM}ninoclaw model <name>{RST}   Switch to a different model
+  {G}route{RST}             Smart model routing (fast vs smart)
+    {DIM}ninoclaw route{RST}                  Show routing config
+    {DIM}ninoclaw route fast <model>{RST}     Set fast model (simple tasks)
+    {DIM}ninoclaw route smart <model>{RST}    Set smart model (complex tasks)
+    {DIM}ninoclaw route off{RST}              Disable routing
   {G}think{RST}              Toggle Ollama thinking mode (Qwen3 only)
     {DIM}ninoclaw think{RST}          Show current state
     {DIM}ninoclaw think on|off{RST}   Enable/disable thinking
@@ -266,7 +271,50 @@ def cmd_model(args):
     print(f"{DIM}Restart the bot for changes to take effect: ninoclaw start{RST}\n")
 
 
-def cmd_think(args):
+def cmd_route(args):
+    """Show or configure smart model routing (fast vs smart model)"""
+    from dotenv import dotenv_values, set_key
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    env = dotenv_values(env_path)
+    fast  = env.get("FAST_MODEL", "")
+    smart = env.get("SMART_MODEL", "") or env.get("OPENAI_MODEL", "")
+
+    if not args:
+        print(f"\n{C}🔀 Model Routing{RST}")
+        if fast:
+            print(f"  {G}●{RST} Enabled")
+            print(f"  {W}Fast  (simple tasks):{RST} {fast}")
+            print(f"  {W}Smart (complex tasks):{RST} {smart}")
+            print(f"\n  {DIM}Simple = casual chat, quick questions")
+            print(f"  Complex = code, research, long writing, analysis{RST}")
+        else:
+            print(f"  {R}●{RST} Disabled — single model for all tasks")
+            print(f"  {DIM}Set a FAST_MODEL to enable routing{RST}")
+        print(f"\n{DIM}Usage:")
+        print(f"  ninoclaw route fast <model>   Set fast model")
+        print(f"  ninoclaw route smart <model>  Set smart model")
+        print(f"  ninoclaw route off            Disable routing{RST}\n")
+        return
+
+    sub = args[0].lower()
+    if sub == "fast" and len(args) > 1:
+        set_key(env_path, "FAST_MODEL", args[1])
+        print(f"\n{G}✔  Fast model:{RST} {W}{args[1]}{RST}")
+        print(f"{DIM}Used for: casual chat, quick questions, simple lookups{RST}")
+    elif sub == "smart" and len(args) > 1:
+        set_key(env_path, "SMART_MODEL", args[1])
+        print(f"\n{G}✔  Smart model:{RST} {W}{args[1]}{RST}")
+        print(f"{DIM}Used for: code, research, analysis, long writing{RST}")
+    elif sub == "off":
+        set_key(env_path, "FAST_MODEL", "")
+        print(f"\n{G}✔  Routing disabled{RST} — using single model for all tasks")
+    else:
+        print(f"\n{R}Usage: ninoclaw route fast|smart <model> | off{RST}\n")
+        return
+    print(f"{DIM}Restart the bot: ninoclaw start{RST}\n")
+
+
+
     """Toggle Ollama thinking mode on/off"""
     from dotenv import dotenv_values, set_key
     env_path = os.path.join(os.path.dirname(__file__), ".env")
@@ -313,6 +361,8 @@ def cmd_think(args):
         cmd_model(args[1:])
     elif cmd == "think":
         cmd_think(args[1:])
+    elif cmd == "route":
+        cmd_route(args[1:])
     elif cmd == "version":
         cmd_version()
     elif cmd in ("help", "--help", "-h"):

@@ -516,7 +516,8 @@ You have access to tools to schedule and manage recurring tasks. When the user w
         message=user_message,
         system_prompt=personalized_prompt,
         history=conv_history,
-        tools=get_tool_definitions()
+        tools=get_tool_definitions(),
+        force_smart=True  # always use smart model when tools may be involved
     )
 
     final_response = response if isinstance(response, str) else response.get("content") or ""

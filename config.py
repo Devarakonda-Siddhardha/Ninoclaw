@@ -93,9 +93,24 @@ AI_PROVIDER    = "openai"
 OPENAI_API_KEY = _primary["api_key"]
 OPENAI_API_URL = _primary["api_url"]
 OPENAI_MODEL   = _primary["model"]
-OLLAMA_HOST    = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL", "llama3.2")
-OLLAMA_THINK   = os.getenv("OLLAMA_THINK", "false").lower() == "true"
+# Smart model routing — use fast model for simple tasks, smart model for complex ones
+# Set FAST_MODEL to enable routing (uses same URL/key as primary by default)
+# Example: FAST_MODEL=anthropic/claude-haiku-4-5  SMART_MODEL=anthropic/claude-opus-4
+FAST_MODEL     = _env("FAST_MODEL", "")   # cheap/fast model name
+SMART_MODEL    = _env("SMART_MODEL", "")  # big/smart model name (defaults to OPENAI_MODEL)
+
+def _fast_cfg():
+    """Config for the fast model (same provider as primary, different model)."""
+    if not FAST_MODEL:
+        return None
+    return {**_primary, "model": FAST_MODEL}
+
+def _smart_cfg():
+    """Config for the smart model (same provider as primary, different model)."""
+    model = SMART_MODEL or _primary["model"]
+    return {**_primary, "model": model}
+
+
 
 # Plugin feature flags — toggle via dashboard or .env
 ENABLE_WEB_SEARCH  = os.getenv("ENABLE_WEB_SEARCH",  "true")  != "false"

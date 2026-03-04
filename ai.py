@@ -4,17 +4,45 @@ AI integration — supports a chain of models with automatic fallback
 import requests
 import json
 import time
-from config import MODELS, OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_THINK
+from config import MODELS, OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_THINK, FAST_MODEL, _fast_cfg, _smart_cfg
 
 
-def chat(message, system_prompt=None, history=None, tools=None, image_b64=None):
+# Keywords that signal a complex/expensive request
+_COMPLEX_KEYWORDS = {
+    "code", "write", "debug", "fix", "build", "create", "implement", "program",
+    "analyze", "analyse", "research", "compare", "explain in detail", "essay",
+    "summarize", "summarise", "plan", "design", "architecture", "optimize",
+    "translate", "refactor", "review", "generate", "draft", "report",
+}
+
+def _pick_model_cfg(message: str, force_smart: bool = False):
+    """
+    Route to fast or smart model based on request complexity.
+    Returns a model config dict, or None to use the normal MODELS chain.
+    Only activates when FAST_MODEL is configured.
+    """
+    if not FAST_MODEL:
+        return None  # routing disabled, use normal chain
+    if force_smart:
+        return _smart_cfg()
+    msg_lower = message.lower()
+    is_complex = (
+        len(message) > 300
+        or any(kw in msg_lower for kw in _COMPLEX_KEYWORDS)
+    )
+    return _smart_cfg() if is_complex else _fast_cfg()
+
+def chat(message, system_prompt=None, history=None, tools=None, image_b64=None, force_smart=False):
     """
     Try each model in MODELS chain in order.
     Falls back to the next model on 429, 5xx, or connection errors.
+    If FAST_MODEL is configured, routes simple vs complex requests automatically.
     """
     last_error = "No models configured."
 
-    for model_cfg in MODELS:
+    routed = _pick_model_cfg(message, force_smart=force_smart)
+    model_list = [routed] if routed else MODELS
+    for model_cfg in model_list:
         result, error = _try_openai(model_cfg, message, system_prompt, history, tools, image_b64)
         if result is not None:
             return result
@@ -33,7 +61,10 @@ async def chat_stream(message, system_prompt=None, history=None):
     import asyncio, httpx
     last_error = "No models configured."
 
-    for model_cfg in MODELS:
+    routed = _pick_model_cfg(message)
+    model_list = [routed] if routed else MODELS
+
+    for model_cfg in model_list:
         url = f"{model_cfg['api_url']}/chat/completions"
         headers = {
             "Authorization": f"Bearer {model_cfg['api_key']}",
