@@ -690,6 +690,7 @@ def models_page():
         <tr><td><code>google/gemini-2.0-flash-exp:free</code></td><td>OpenRouter</td><td>Free on OpenRouter</td></tr>
         <tr><td><code>meta-llama/llama-3.3-70b-instruct:free</code></td><td>OpenRouter</td><td>Free Llama 3.3</td></tr>
         <tr><td><code>llama3.2</code></td><td>Ollama (local)</td><td>Offline, private</td></tr>
+        <tr><td><code>local-model</code></td><td>llama.cpp / vLLM</td><td>Local API (http://127.0.0.1:8000/v1)</td></tr>
       </tbody>
     </table></div>
   </div>

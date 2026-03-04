@@ -245,6 +245,7 @@ def run_wizard():
         ("ZhipuAI GLM     (glm-4-flash free)",                  "glm"),
         ("Anthropic Claude",                                    "anthropic"),
         ("Ollama          (local, offline)",                    "ollama"),
+        ("Local Server    (llama.cpp, LM Studio, vLLM)",        "local"),
         ("Custom endpoint",                                     "custom"),
     ])
 
@@ -298,6 +299,13 @@ def run_wizard():
         cfg["OPENAI_API_URL"] = ask("Ollama URL", default=e.get("OPENAI_API_URL", "http://localhost:11434/v1")) or ""
         cfg["OPENAI_API_KEY"] = "ollama"
         cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "llama3.2")) or ""
+
+    elif provider == "local":
+        info("Make sure your local server is running (e.g. llama-server -hf ... --port 8000)")
+        info("Warning: Do not use port 8080 if your Ninoclaw web dashboard uses it.")
+        cfg["OPENAI_API_URL"] = ask("Local API Base URL", default=e.get("OPENAI_API_URL", "http://127.0.0.1:8000/v1")) or ""
+        cfg["OPENAI_API_KEY"] = ask("API Key (usually 'local')", default="local") or "local"
+        cfg["OPENAI_MODEL"]   = ask("Model name (usually ignored by local servers)", default="local-model") or "local-model"
 
     else:  # custom
         cfg["OPENAI_API_URL"] = ask("API Base URL", default=e.get("OPENAI_API_URL")) or ""
