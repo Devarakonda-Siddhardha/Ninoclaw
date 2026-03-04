@@ -52,6 +52,8 @@ async def chat_stream(message, system_prompt=None, history=None):
             "temperature": 0.7,
             "stream": True,
         }
+        if model_cfg.get("api_key") == "ollama" or "localhost:11434" in url:
+            payload["think"] = False
 
         try:
             _timeout = 180 if (model_cfg.get("api_key") == "ollama" or "localhost:11434" in url) else 60
@@ -97,9 +99,7 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64):
     messages = []
     _is_ollama = model_cfg.get("api_key") == "ollama" or "localhost:11434" in url
     if system_prompt:
-        # Disable Qwen3 thinking mode on local Ollama (saves tokens on small/slow models)
-        content = ("/no_think\n" + system_prompt) if _is_ollama else system_prompt
-        messages.append({"role": "system", "content": content})
+        messages.append({"role": "system", "content": system_prompt})
     if history:
         messages.extend(history)
 
@@ -115,6 +115,8 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64):
         messages.append({"role": "user", "content": message})
 
     payload = {"model": model_cfg["model"], "messages": messages, "temperature": 0.7}
+    if _is_ollama:
+        payload["think"] = False  # disable Qwen3 thinking mode (faster on small/slow hardware)
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
