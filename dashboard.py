@@ -205,6 +205,10 @@ BASE = """<!DOCTYPE html>
   <div class="alert alert-danger"><i class="bi bi-x-circle me-2"></i>{{ msg }}</div>
   {% endfor %}
 
+
+"""
+
+FOOTER = """
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
@@ -423,7 +427,7 @@ def config_page():
 </form>
 
 """
-    return render_template_string(tmpl, active="config", version=git_version(), env=env)
+    return render_template_string(tmpl + FOOTER, active="config", version=git_version(), env=env)
 
 
 @app.route("/plugins", methods=["GET", "POST"])
@@ -587,7 +591,7 @@ def plugins_page():
 </form>
 
 """
-    return render_template_string(tmpl, active="plugins", version=git_version(), env=env,
+    return render_template_string(tmpl + FOOTER, active="plugins", version=git_version(), env=env,
         skills=skills_data,
         web_search=is_on("ENABLE_WEB_SEARCH"),
         vision=is_on("ENABLE_VISION"),
@@ -692,7 +696,7 @@ def models_page():
 </div>
 
 """
-    return render_template_string(tmpl, active="models", version=git_version(), env=env)
+    return render_template_string(tmpl + FOOTER, active="models", version=git_version(), env=env)
 
 
 @app.route("/memory")
@@ -754,7 +758,7 @@ def memory_page():
 </form>
 
 """
-    return render_template_string(tmpl, active="memory", version=git_version(), users=users)
+    return render_template_string(tmpl + FOOTER, active="memory", version=git_version(), users=users)
 
 
 @app.route("/memory/clear", methods=["POST"])
@@ -822,7 +826,7 @@ def chat_page():
 {% endif %}
 
 """
-    return render_template_string(tmpl, active="chat", version=git_version(), users=users)
+    return render_template_string(tmpl + FOOTER, active="chat", version=git_version(), users=users)
 
 
 @app.route("/api/chat/<user_id>/send", methods=["POST"])
@@ -835,9 +839,8 @@ def chat_send(user_id):
         return jsonify({"error": "empty message"}), 400
     try:
         sys.path.insert(0, DIR)
-        from memory import MemoryManager
+        from memory import memory as mem
         from ai import chat as ai_chat
-        mem = MemoryManager()
         mem.add_message(user_id, "user", text)
         context = mem.get_conversation_context(user_id)
         reply = ai_chat(context)
@@ -998,10 +1001,9 @@ function nowTs() {
 
 function appendMsg(role, content, ts) {
   const container = document.getElementById('chat-messages');
-  const bottom = document.getElementById('chat-bottom');
   const div = document.createElement('div');
   div.innerHTML = renderMsg({role, content, ts: ts || nowTs()});
-  container.insertBefore(div.firstChild, bottom);
+  container.appendChild(div.firstElementChild);
   lastCount++;
   if (autoScroll) scrollToBottom();
 }
@@ -1089,7 +1091,7 @@ async function pollMessages() {
       newMsgs.forEach(m => {
         const div = document.createElement('div');
         div.innerHTML = renderMsg(m);
-        container.insertBefore(div.firstChild, document.getElementById('chat-bottom'));
+        container.appendChild(div.firstElementChild);
       });
       lastCount = msgs.length;
       if (autoScroll) scrollToBottom();
@@ -1103,7 +1105,7 @@ document.getElementById('msg-input').focus();
 </script>
 
 """
-    return render_template_string(tmpl, active="chat", version=git_version(),
+    return render_template_string(tmpl + FOOTER, active="chat", version=git_version(),
                                   user_id=user_id, messages=messages)
 
 
@@ -1178,7 +1180,7 @@ def tasks_page():
 </div>
 
 """
-    return render_template_string(tmpl, active="tasks", version=git_version(),
+    return render_template_string(tmpl + FOOTER, active="tasks", version=git_version(),
                                   tasks=tasks, crons=crons)
 
 
