@@ -93,6 +93,9 @@ AI_PROVIDER    = "openai"
 OPENAI_API_KEY = _primary["api_key"]
 OPENAI_API_URL = _primary["api_url"]
 OPENAI_MODEL   = _primary["model"]
+OLLAMA_HOST    = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL", "llama3.2")
+OLLAMA_THINK   = os.getenv("OLLAMA_THINK", "false").lower() == "true"
 # Smart model routing — use fast model for simple tasks, smart model for complex ones
 # Set FAST_MODEL to enable routing (uses same URL/key as primary by default)
 # Example: FAST_MODEL=anthropic/claude-haiku-4-5  SMART_MODEL=anthropic/claude-opus-4
