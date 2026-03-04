@@ -95,8 +95,11 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64):
     }
 
     messages = []
+    _is_ollama = model_cfg.get("api_key") == "ollama" or "localhost:11434" in url
     if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
+        # Disable Qwen3 thinking mode on local Ollama (saves tokens on small/slow models)
+        content = ("/no_think\n" + system_prompt) if _is_ollama else system_prompt
+        messages.append({"role": "system", "content": content})
     if history:
         messages.extend(history)
 
