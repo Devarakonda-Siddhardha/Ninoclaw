@@ -75,34 +75,43 @@ Your Phone (Termux)
 
 ---
 
-## 🛠️ Setup (Termux)
+## ⚡ Quick Start
 
-### 1. Install dependencies
+### Windows 🪟
+```powershell
+# 1. Clone the repository
+git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
+cd Ninoclaw
 
-```bash
-pkg update && pkg install python git
-pip install python-telegram-bot google-generativeai python-dotenv requests
-```
-
-### 2. Clone the repo
-
-```bash
-git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git ~/ninoclaw
-cd ~/ninoclaw
+# 2. Install dependencies
 pip install -r requirements.txt
+
+# 3. Run setup wizard and start
+.\ninoclaw setup
+.\ninoclaw start
 ```
 
-### 3. Make the CLI available
-
+### Linux / macOS / Termux 🐧🍎
 ```bash
+# 1. Install system requirements (examples for apt or pkg)
+sudo apt install python3 git -y    # Ubuntu/Debian
+pkg install python git -y          # Termux
+
+# 2. Clone the repository
+git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
+cd Ninoclaw
+
+# 3. Install Python dependencies
+pip install -r requirements.txt
+
+# 4. Make CLI available globally (optional)
 chmod +x ninoclaw
-ln -s "$(pwd)/ninoclaw" "$PREFIX/bin/ninoclaw"
-```
+sudo ln -s "$(pwd)/ninoclaw" "/usr/local/bin/ninoclaw"  # Linux/macOS
+ln -s "$(pwd)/ninoclaw" "$PREFIX/bin/ninoclaw"          # Termux
 
-### 4. Run setup wizard
-
-```bash
+# 5. Run setup wizard and start
 ninoclaw setup
+ninoclaw start
 ```
 
 The interactive wizard will walk you through:
