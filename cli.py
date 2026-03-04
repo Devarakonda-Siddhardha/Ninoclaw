@@ -315,6 +315,7 @@ def cmd_route(args):
 
 
 
+def cmd_think(args):
     """Toggle Ollama thinking mode on/off"""
     from dotenv import dotenv_values, set_key
     env_path = os.path.join(os.path.dirname(__file__), ".env")
@@ -340,6 +341,7 @@ def cmd_route(args):
     print(f"{DIM}Restart the bot for changes to take effect: ninoclaw start{RST}\n")
 
 
+def main():
     args = sys.argv[1:]
     cmd  = args[0].lower() if args else "start"
 
