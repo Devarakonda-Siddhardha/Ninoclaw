@@ -61,19 +61,26 @@ def execute(tool_name, arguments):
     if not api_key or api_key == "your-api-key-here":
         return "❌ No Gemini API key found. Set GEMINI_API_KEY in your .env file."
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    headers = {
-        "x-goog-api-key": api_key,
-        "Content-Type": "application/json",
-    }
+    headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
     }
 
+    # Try requested model, fall back to flash on rate limit
+    models_to_try = [model] if model == _MODELS["flash"] else [model, _MODELS["flash"]]
+
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=120)
-        resp.raise_for_status()
+        resp = None
+        used_model = model
+        for m in models_to_try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+            resp = requests.post(url, json=payload, headers=headers, timeout=120)
+            if resp.status_code == 429 and m != models_to_try[-1]:
+                continue  # try next model
+            used_model = m
+            resp.raise_for_status()
+            break
         data = resp.json()
 
         parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
@@ -100,7 +107,10 @@ def execute(tool_name, arguments):
         return f"[IMAGE:{tmp.name}]\n{caption_text}"
 
     except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code == 400:
+        code = e.response.status_code if e.response is not None else 0
+        if code == 429:
+            return "❌ Rate limit hit on all models. Wait a minute and try again (free tier limit)."
+        if code == 400:
             return "❌ Image generation failed: prompt may violate content policy."
         return f"❌ API error: {e}"
     except Exception as e:
