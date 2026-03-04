@@ -374,8 +374,30 @@ def run_wizard():
     else:
         ok("Skipped")
 
-    # ── 8. Dashboard ──────────────────────────────────────────────────────────
-    section("Step 8 — Web Dashboard")
+    # ── 8. Image Generation ───────────────────────────────────────────────────
+    section("Step 8 — Image Generation  (optional)")
+    info("Uses Gemini's native image generation (gemini-3.1-flash-image-preview)")
+    info("Free tier available at https://aistudio.google.com/apikey")
+    enable_img = ask("Enable image generation?", default="y", optional=True)
+    if enable_img and enable_img.lower() not in ("n", "no", ""):
+        # Check if already using Gemini — if so, reuse the key
+        is_gemini = "generativelanguage.googleapis.com" in cfg.get("OPENAI_API_URL", e.get("OPENAI_API_URL", ""))
+        if is_gemini:
+            info("Using your existing Gemini API key for image generation ✅")
+            cfg["GEMINI_API_KEY"] = cfg.get("OPENAI_API_KEY") or e.get("OPENAI_API_KEY", "")
+        else:
+            info("You need a separate Google Gemini API key (free at aistudio.google.com/apikey)")
+            gemini_key = ask("Gemini API Key", default=e.get("GEMINI_API_KEY"), optional=True, secret=True)
+            if gemini_key:
+                cfg["GEMINI_API_KEY"] = gemini_key
+                ok("Image generation enabled — say 'generate an image of...' in Telegram")
+            else:
+                ok("Skipped")
+    else:
+        ok("Skipped")
+
+    # ── 9. Dashboard ──────────────────────────────────────────────────────────
+    section("Step 9 — Web Dashboard")
     cfg["DASHBOARD_PASSWORD"] = ask("Dashboard password", default=e.get("DASHBOARD_PASSWORD", "admin")) or "admin"
     cfg["DASHBOARD_PORT"]     = ask("Dashboard port",     default=e.get("DASHBOARD_PORT", "8080"))       or "8080"
     ok(f"Dashboard at http://localhost:{cfg['DASHBOARD_PORT']}")
