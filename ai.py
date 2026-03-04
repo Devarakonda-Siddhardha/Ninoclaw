@@ -54,7 +54,8 @@ async def chat_stream(message, system_prompt=None, history=None):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            _timeout = 180 if (model_cfg.get("api_key") == "ollama" or "localhost:11434" in url) else 60
+            async with httpx.AsyncClient(timeout=_timeout) as client:
                 async with client.stream("POST", url, json=payload, headers=headers) as resp:
                     if resp.status_code >= 400:
                         last_error = f"HTTP {resp.status_code}"
@@ -117,7 +118,8 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64):
 
     try:
         for attempt in range(3):
-            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            _timeout = 180 if (headers.get("Authorization", "") == "Bearer ollama" or "localhost:11434" in url) else 60
+            resp = requests.post(url, json=payload, headers=headers, timeout=_timeout)
             if resp.status_code == 429:
                 time.sleep(2 ** attempt)
                 continue
