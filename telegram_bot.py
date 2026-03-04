@@ -545,6 +545,24 @@ You have access to tools to schedule and manage recurring tasks. When the user w
 
         memory.add_message(user_id, "assistant", final_response)
         asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
+
+        # Check if any tool result contains an image
+        for result in tool_results:
+            if result and result.startswith("[IMAGE:"):
+                import os as _os
+                lines = result.split("\n", 1)
+                img_path = lines[0][7:].rstrip("]")
+                caption = lines[1].strip() if len(lines) > 1 else "🎨 Generated image"
+                try:
+                    with open(img_path, "rb") as f:
+                        await update.message.reply_photo(photo=f, caption=caption[:1024])
+                    _os.unlink(img_path)
+                except Exception as e:
+                    await update.message.reply_text(f"❌ Could not send image: {e}")
+                # Remove the image result from text response
+                final_response = final_response.replace(result, caption).strip()
+                break
+
         await send_with_code_files(update, final_response)
         return
 
