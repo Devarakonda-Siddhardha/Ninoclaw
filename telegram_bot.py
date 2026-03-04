@@ -547,12 +547,8 @@ You have access to tools to schedule and manage recurring tasks. When the user w
         await send_with_code_files(update, final_response)
         return
 
-    # No tool calls — use streaming response
-    sent_msg = await update.message.reply_text("⏳")
+    # No tool calls — collect full streamed response, then send once
     accumulated = ""
-    last_edit = 0
-    EDIT_INTERVAL = 0.8  # seconds between edits (Telegram rate limit)
-
     try:
         async for chunk in chat_stream(
             message=user_message,
@@ -560,32 +556,13 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             history=conv_history,
         ):
             accumulated += chunk
-            now = asyncio.get_event_loop().time()
-            if now - last_edit >= EDIT_INTERVAL and accumulated.strip():
-                try:
-                    await sent_msg.edit_text(accumulated[:4096])
-                    last_edit = now
-                except Exception:
-                    pass
-
-        # Final edit / send with file extraction
-        final_response = accumulated or final_response
-        try:
-            await sent_msg.delete()
-        except Exception:
-            pass
-        await send_with_code_files(update, final_response or "⚠️ No response.")
-
     except Exception:
-        final_response = final_response or "⚠️ No response."
-        try:
-            await sent_msg.edit_text(final_response[:4096])
-        except Exception:
-            pass
+        pass
 
-    final_response = accumulated or final_response
+    final_response = accumulated.strip() or final_response or "⚠️ No response."
     memory.add_message(user_id, "assistant", final_response)
     asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
+    await send_with_code_files(update, final_response)
 
 async def handle_onboarding(update: Update, user_id, message, user_data):
     """Handle onboarding flow"""
