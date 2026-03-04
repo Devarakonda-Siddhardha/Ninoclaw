@@ -547,8 +547,12 @@ You have access to tools to schedule and manage recurring tasks. When the user w
         await send_with_code_files(update, final_response)
         return
 
-    # No tool calls — collect full streamed response, then send once
+    # No tool calls — stream response, editing message as chunks arrive
     accumulated = ""
+    sent_msg = None
+    last_edit = 0
+    EDIT_INTERVAL = 0.7
+
     try:
         async for chunk in chat_stream(
             message=user_message,
@@ -556,13 +560,47 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             history=conv_history,
         ):
             accumulated += chunk
+            now = asyncio.get_event_loop().time()
+            if not sent_msg and accumulated.strip():
+                # Send first message as soon as we have content — no placeholder
+                sent_msg = await update.message.reply_text(accumulated[:4096])
+                last_edit = now
+            elif sent_msg and now - last_edit >= EDIT_INTERVAL:
+                try:
+                    await sent_msg.edit_text(accumulated[:4096])
+                    last_edit = now
+                except Exception:
+                    pass
     except Exception:
         pass
 
     final_response = accumulated.strip() or final_response or "⚠️ No response."
+
+    # Final update — handle code files or long responses
+    has_code = bool(__import__('re').search(r'```\w*\n[\s\S]{300,}```', final_response))
+    if has_code:
+        # Delete streamed message and resend with file attachments
+        if sent_msg:
+            try:
+                await sent_msg.delete()
+            except Exception:
+                pass
+        await send_with_code_files(update, final_response)
+    elif sent_msg:
+        # Just do a final clean edit
+        try:
+            await sent_msg.edit_text(final_response[:4096])
+        except Exception:
+            pass
+        # Send overflow if > 4096
+        if len(final_response) > 4096:
+            for i in range(4096, len(final_response), 4096):
+                await update.message.reply_text(final_response[i:i+4096])
+    else:
+        await update.message.reply_text(final_response[:4096])
+
     memory.add_message(user_id, "assistant", final_response)
     asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
-    await send_with_code_files(update, final_response)
 
 async def handle_onboarding(update: Update, user_id, message, user_data):
     """Handle onboarding flow"""
