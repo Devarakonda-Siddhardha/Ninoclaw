@@ -25,6 +25,8 @@ BOT_PURPOSE = _env("BOT_PURPOSE", "be your personal AI assistant")
 TIMEZONE    = _env("TIMEZONE",    "UTC")
 
 SERPER_API_KEY = _env("SERPER_API_KEY", "")
+FAL_KEY        = _env("FAL_KEY", "")        # fal.ai — image generation (FLUX)
+GEMINI_API_KEY = _env("GEMINI_API_KEY", "") # Google Gemini — image generation fallback
 
 # ---------------------------------------------------------------------------
 # AI Model Chain — tried in order, falls back to the next on error/rate-limit

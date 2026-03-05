@@ -276,23 +276,40 @@ def cmd_imagegen(args):
     from dotenv import dotenv_values, set_key
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     env = dotenv_values(env_path)
-    key = env.get("GEMINI_API_KEY", "")
+    fal_key    = env.get("FAL_KEY", "")
+    gemini_key = env.get("GEMINI_API_KEY", "")
 
     if not args:
-        if key:
-            print(f"\n{C}🎨 Image Generation{RST}")
-            print(f"  {G}●{RST} Enabled — GEMINI_API_KEY set ({key[:8]}...)")
-            print(f"  {DIM}Say 'generate an image of...' in Telegram to use it{RST}\n")
+        print(f"\n{C}🎨 Image Generation{RST}")
+        if fal_key:
+            print(f"  {G}●{RST} fal.ai (FLUX)  — {fal_key[:8]}...  {G}✓ primary{RST}")
         else:
-            print(f"\n{C}🎨 Image Generation{RST}")
-            print(f"  {R}●{RST} Not configured")
-            print(f"  {DIM}Get a free key at https://aistudio.google.com/apikey")
-            print(f"  Usage: ninoclaw imagegen <your-api-key>{RST}\n")
+            print(f"  {R}○{RST} fal.ai (FLUX)  — not set  {DIM}(recommended){RST}")
+        if gemini_key:
+            print(f"  {G}●{RST} Gemini Nano Banana — {gemini_key[:8]}...  {DIM}(fallback){RST}")
+        else:
+            print(f"  {DIM}○ Gemini Nano Banana — not set (fallback){RST}")
+        if not fal_key and not gemini_key:
+            print(f"\n  {DIM}Get a free fal.ai key at https://fal.ai → Dashboard → API Keys")
+            print(f"  Usage: ninoclaw imagegen fal <key>   (recommended)")
+            print(f"         ninoclaw imagegen gemini <key>{RST}")
+        print()
         return
 
-    new_key = args[0].strip()
-    set_key(env_path, "GEMINI_API_KEY", new_key)
-    print(f"\n{G}✔  Gemini API key saved{RST}")
+    if len(args) < 2:
+        print(f"\n{R}Usage: ninoclaw imagegen fal|gemini <api-key>{RST}\n")
+        return
+
+    provider, key = args[0].lower(), args[1].strip()
+    if provider == "fal":
+        set_key(env_path, "FAL_KEY", key)
+        print(f"\n{G}✔  fal.ai key saved{RST} — FLUX.1 Schnell enabled (fast + free tier)")
+    elif provider == "gemini":
+        set_key(env_path, "GEMINI_API_KEY", key)
+        print(f"\n{G}✔  Gemini key saved{RST} — Nano Banana enabled (fallback)")
+    else:
+        print(f"\n{R}Usage: ninoclaw imagegen fal|gemini <api-key>{RST}\n")
+        return
     print(f"{DIM}Restart the bot: ninoclaw start{RST}\n")
 
 
