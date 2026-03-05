@@ -73,8 +73,23 @@ def _generate_fal(prompt, quality, fal_key):
     return tmp.name, None
 
 
+def _generate_hf(prompt, hf_token):
+    """Generate image via HuggingFace Inference API (FLUX.1-schnell, free)."""
+    url = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
+    headers = {
+        "Authorization": f"Bearer {hf_token}",
+        "Content-Type": "application/json",
+    }
+    payload = {"inputs": prompt}
+    resp = requests.post(url, json=payload, headers=headers, timeout=120)
+    resp.raise_for_status()
+    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir="/tmp")
+    tmp.write(resp.content)
+    tmp.close()
+    return tmp.name, None
+
+
 def _generate_gemini(prompt, gemini_key):
-    """Generate image via Gemini Nano Banana API."""
     model = "gemini-3.1-flash-image-preview"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     headers = {"x-goog-api-key": gemini_key, "Content-Type": "application/json"}
@@ -104,18 +119,24 @@ def execute(tool_name, arguments):
         return None
 
     prompt = arguments.get("prompt", "").strip()
-    quality = arguments.get("quality", "fast")
+    # Accept both 'quality' and 'model' arg names (some models hallucinate 'model')
+    quality = arguments.get("quality") or arguments.get("model", "fast")
+    if quality in ("pro", "hd", "high", "best"):
+        quality = "hd"
+    else:
+        quality = "fast"
 
     if not prompt:
         return "❌ Please provide an image description."
 
     fal_key    = os.getenv("FAL_KEY", "")
+    hf_token   = os.getenv("HF_TOKEN", "")
     gemini_key = os.getenv("GEMINI_API_KEY", "")
 
-    if not fal_key and not gemini_key:
-        return "❌ No image generation API key found. Set FAL_KEY (fal.ai) or GEMINI_API_KEY in .env.\nGet a free fal.ai key at https://fal.ai"
+    if not fal_key and not hf_token and not gemini_key:
+        return "❌ No image generation key found. Set HF_TOKEN (free at huggingface.co), FAL_KEY, or GEMINI_API_KEY in .env."
 
-    # Try fal.ai first (better free tier), fall back to Gemini
+    # Try fal.ai → HuggingFace → Gemini
     errors = []
     if fal_key:
         try:
@@ -125,14 +146,24 @@ def execute(tool_name, arguments):
             errors.append(f"fal.ai: {err}")
         except requests.HTTPError as e:
             code = e.response.status_code if e.response is not None else 0
-            if code == 401:
-                errors.append("fal.ai: invalid API key")
-            elif code == 429:
-                errors.append("fal.ai: rate limited")
-            else:
-                errors.append(f"fal.ai: HTTP {code}")
+            errors.append(f"fal.ai: HTTP {code}")
         except Exception as e:
             errors.append(f"fal.ai: {e}")
+
+    if hf_token:
+        try:
+            path, err = _generate_hf(prompt, hf_token)
+            if path:
+                return f"[IMAGE:{path}]\n🎨 {prompt}"
+            errors.append(f"HuggingFace: {err}")
+        except requests.HTTPError as e:
+            code = e.response.status_code if e.response is not None else 0
+            if code == 503:
+                errors.append("HuggingFace: model loading, try again in 20s")
+            else:
+                errors.append(f"HuggingFace: HTTP {code}")
+        except Exception as e:
+            errors.append(f"HuggingFace: {e}")
 
     if gemini_key:
         try:
@@ -150,28 +181,4 @@ def execute(tool_name, arguments):
             errors.append(f"Gemini: {e}")
 
     return f"❌ Image generation failed: {' | '.join(errors)}"
-
-
-TOOLS = [{
-    "type": "function",
-    "function": {
-        "name": "generate_image",
-        "description": "Generate an image from a text description/prompt. Use when user says 'generate an image', 'create a picture', 'draw', 'make an image of', 'show me', etc.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "prompt": {
-                    "type": "string",
-                    "description": "Detailed description of the image to generate"
-                },
-                "model": {
-                    "type": "string",
-                    "description": "Model to use: 'flash' (fast, default) or 'pro' (high quality)",
-                    "enum": ["flash", "pro"]
-                }
-            },
-            "required": ["prompt"]
-        }
-    }
-}]
 

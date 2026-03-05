@@ -523,6 +523,47 @@ You have access to tools to schedule and manage recurring tasks. When the user w
     final_response = response if isinstance(response, str) else response.get("content") or ""
     tool_calls = response.get("tool_calls") if isinstance(response, dict) else None
 
+    # Parse hallucinated <tool_code> blocks from models that don't support native function calling
+    if not tool_calls and final_response:
+        import re as _re2, json as _json2
+        tc_match = _re2.search(r'<tool_code>\s*(\{.*?\})\s*</tool_code>', final_response, _re2.DOTALL)
+        if tc_match:
+            try:
+                tc_data = _json2.loads(tc_match.group(1))
+                tool_name = tc_data.get("name")
+                tool_args = tc_data.get("arguments", {})
+                if isinstance(tool_args, str):
+                    tool_args = _json2.loads(tool_args)
+                if tool_name:
+                    tool_calls = [{"function": {"name": tool_name, "arguments": tool_args}}]
+                    final_response = _re2.sub(r'(?s).*?<tool_code>.*?</tool_code>\s*', '', final_response).strip()
+            except Exception:
+                pass
+
+    # Direct intent mapping — bypass model hallucination for common tool commands
+    if not tool_calls:
+        msg_l = user_message.lower().strip()
+        _direct = None
+        if any(w in msg_l for w in ["pause", "stop music", "stop song", "stop playing"]):
+            _direct = ("spotify_play_pause", {})
+        elif any(w in msg_l for w in ["resume", "unpause", "continue playing"]):
+            _direct = ("spotify_play_pause", {})
+        elif any(w in msg_l for w in ["next song", "skip song", "next track", "skip track", "skip this"]):
+            _direct = ("spotify_next", {})
+        elif any(w in msg_l for w in ["previous song", "prev song", "go back", "previous track"]):
+            _direct = ("spotify_previous", {})
+        elif any(w in msg_l for w in ["what's playing", "whats playing", "current song", "currently playing", "what song"]):
+            _direct = ("spotify_current", {})
+        elif msg_l.startswith("play ") and len(msg_l) > 5:
+            query = user_message[5:].strip()
+            # Remove trailing "on spotify", "song", etc.
+            import re as _re3
+            query = _re3.sub(r'\s*(on spotify|using spotify|spotify)\s*$', '', query, flags=_re3.IGNORECASE).strip()
+            _direct = ("spotify_search_play", {"query": query, "type": "track"})
+        if _direct:
+            tool_calls = [{"function": {"name": _direct[0], "arguments": _direct[1]}}]
+            final_response = ""
+
     # Execute tool calls if any
     tool_results = []
     if tool_calls:
@@ -535,21 +576,27 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             else:
                 tool_args = raw_args
             if tool_name:
+                print(f"[Tool] Calling: {tool_name}({tool_args})")
                 result = await execute_tool(tool_name, tool_args, user_id, task_manager)
+                print(f"[Tool] Result: {str(result)[:100]}")
                 tool_results.append(result)
 
         if tool_results:
+            import re as _re
             if final_response:
                 final_response += "\n\n"
-            final_response += "\n\n".join(tool_results)
+            # Strip [IMAGE:...] markers before appending to text response
+            clean_results = [_re.sub(r'\[IMAGE:[^\]]*\]\n?', '', r).strip() for r in tool_results]
+            final_response += "\n\n".join(r for r in clean_results if r)
 
         memory.add_message(user_id, "assistant", final_response)
         asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
 
         # Check if any tool result contains an image
+        image_sent = False
         for result in tool_results:
             if result and result.startswith("[IMAGE:"):
-                import os as _os
+                import os as _os, re as _re
                 lines = result.split("\n", 1)
                 img_path = lines[0][7:].rstrip("]")
                 caption = lines[1].strip() if len(lines) > 1 else "🎨 Generated image"
@@ -557,13 +604,19 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                     with open(img_path, "rb") as f:
                         await update.message.reply_photo(photo=f, caption=caption[:1024])
                     _os.unlink(img_path)
+                    image_sent = True
                 except Exception as e:
                     await update.message.reply_text(f"❌ Could not send image: {e}")
-                # Remove the image result from text response
-                final_response = final_response.replace(result, caption).strip()
+                # Strip [IMAGE:...] markers and the caption echo from text response
+                import re as _re2
+                final_response = _re2.sub(r'\[IMAGE:[^\]]*\]\n?', '', final_response).strip()
+                # If what remains is just the caption, suppress the text message
+                if final_response == caption or not final_response:
+                    final_response = ""
                 break
 
-        await send_with_code_files(update, final_response)
+        if final_response:
+            await send_with_code_files(update, final_response)
         return
 
     # No tool calls — stream response, editing message as chunks arrive
@@ -733,7 +786,8 @@ Your purpose is to {BOT_PURPOSE}."""
     memory.add_message(user_id, "user", f"[Image] {caption}")
     memory.add_message(user_id, "assistant", final_response)
 
-    await update.message.reply_text(final_response)
+    if final_response.strip():
+        await update.message.reply_text(final_response)
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):

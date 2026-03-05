@@ -294,7 +294,8 @@ def config_page():
                   "CONTEXT_WINDOW", "DASHBOARD_PASSWORD", "DASHBOARD_PORT",
                   "AGENT_NAME", "USER_NAME", "BOT_PURPOSE", "TIMEZONE",
                   "RESEND_API_KEY", "RESEND_FROM", "OWNER_EMAIL",
-                  "OPENROUTER_API_KEY", "OPENROUTER_MODEL"]
+                  "OPENROUTER_API_KEY", "OPENROUTER_MODEL",
+                  "GLM_CODING_API_KEY", "GLM_CODING_MODEL"]
         for f in fields:
             val = request.form.get(f, "").strip()
             if val:
@@ -403,6 +404,22 @@ def config_page():
     <div>
       <label class="form-label">OpenRouter Model  <small>(when used as primary)</small></label>
       <input class="form-control" name="OPENROUTER_MODEL" value="{{ env.get('OPENROUTER_MODEL','google/gemini-flash-1.5') }}">
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-header"><i class="bi bi-code-slash"></i> GLM Coding Plan  <small style="color:var(--muted);font-weight:400">Zhipu AI coding models — <a href="https://z.ai" style="color:var(--accent)">z.ai</a></small></div>
+  <div class="card-body">
+    <div style="margin-bottom:14px">
+      <label class="form-label">GLM Coding API Key</label>
+      <input class="form-control" type="password" name="GLM_CODING_API_KEY" placeholder="Leave blank to keep current" autocomplete="off">
+      {% if env.get('GLM_CODING_API_KEY') %}<small style="color:var(--green)">✓ Set — used as fallback automatically</small>
+      {% else %}<small style="color:var(--muted)">Get key at <a href="https://z.ai" style="color:var(--accent)">z.ai</a> — GLM Coding Plan starts at $3/month</small>{% endif %}
+    </div>
+    <div>
+      <label class="form-label">GLM Coding Model</label>
+      <input class="form-control" name="GLM_CODING_MODEL" value="{{ env.get('GLM_CODING_MODEL','GLM-4.7') }}">
+      <small style="color:var(--muted)">Options: GLM-4.7 (complex tasks), GLM-4.5-air (faster/lighter)</small>
     </div>
   </div>
 </div>

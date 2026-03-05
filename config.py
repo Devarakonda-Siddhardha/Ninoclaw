@@ -26,6 +26,18 @@ TIMEZONE    = _env("TIMEZONE",    "UTC")
 
 SERPER_API_KEY = _env("SERPER_API_KEY", "")
 FAL_KEY        = _env("FAL_KEY", "")        # fal.ai — image generation (FLUX)
+
+# Integration env vars — used by skills and create_integration
+SLACK_WEBHOOK_URL  = _env("SLACK_WEBHOOK_URL", "")
+SLACK_BOT_TOKEN    = _env("SLACK_BOT_TOKEN", "")
+SLACK_CHANNEL      = _env("SLACK_CHANNEL", "#general")
+GITHUB_TOKEN       = _env("GITHUB_TOKEN", "")
+SPOTIFY_CLIENT_ID      = _env("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET  = _env("SPOTIFY_CLIENT_SECRET", "")
+SPOTIFY_REFRESH_TOKEN  = _env("SPOTIFY_REFRESH_TOKEN", "")
+GOOGLE_CREDENTIALS_JSON = _env("GOOGLE_CREDENTIALS_JSON", "")
+GOOGLE_CALENDAR_ID     = _env("GOOGLE_CALENDAR_ID", "primary")
+HF_TOKEN       = _env("HF_TOKEN", "")       # HuggingFace — image generation (FLUX.1-schnell, free)
 GEMINI_API_KEY = _env("GEMINI_API_KEY", "") # Google Gemini — image generation fallback
 
 # ---------------------------------------------------------------------------
@@ -67,8 +79,10 @@ _provider_chain = [
     _provider("https://api.mistral.ai/v1",             "MISTRAL_API_KEY",    "MISTRAL_MODEL",    "mistral-small-latest"),
     # xAI Grok
     _provider("https://api.x.ai/v1",                   "XAI_API_KEY",        "XAI_MODEL",        "grok-3-mini"),
-    # ZhipuAI GLM
+    # ZhipuAI GLM (China endpoint)
     _provider("https://open.bigmodel.cn/api/paas/v4",  "GLM_API_KEY",        "GLM_MODEL",        "glm-4-flash"),
+    # ZhipuAI GLM Coding Plan (global endpoint — glm-4.7/4.5-air, set GLM_CODING_API_KEY)
+    _provider("https://api.z.ai/api/coding/paas/v4",   "GLM_CODING_API_KEY", "GLM_CODING_MODEL", "GLM-4.7"),
     # MiniMax
     _provider(
         f"https://api.minimax.chat/v1",
@@ -143,12 +157,27 @@ SYSTEM_PROMPT = """You are Ninoclaw, a helpful personal AI assistant. You:
 - Help schedule tasks and reminders
 - Can create recurring scheduled tasks (cron jobs) using tools
 - Are concise but friendly
-- Can execute tasks when needed
+- ALWAYS use tools when available — NEVER say "I can't access" or "I don't have access to" when a tool exists for it. Just call the tool.
+- If a tool exists for what the user wants, USE IT immediately without disclaimers.
 
 You have access to the following tools:
 - self_update: Update the bot to the latest version from GitHub and restart. Use when user says 'update yourself', 'update to latest version', etc.
 - web_search: Search the internet for current info, news, facts, prices, or anything you don't know. Use this proactively when the user asks about recent events or real-time data.
-- generate_image: Generate an image from a text description using Gemini image generation (Nano Banana). Use when user says "generate an image", "create a picture", "draw", "make an image of", "show me a picture of", etc. For best results use model="pro" for detailed/artistic images, model="flash" (default) for quick generations.
+- generate_image: Generate an image from a text description using FLUX via HuggingFace. Use when user says "generate an image", "create a picture", "draw", "make an image of", "show me a picture of", etc.
+- spotify_current: Show what's currently playing on Spotify. Use when user asks "what's playing", "current song", etc.
+- spotify_play_pause: Toggle Spotify play/pause. Use when user says "play", "pause", "stop music", etc.
+- spotify_next: Skip to next Spotify track. Use when user says "next song", "skip", etc.
+- spotify_previous: Go to previous Spotify track.
+- spotify_search_play: Search and play a song/artist/playlist on Spotify. Use when user says "play [song/artist]", "put on [music]", etc.
+- spotify_volume: Set Spotify volume (0-100). Use when user says "volume up/down", "set volume to X", etc.
+- slack_send: Send a message to Slack. Use when user says "send to slack", "message slack", "notify slack", etc.
+- github_create_issue: Create a GitHub issue. Use when user says "create issue on [repo]", "report bug on github", etc.
+- github_list_prs: List open pull requests on a GitHub repo.
+- github_get_repo: Get info about a GitHub repo (stars, description, latest commit).
+- gcal_list_events: List upcoming Google Calendar events. Use when user asks "what's on my calendar", "upcoming events", etc.
+- gcal_create_event: Create a Google Calendar event. Use when user says "add to calendar", "schedule meeting", etc.
+- gcal_find_event: Search calendar events by keyword.
+- create_integration: Write and install a new integration skill for any app on the fly. Use when user says "add integration with X", "connect to Y app", "create skill for Z service".
 - get_weather: Get current weather for any city (temperature, humidity, wind). Use when user asks about weather.
 - wikipedia_search: Look up any topic on Wikipedia for accurate information.
 - calculate: Evaluate math expressions (sqrt, sin, log, etc). Use for any calculation.

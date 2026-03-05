@@ -15,7 +15,15 @@ _COMPLEX_KEYWORDS = {
     "translate", "refactor", "review", "generate", "draft", "report",
 }
 
-def _pick_model_cfg(message: str, force_smart: bool = False):
+# These keywords indicate tool use is needed — always route to smart model
+_TOOL_KEYWORDS = {
+    "play", "pause", "skip", "spotify", "song", "music", "volume", "track",
+    "slack", "github", "issue", "pull request", "calendar", "schedule", "event",
+    "weather", "news", "calculate", "convert", "currency", "search", "image",
+    "remind", "reminder", "cron", "what's playing", "next song",
+}
+
+def _pick_model_cfg(message: str, force_smart: bool = False, force_fast: bool = False):
     """
     Route to fast or smart model based on request complexity.
     Returns a model config dict, or None to use the normal MODELS chain.
@@ -23,16 +31,88 @@ def _pick_model_cfg(message: str, force_smart: bool = False):
     """
     if not FAST_MODEL:
         return None  # routing disabled, use normal chain
+    if force_fast:
+        return _fast_cfg()
     if force_smart:
         return _smart_cfg()
     msg_lower = message.lower()
     is_complex = (
         len(message) > 300
         or any(kw in msg_lower for kw in _COMPLEX_KEYWORDS)
+        or any(kw in msg_lower for kw in _TOOL_KEYWORDS)
     )
     return _smart_cfg() if is_complex else _fast_cfg()
 
-def chat(message, system_prompt=None, history=None, tools=None, image_b64=None, force_smart=False):
+def _try_gemini_tools(message, system_prompt, history, tools):
+    """
+    Use Gemini Flash via Google API for tool/function calling.
+    More reliable than OpenRouter free models for tool use.
+    """
+    import os
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if not gemini_key:
+        return None, "No GEMINI_API_KEY"
+
+    model = "gemini-3-flash-preview"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    headers_g = {"x-goog-api-key": gemini_key, "Content-Type": "application/json"}
+
+    # Build contents
+    contents = []
+    if history:
+        for h in history[-10:]:
+            role = "user" if h.get("role") == "user" else "model"
+            contents.append({"role": role, "parts": [{"text": h.get("content", "")}]})
+    contents.append({"role": "user", "parts": [{"text": message}]})
+
+    # Convert OpenAI tool format to Gemini format
+    gemini_tools = []
+    if tools:
+        fn_decls = []
+        for t in tools:
+            fn = t.get("function", {})
+            fn_decls.append({
+                "name": fn.get("name"),
+                "description": fn.get("description", ""),
+                "parameters": fn.get("parameters", {}),
+            })
+        gemini_tools = [{"function_declarations": fn_decls}]
+
+    payload = {
+        "contents": contents,
+    }
+    if gemini_tools:
+        payload["tools"] = gemini_tools
+        payload["tool_config"] = {"function_calling_config": {"mode": "AUTO"}}
+    if system_prompt:
+        payload["system_instruction"] = {"parts": [{"text": system_prompt}]}
+
+    try:
+        resp = requests.post(url, json=payload, headers=headers_g, timeout=60)
+        if resp.status_code == 429:
+            return None, "Gemini rate limited"
+        resp.raise_for_status()
+        data = resp.json()
+        candidate = data.get("candidates", [{}])[0]
+        parts = candidate.get("content", {}).get("parts", [])
+
+        # Check for function call
+        for part in parts:
+            if "functionCall" in part:
+                fc = part["functionCall"]
+                return {
+                    "content": "",
+                    "tool_calls": [{"function": {"name": fc["name"], "arguments": fc.get("args", {})}}]
+                }, None
+
+        # Text response
+        text = "".join(p.get("text", "") for p in parts)
+        return {"content": text, "tool_calls": None}, None
+    except Exception as e:
+        return None, str(e)
+
+
+def chat(message, system_prompt=None, history=None, tools=None, image_b64=None, force_smart=False, force_fast=False):
     """
     Try each model in MODELS chain in order.
     Falls back to the next model on 429, 5xx, or connection errors.
@@ -40,7 +120,7 @@ def chat(message, system_prompt=None, history=None, tools=None, image_b64=None, 
     """
     last_error = "No models configured."
 
-    routed = _pick_model_cfg(message, force_smart=force_smart)
+    routed = _pick_model_cfg(message, force_smart=force_smart, force_fast=force_fast)
     model_list = [routed] if routed else MODELS
     for model_cfg in model_list:
         result, error = _try_openai(model_cfg, message, system_prompt, history, tools, image_b64)

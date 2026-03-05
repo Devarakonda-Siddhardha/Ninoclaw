@@ -243,6 +243,7 @@ def run_wizard():
         ("Mistral         (mistral-small free)",                "mistral"),
         ("xAI Grok        (grok-3-mini)",                       "xai"),
         ("ZhipuAI GLM     (glm-4-flash free)",                  "glm"),
+        ("ZhipuAI GLM Coding Plan (GLM-4.7, paid)",            "glm_coding"),
         ("Anthropic Claude",                                    "anthropic"),
         ("Ollama          (local, offline)",                    "ollama"),
         ("Local Server    (llama.cpp, LM Studio, vLLM)",        "local"),
@@ -289,6 +290,14 @@ def run_wizard():
         cfg["OPENAI_API_KEY"] = ask("ZhipuAI API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
         cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "glm-4-flash")) or ""
 
+    elif provider == "glm_coding":
+        info("Get key: https://z.ai  (GLM Coding Plan from $3/month)")
+        cfg["OPENAI_API_URL"] = "https://api.z.ai/api/coding/paas/v4"
+        cfg["OPENAI_API_KEY"] = ask("Z.AI API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "GLM-4.7")) or ""
+        cfg["GLM_CODING_API_KEY"]   = cfg["OPENAI_API_KEY"]
+        cfg["GLM_CODING_MODEL"]     = cfg["OPENAI_MODEL"]
+
     elif provider == "anthropic":
         cfg["OPENAI_API_URL"] = "https://api.anthropic.com/v1"
         cfg["OPENAI_API_KEY"] = ask("Anthropic API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
@@ -318,12 +327,13 @@ def run_wizard():
     section("Step 3 — Fallback Providers  (optional)")
     info("Bot tries these in order if primary fails. Press Enter to skip any.")
     _fallbacks = [
-        ("OpenRouter API Key", "OPENROUTER_API_KEY", "https://openrouter.ai — free models available"),
-        ("Groq API Key",       "GROQ_API_KEY",        "https://console.groq.com — free"),
-        ("Mistral API Key",    "MISTRAL_API_KEY",      "https://console.mistral.ai"),
-        ("xAI Grok API Key",   "XAI_API_KEY",          "https://console.x.ai"),
-        ("GLM API Key",        "GLM_API_KEY",           "https://open.bigmodel.cn"),
-        ("Ollama model name",  "OLLAMA_MODEL",          "e.g. llama3.2 — local"),
+        ("OpenRouter API Key",      "OPENROUTER_API_KEY", "https://openrouter.ai — free models available"),
+        ("Groq API Key",           "GROQ_API_KEY",        "https://console.groq.com — free"),
+        ("Mistral API Key",        "MISTRAL_API_KEY",      "https://console.mistral.ai"),
+        ("xAI Grok API Key",       "XAI_API_KEY",          "https://console.x.ai"),
+        ("GLM API Key",            "GLM_API_KEY",           "https://open.bigmodel.cn"),
+        ("GLM Coding API Key",     "GLM_CODING_API_KEY",    "https://z.ai — GLM-4.7 coding model"),
+        ("Ollama model name",      "OLLAMA_MODEL",          "e.g. llama3.2 — local"),
     ]
     for label, key, hint in _fallbacks:
         if cfg.get(key): continue  # already set as primary
@@ -376,12 +386,19 @@ def run_wizard():
 
     # ── 8. Image Generation ───────────────────────────────────────────────────
     section("Step 8 — Image Generation  (optional)")
-    info("Primary: fal.ai (FLUX.1 Schnell) — fast, free tier, get key at https://fal.ai")
+    info("Free option: HuggingFace (FLUX.1-schnell) — get token at https://huggingface.co/settings/tokens")
+    info("Paid option: fal.ai (FLUX.1 Schnell) — get key at https://fal.ai")
     info("Fallback: Google Gemini Nano Banana — get key at https://aistudio.google.com/apikey")
-    fal_key = ask("fal.ai API Key (recommended)", default=e.get("FAL_KEY"), optional=True, secret=True)
+    hf_token = ask("HuggingFace Token (free, recommended)", default=e.get("HF_TOKEN"), optional=True, secret=True)
+    if hf_token:
+        cfg["HF_TOKEN"] = hf_token
+        ok("HuggingFace FLUX.1-schnell enabled — say 'generate an image of...' in Telegram")
+    else:
+        ok("Skipped HuggingFace")
+    fal_key = ask("fal.ai API Key (optional)", default=e.get("FAL_KEY"), optional=True, secret=True)
     if fal_key:
         cfg["FAL_KEY"] = fal_key
-        ok("fal.ai FLUX enabled — say 'generate an image of...' in Telegram")
+        ok("fal.ai FLUX enabled")
     else:
         ok("Skipped fal.ai")
     # Gemini fallback

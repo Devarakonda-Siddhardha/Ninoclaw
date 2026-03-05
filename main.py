@@ -14,12 +14,14 @@ from telegram.ext import Application
 from telegram import __version__ as ptb_version
 from config import (
     TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL,
-    OPENAI_MODEL, OPENAI_API_URL, OPENAI_API_KEY, AGENT_NAME, USER_NAME, BOT_PURPOSE, TIMEZONE
+    OPENAI_MODEL, OPENAI_API_URL, OPENAI_API_KEY, AGENT_NAME, USER_NAME, BOT_PURPOSE, TIMEZONE,
+    OWNER_ID
 )
 import telegram_bot as telegram_module  # Import our local telegram module
 from ai import test_connection
 from tasks import task_manager
 from bg_agent import bg_runner
+from security_audit import security_auditor
 
 def print_banner():
     """Print startup banner"""
@@ -243,6 +245,11 @@ def main():
     bg_runner.notify_fn = _tg_notify
     bg_runner.start()
     print("✅ Background agent runner started")
+
+    # Start security auditor (30-min checks, alerts owner on issues)
+    if OWNER_ID:
+        security_auditor.start(_tg_notify, OWNER_ID)
+        print("✅ Security auditor started (every 30 min)")
 
     # Start Discord bot if configured
     if DISCORD_BOT_TOKEN:

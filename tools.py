@@ -649,6 +649,6 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         if result is not None:
             return result
     except Exception as e:
-        pass
+        return f"❌ Skill error ({tool_name}): {e}"
 
     return f"Unknown tool: {tool_name}"

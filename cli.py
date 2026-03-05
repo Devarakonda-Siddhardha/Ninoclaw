@@ -47,6 +47,12 @@ HELP = f"""
   {G}think{RST}              Toggle Ollama thinking mode (Qwen3 only)
     {DIM}ninoclaw think{RST}          Show current state
     {DIM}ninoclaw think on|off{RST}   Enable/disable thinking
+  {G}integrations{RST}       Manage third-party integrations
+    {DIM}ninoclaw integrations{RST}                          List all integrations & key status
+    {DIM}ninoclaw integrations slack <webhook_url>{RST}      Save SLACK_WEBHOOK_URL
+    {DIM}ninoclaw integrations github <token>{RST}           Save GITHUB_TOKEN
+    {DIM}ninoclaw integrations spotify <id> <secret> <rt>{RST} Save Spotify credentials
+    {DIM}ninoclaw integrations gcal <path/to/creds.json>{RST} Save Google Calendar credentials path
   {G}version{RST}            Show current version (git commit)
 
 {W}Examples:{RST}
@@ -277,38 +283,47 @@ def cmd_imagegen(args):
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     env = dotenv_values(env_path)
     fal_key    = env.get("FAL_KEY", "")
+    hf_token   = env.get("HF_TOKEN", "")
     gemini_key = env.get("GEMINI_API_KEY", "")
 
     if not args:
         print(f"\n{C}🎨 Image Generation{RST}")
         if fal_key:
-            print(f"  {G}●{RST} fal.ai (FLUX)  — {fal_key[:8]}...  {G}✓ primary{RST}")
+            print(f"  {G}●{RST} fal.ai (FLUX)         — {fal_key[:8]}...  {G}✓ primary{RST}")
         else:
-            print(f"  {R}○{RST} fal.ai (FLUX)  — not set  {DIM}(recommended){RST}")
+            print(f"  {R}○{RST} fal.ai (FLUX)         — not set")
+        if hf_token:
+            print(f"  {G}●{RST} HuggingFace (FLUX.1)  — {hf_token[:8]}...  {G}✓ free{RST}")
+        else:
+            print(f"  {DIM}○ HuggingFace (FLUX.1) — not set  (free at huggingface.co){RST}")
         if gemini_key:
-            print(f"  {G}●{RST} Gemini Nano Banana — {gemini_key[:8]}...  {DIM}(fallback){RST}")
+            print(f"  {G}●{RST} Gemini Nano Banana     — {gemini_key[:8]}...  {DIM}(fallback){RST}")
         else:
-            print(f"  {DIM}○ Gemini Nano Banana — not set (fallback){RST}")
-        if not fal_key and not gemini_key:
-            print(f"\n  {DIM}Get a free fal.ai key at https://fal.ai → Dashboard → API Keys")
-            print(f"  Usage: ninoclaw imagegen fal <key>   (recommended)")
+            print(f"  {DIM}○ Gemini Nano Banana     — not set (fallback){RST}")
+        if not fal_key and not hf_token and not gemini_key:
+            print(f"\n  {DIM}Recommended: get a free HF token at https://huggingface.co/settings/tokens")
+            print(f"  Usage: ninoclaw imagegen hf <token>")
+            print(f"         ninoclaw imagegen fal <key>")
             print(f"         ninoclaw imagegen gemini <key>{RST}")
         print()
         return
 
     if len(args) < 2:
-        print(f"\n{R}Usage: ninoclaw imagegen fal|gemini <api-key>{RST}\n")
+        print(f"\n{R}Usage: ninoclaw imagegen hf|fal|gemini <api-key>{RST}\n")
         return
 
     provider, key = args[0].lower(), args[1].strip()
-    if provider == "fal":
+    if provider in ("hf", "huggingface"):
+        set_key(env_path, "HF_TOKEN", key)
+        print(f"\n{G}✔  HuggingFace token saved{RST} — FLUX.1-schnell enabled (free)")
+    elif provider == "fal":
         set_key(env_path, "FAL_KEY", key)
-        print(f"\n{G}✔  fal.ai key saved{RST} — FLUX.1 Schnell enabled (fast + free tier)")
+        print(f"\n{G}✔  fal.ai key saved{RST} — FLUX.1 Schnell enabled")
     elif provider == "gemini":
         set_key(env_path, "GEMINI_API_KEY", key)
         print(f"\n{G}✔  Gemini key saved{RST} — Nano Banana enabled (fallback)")
     else:
-        print(f"\n{R}Usage: ninoclaw imagegen fal|gemini <api-key>{RST}\n")
+        print(f"\n{R}Usage: ninoclaw imagegen hf|fal|gemini <api-key>{RST}\n")
         return
     print(f"{DIM}Restart the bot: ninoclaw start{RST}\n")
 
@@ -383,6 +398,137 @@ def cmd_think(args):
     print(f"{DIM}Restart the bot for changes to take effect: ninoclaw start{RST}\n")
 
 
+def cmd_integrations(args):
+    """Manage third-party integration credentials"""
+    from dotenv import dotenv_values, set_key
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    env = dotenv_values(env_path) if os.path.exists(env_path) else {}
+
+    INTEGRATION_VARS = [
+        ("SLACK_WEBHOOK_URL",       "Slack Webhook"),
+        ("SLACK_BOT_TOKEN",         "Slack Bot Token"),
+        ("SLACK_CHANNEL",           "Slack Channel"),
+        ("GITHUB_TOKEN",            "GitHub Token"),
+        ("SPOTIFY_CLIENT_ID",       "Spotify Client ID"),
+        ("SPOTIFY_CLIENT_SECRET",   "Spotify Client Secret"),
+        ("SPOTIFY_REFRESH_TOKEN",   "Spotify Refresh Token"),
+        ("GOOGLE_CREDENTIALS_JSON", "Google Credentials JSON"),
+        ("GOOGLE_CALENDAR_ID",      "Google Calendar ID"),
+    ]
+
+    if not args:
+        # Show all integrations with key status
+        print(f"\n{C}🔌 Integrations{RST}")
+        print(f"  {DIM}{'─'*44}{RST}")
+        # Loaded skills
+        try:
+            import skill_manager
+            skills = skill_manager.list_skills()
+            if skills:
+                for key, info in skills.items():
+                    icon = info.get("icon", "🔧")
+                    name = info.get("name", key)
+                    req  = info.get("requires_key", False)
+                    tag  = f"{Y}key required{RST}" if req else f"{G}active{RST}"
+                    print(f"  {icon} {W}{name:<28}{RST} {tag}")
+            else:
+                print(f"  {DIM}No skills loaded.{RST}")
+        except Exception as e:
+            print(f"  {DIM}Could not load skills: {e}{RST}")
+        print(f"\n  {DIM}{'─'*44}{RST}")
+        # Env var status
+        for var, label in INTEGRATION_VARS:
+            val = env.get(var, "")
+            if val:
+                display = f"{val[:6]}...{val[-4:]}" if len(val) > 12 else val
+                status  = f"{G}✔  {display}{RST}"
+            else:
+                status = f"{R}✗  Not set{RST}"
+            print(f"  {W}{label:<28}{RST} {status}")
+        print()
+        return
+
+    sub = args[0].lower()
+
+    if sub == "slack" and len(args) >= 2:
+        set_key(env_path, "SLACK_WEBHOOK_URL", args[1])
+        print(f"\n{G}✔  SLACK_WEBHOOK_URL saved.{RST}{DIM}  Restart: ninoclaw start{RST}\n")
+
+    elif sub == "github" and len(args) >= 2:
+        set_key(env_path, "GITHUB_TOKEN", args[1])
+        print(f"\n{G}✔  GITHUB_TOKEN saved.{RST}{DIM}  Restart: ninoclaw start{RST}\n")
+
+    elif sub == "spotify" and len(args) >= 4:
+        set_key(env_path, "SPOTIFY_CLIENT_ID",     args[1])
+        set_key(env_path, "SPOTIFY_CLIENT_SECRET", args[2])
+        set_key(env_path, "SPOTIFY_REFRESH_TOKEN", args[3])
+        print(f"\n{G}✔  Spotify credentials saved.{RST}{DIM}  Restart: ninoclaw start{RST}\n")
+
+    elif sub == "spotify-setup" and len(args) >= 3:
+        client_id, client_secret = args[1], args[2]
+        import urllib.parse, requests as _req, base64 as _b64
+
+        redirect_uri = "https://google.com"
+        scope = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
+        auth_url = (
+            "https://accounts.spotify.com/authorize?"
+            + urllib.parse.urlencode({
+                "client_id": client_id,
+                "response_type": "code",
+                "redirect_uri": redirect_uri,
+                "scope": scope,
+            })
+        )
+
+        print(f"\n{C}🎵 Spotify OAuth Setup{RST}")
+        print(f"\n{W}1. Open this URL in Chrome:{RST}\n")
+        print(f"   {B}{auth_url}{RST}\n")
+        print(f"{W}2. Click Allow on the Spotify page")
+        print(f"3. Chrome goes to google.com — copy the FULL URL from Chrome address bar")
+        print(f"   It looks like: https://www.google.com/?code=AQBxyz...{RST}\n")
+        raw = input(f"{W}4. Paste that full URL here:{RST} ").strip()
+        if not raw:
+            print(f"{R}Nothing entered.{RST}")
+            return
+        parsed = urllib.parse.urlparse(raw)
+        code = urllib.parse.parse_qs(parsed.query).get("code", [""])[0]
+        if not code:
+            print(f"{R}❌ Could not find code in URL. Make sure you copied the full URL.{RST}")
+            return
+
+        creds_b64 = _b64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        resp = _req.post(
+            "https://accounts.spotify.com/api/token",
+            data={"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
+            headers={"Authorization": f"Basic {creds_b64}"},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            print(f"{R}❌ Token exchange failed: {resp.text}{RST}")
+            return
+        refresh_token = resp.json().get("refresh_token", "")
+        if not refresh_token:
+            print(f"{R}❌ No refresh token returned.{RST}")
+            return
+        set_key(env_path, "SPOTIFY_CLIENT_ID",     client_id)
+        set_key(env_path, "SPOTIFY_CLIENT_SECRET", client_secret)
+        set_key(env_path, "SPOTIFY_REFRESH_TOKEN", refresh_token)
+        print(f"\n{G}✔  Spotify connected!{RST} Refresh token saved.")
+        print(f"{DIM}Restart: ninoclaw start{RST}\n")
+
+    elif sub == "gcal" and len(args) >= 2:
+        set_key(env_path, "GOOGLE_CREDENTIALS_JSON", args[1])
+        print(f"\n{G}✔  GOOGLE_CREDENTIALS_JSON saved.{RST}{DIM}  Restart: ninoclaw start{RST}\n")
+
+    else:
+        print(f"\n{W}Usage:{RST}")
+        print(f"  {G}ninoclaw integrations{RST}                            List all")
+        print(f"  {G}ninoclaw integrations slack{RST} <webhook_url>        Save webhook")
+        print(f"  {G}ninoclaw integrations github{RST} <token>             Save token")
+        print(f"  {G}ninoclaw integrations spotify{RST} <id> <secret> <rt> Save credentials")
+        print(f"  {G}ninoclaw integrations gcal{RST} <path/to/creds.json>  Save creds path\n")
+
+
 def main():
     args = sys.argv[1:]
     cmd  = args[0].lower() if args else "start"
@@ -409,6 +555,11 @@ def main():
         cmd_route(args[1:])
     elif cmd in ("imagegen", "image"):
         cmd_imagegen(args[1:])
+    elif cmd == "audit":
+        from security_audit import security_auditor
+        print(security_auditor.run_now())
+    elif cmd == "integrations":
+        cmd_integrations(args[1:])
     elif cmd == "version":
         cmd_version()
     elif cmd in ("help", "--help", "-h"):
