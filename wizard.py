@@ -294,7 +294,7 @@ def run_wizard():
         info("Get key: https://z.ai  (GLM Coding Plan from $3/month)")
         cfg["OPENAI_API_URL"] = "https://api.z.ai/api/coding/paas/v4"
         cfg["OPENAI_API_KEY"] = ask("Z.AI API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
-        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "GLM-4.7")) or ""
+        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "glm-4.7")) or ""
         cfg["GLM_CODING_API_KEY"]   = cfg["OPENAI_API_KEY"]
         cfg["GLM_CODING_MODEL"]     = cfg["OPENAI_MODEL"]
 

@@ -418,8 +418,8 @@ def config_page():
     </div>
     <div>
       <label class="form-label">GLM Coding Model</label>
-      <input class="form-control" name="GLM_CODING_MODEL" value="{{ env.get('GLM_CODING_MODEL','GLM-4.7') }}">
-      <small style="color:var(--muted)">Options: GLM-4.7 (complex tasks), GLM-4.5-air (faster/lighter)</small>
+      <input class="form-control" name="GLM_CODING_MODEL" value="{{ env.get('GLM_CODING_MODEL','glm-4.7') }}">
+      <small style="color:var(--muted)">Options: glm-4.7 (complex tasks), glm-4.5-air (faster/lighter)</small>
     </div>
   </div>
 </div>

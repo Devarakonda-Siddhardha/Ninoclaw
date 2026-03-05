@@ -305,11 +305,31 @@ Your name is {agent_name}. You are talking to {user_name}.
 This is an automated task execution. Be helpful and concise."""
 
         try:
-            response = chat(message=command, system_prompt=personalized_prompt, history=[])
+            from tools import get_tool_definitions, execute_tool
+            tools = get_tool_definitions()
+            result = chat(message=command, system_prompt=personalized_prompt, history=[], tools=tools)
+
+            # Handle tool calls from the scheduled job
+            tool_results = []
+            if isinstance(result, dict) and result.get("tool_calls"):
+                for tc in result["tool_calls"]:
+                    fn = tc.get("function", {})
+                    tool_name = fn.get("name", "")
+                    args = fn.get("arguments", {})
+                    if isinstance(args, str):
+                        import json as _json
+                        try: args = _json.loads(args)
+                        except Exception: args = {}
+                    tool_output = execute_tool(tool_name, args, user_id)
+                    tool_results.append(f"✅ {tool_name}: {tool_output}")
+                response = "\n".join(tool_results) if tool_results else "✅ Done."
+            else:
+                response = result if isinstance(result, str) else (result or {}).get("content", "✅ Done.")
+
             if self.telegram_app:
                 await self.telegram_app.bot.send_message(
                     chat_id=user_id,
-                    text=f"🔄 Scheduled task: {job['name']}\n\n{response}"
+                    text=f"⏰ Scheduled: {job['name']}\n\n{response}"
                 )
 
             conn = _get_conn()

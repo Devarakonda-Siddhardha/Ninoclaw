@@ -82,7 +82,7 @@ _provider_chain = [
     # ZhipuAI GLM (China endpoint)
     _provider("https://open.bigmodel.cn/api/paas/v4",  "GLM_API_KEY",        "GLM_MODEL",        "glm-4-flash"),
     # ZhipuAI GLM Coding Plan (global endpoint — glm-4.7/4.5-air, set GLM_CODING_API_KEY)
-    _provider("https://api.z.ai/api/coding/paas/v4",   "GLM_CODING_API_KEY", "GLM_CODING_MODEL", "GLM-4.7"),
+    _provider("https://api.z.ai/api/coding/paas/v4",   "GLM_CODING_API_KEY", "GLM_CODING_MODEL", "glm-4.7"),
     # MiniMax
     _provider(
         f"https://api.minimax.chat/v1",
