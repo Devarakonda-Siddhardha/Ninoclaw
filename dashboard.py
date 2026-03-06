@@ -96,6 +96,7 @@ BASE = """<!DOCTYPE html>
   .card-header {
     padding: 14px 20px; border-bottom: 1px solid var(--border);
     font-weight: 600; font-size: 0.95rem; display: flex; align-items: center; gap: 8px;
+    color: var(--text) !important;
   }
   .card-body { padding: 20px; }
   .form-label { color: var(--muted); font-size: 0.82rem; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
@@ -1308,13 +1309,17 @@ def run_dashboard():
     port = int(env.get("DASHBOARD_PORT", os.getenv("DASHBOARD_PORT", "8080")))
     host = "0.0.0.0"
 
-    # Set a default password if none exists
-    if not env.get("DASHBOARD_PASSWORD"):
-        save_env_key("DASHBOARD_PASSWORD", "admin")
+    # Enforce a non-default dashboard password on startup.
+    pwd = (env.get("DASHBOARD_PASSWORD") or "").strip()
+    if not pwd or pwd == "admin":
+        import secrets
+        pwd = secrets.token_urlsafe(18)
+        save_env_key("DASHBOARD_PASSWORD", pwd)
+        print("⚠️  Generated a secure DASHBOARD_PASSWORD (default/empty password was unsafe).")
 
     print(f"\n🦀 Ninoclaw Dashboard")
     print(f"   URL:      http://localhost:{port}")
-    print(f"   Password: {env.get('DASHBOARD_PASSWORD', 'admin')}")
+    print(f"   Password: {pwd}")
     print(f"   (change it in Config page or set DASHBOARD_PASSWORD in .env)\n")
     app.run(host=host, port=port, debug=False)
 

@@ -5,6 +5,7 @@ Windows-focused. No API keys needed.
 import subprocess
 import sys
 import os
+import re
 
 SKILL_INFO = {
     "name": "app_launcher",
@@ -58,45 +59,45 @@ TOOLS = [
 
 _WIN_APPS = {
     # Browsers
-    "chrome": "start chrome",
-    "google chrome": "start chrome",
-    "firefox": "start firefox",
-    "edge": "start msedge",
-    "microsoft edge": "start msedge",
-    "brave": "start brave",
+    "chrome": "chrome.exe",
+    "google chrome": "chrome.exe",
+    "firefox": "firefox.exe",
+    "edge": "msedge.exe",
+    "microsoft edge": "msedge.exe",
+    "brave": "brave.exe",
     # Dev tools
-    "vscode": "code",
-    "vs code": "code",
-    "visual studio code": "code",
-    "terminal": "start wt",
-    "windows terminal": "start wt",
-    "cmd": "start cmd",
-    "powershell": "start powershell",
-    "git bash": "start \"\" \"C:\\Program Files\\Git\\git-bash.exe\"",
+    "vscode": "Code.exe",
+    "vs code": "Code.exe",
+    "visual studio code": "Code.exe",
+    "terminal": "wt.exe",
+    "windows terminal": "wt.exe",
+    "cmd": "cmd.exe",
+    "powershell": "powershell.exe",
+    "git bash": "C:\\Program Files\\Git\\git-bash.exe",
     # System
-    "notepad": "start notepad",
-    "calculator": "start calc",
-    "calc": "start calc",
-    "file explorer": "start explorer",
-    "explorer": "start explorer",
-    "task manager": "start taskmgr",
-    "settings": "start ms-settings:",
-    "control panel": "start control",
-    "paint": "start mspaint",
-    "snipping tool": "start snippingtool",
+    "notepad": "notepad.exe",
+    "calculator": "calc.exe",
+    "calc": "calc.exe",
+    "file explorer": "explorer.exe",
+    "explorer": "explorer.exe",
+    "task manager": "taskmgr.exe",
+    "settings": "ms-settings:",
+    "control panel": "control.exe",
+    "paint": "mspaint.exe",
+    "snipping tool": "snippingtool.exe",
     # Media
-    "spotify": "start spotify:",
-    "vlc": "start vlc",
+    "spotify": "spotify:",
+    "vlc": "vlc.exe",
     # Office
-    "word": "start winword",
-    "excel": "start excel",
-    "powerpoint": "start powerpnt",
+    "word": "winword.exe",
+    "excel": "excel.exe",
+    "powerpoint": "powerpnt.exe",
     # Communication
-    "whatsapp": "start whatsapp:",
-    "telegram": "start telegram:",
-    "discord": "start discord:",
-    "teams": "start msteams:",
-    "zoom": "start zoom",
+    "whatsapp": "whatsapp:",
+    "telegram": "tg:",
+    "discord": "discord:",
+    "teams": "msteams:",
+    "zoom": "zoom.exe",
 }
 
 # Process names for closing apps
@@ -148,21 +149,23 @@ def _open_app(app_name):
         return "❌ App launcher currently supports Windows only."
 
     name = app_name.lower().strip()
-    cmd = _WIN_APPS.get(name)
+    target = _WIN_APPS.get(name)
 
-    if not cmd:
+    if not target:
         # Try fuzzy match
         match = _fuzzy_match(name, _WIN_APPS)
         if match:
-            cmd = _WIN_APPS[match]
+            target = _WIN_APPS[match]
             name = match  # Use the matched name for the response
 
-    if not cmd:
-        # Last resort: try to launch it directly
-        cmd = f"start {name}"
+    if not target:
+        return (
+            f"❌ Unknown app: {app_name}. For security, only known apps are allowed. "
+            f"Try names like Chrome, VS Code, Notepad, Spotify, etc."
+        )
 
     try:
-        subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.startfile(target)  # noqa: S606 - starts a fixed local app target/URI
         return f"🚀 Opened **{name.title()}**!"
     except Exception as e:
         return f"❌ Could not open {app_name}: {e}"
@@ -173,12 +176,20 @@ def _close_app(app_name):
         return "❌ App launcher currently supports Windows only."
 
     name = app_name.lower().strip()
-    process = _WIN_PROCESSES.get(name, f"{name}.exe")
+    process = _WIN_PROCESSES.get(name)
+    if not process:
+        safe = re.sub(r"[^a-z0-9_.-]", "", name)
+        if not safe:
+            return "❌ Invalid app/process name."
+        process = safe if safe.endswith(".exe") else f"{safe}.exe"
+
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.exe", process):
+        return "❌ Invalid process name."
 
     try:
         result = subprocess.run(
-            f"taskkill /IM \"{process}\" /F",
-            shell=True, capture_output=True, text=True, timeout=10
+            ["taskkill", "/IM", process, "/F"],
+            shell=False, capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:
             return f"✅ Closed **{app_name}**."
@@ -196,8 +207,17 @@ def _list_running():
 
     try:
         result = subprocess.run(
-            'powershell -Command "Get-Process | Where-Object {$_.MainWindowTitle -ne \'\'} | Select-Object -Property Name,MainWindowTitle | Format-Table -AutoSize"',
-            shell=True, capture_output=True, text=True, timeout=10
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | "
+                "Select-Object -Property Name,MainWindowTitle | Format-Table -AutoSize",
+            ],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         apps = result.stdout.strip()
         if not apps:
