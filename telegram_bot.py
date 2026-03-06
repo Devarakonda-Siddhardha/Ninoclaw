@@ -540,6 +540,41 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             except Exception:
                 pass
 
+    # Parse stepfun/XML-style <tool_call><function=name>...</function></tool_call>
+    if not tool_calls and final_response:
+        import re as _re2, json as _json2
+        tc_match = _re2.search(r'<tool_call>\s*<function=(\w+)>(.*?)</function>\s*</tool_call>', final_response, _re2.DOTALL)
+        if tc_match:
+            try:
+                tool_name = tc_match.group(1)
+                params_text = tc_match.group(2).strip()
+                # Parse <parameter=key>value</parameter> pairs
+                params = {}
+                for pm in _re2.finditer(r'<parameter=(\w+)>\s*(.*?)\s*</parameter>', params_text, _re2.DOTALL):
+                    params[pm.group(1)] = pm.group(2).strip()
+                if tool_name:
+                    tool_calls = [{"function": {"name": tool_name, "arguments": params}}]
+                    final_response = _re2.sub(r'(?s)<tool_call>.*?</tool_call>', '', final_response).strip()
+            except Exception:
+                pass
+
+    # Parse GLM-style <tool_call>name>\n<parameter=key>value</parameter>\n</name>
+    if not tool_calls and final_response:
+        import re as _re2
+        tc_match = _re2.search(r'<tool_call>(\w+)>\s*(.*?)\s*</\1>', final_response, _re2.DOTALL)
+        if tc_match:
+            try:
+                tool_name = tc_match.group(1)
+                params_text = tc_match.group(2).strip()
+                params = {}
+                for pm in _re2.finditer(r'<parameter=(\w+)>\s*(.*?)\s*</parameter>', params_text, _re2.DOTALL):
+                    params[pm.group(1)] = pm.group(2).strip()
+                if tool_name:
+                    tool_calls = [{"function": {"name": tool_name, "arguments": params}}]
+                    final_response = _re2.sub(r'(?s)<tool_call>\w+>.*?</\w+>', '', final_response).strip()
+            except Exception:
+                pass
+
     # Direct intent mapping — bypass model hallucination for common tool commands
     if not tool_calls:
         msg_l = user_message.lower().strip()
