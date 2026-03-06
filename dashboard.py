@@ -1301,6 +1301,28 @@ def builds_serve(name, filename):
     return send_file(str(file_path))
 
 
+@app.route("/builds-assets/<path:filename>")
+def builds_assets(filename):
+    """Serve shared asset files used by generated websites."""
+    if "/" in filename or "\\" in filename:
+        return "Asset not found", 404
+    if not re.fullmatch(r"[a-zA-Z0-9._-]{1,120}", filename or ""):
+        return "Asset not found", 404
+
+    assets_dir = (Path(__file__).parent / "websites" / "assets").resolve()
+    file_path = (assets_dir / filename).resolve()
+
+    try:
+        file_path.relative_to(assets_dir)
+    except ValueError:
+        return "Access denied", 403
+
+    if not file_path.is_file():
+        return "Asset not found", 404
+
+    return send_file(str(file_path))
+
+
 # ─── entry point ────────────────────────────────────────────────────────────
 
 def run_dashboard():

@@ -6,6 +6,8 @@ Fallback: Google Gemini Nano Banana (gemini-3.1-flash-image-preview)
 import os
 import base64
 import tempfile
+import uuid
+from pathlib import Path
 import requests
 
 SKILL_INFO = {
@@ -41,6 +43,25 @@ TOOLS = [{
 }]
 
 
+def _tmp_png_file():
+    return tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir=tempfile.gettempdir())
+
+
+def _persist_for_web(temp_path):
+    """Copy generated image into websites/assets and return public URL."""
+    try:
+        project_root = Path(__file__).resolve().parents[1]
+        assets_dir = project_root / "websites" / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"gen_{uuid.uuid4().hex[:12]}.png"
+        dest = assets_dir / filename
+        dest.write_bytes(Path(temp_path).read_bytes())
+        port = os.getenv("DASHBOARD_PORT", "8080")
+        return f"http://localhost:{port}/builds-assets/{filename}"
+    except Exception:
+        return ""
+
+
 def _generate_fal(prompt, quality, fal_key):
     """Generate image via fal.ai REST API (no SDK needed)."""
     model = "fal-ai/flux/schnell" if quality == "fast" else "fal-ai/flux/dev"
@@ -67,7 +88,7 @@ def _generate_fal(prompt, quality, fal_key):
     # Download the image
     img_resp = requests.get(img_url, timeout=60)
     img_resp.raise_for_status()
-    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir="/tmp")
+    tmp = _tmp_png_file()
     tmp.write(img_resp.content)
     tmp.close()
     return tmp.name, None
@@ -83,7 +104,7 @@ def _generate_hf(prompt, hf_token):
     payload = {"inputs": prompt}
     resp = requests.post(url, json=payload, headers=headers, timeout=120)
     resp.raise_for_status()
-    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir="/tmp")
+    tmp = _tmp_png_file()
     tmp.write(resp.content)
     tmp.close()
     return tmp.name, None
@@ -108,7 +129,7 @@ def _generate_gemini(prompt, gemini_key):
     if not image_b64:
         return None, "No image returned from Gemini"
     img_bytes = base64.b64decode(image_b64)
-    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir="/tmp")
+    tmp = _tmp_png_file()
     tmp.write(img_bytes)
     tmp.close()
     return tmp.name, None
@@ -142,6 +163,9 @@ def execute(tool_name, arguments):
         try:
             path, err = _generate_fal(prompt, quality, fal_key)
             if path:
+                image_url = _persist_for_web(path)
+                if image_url:
+                    return f"[IMAGE:{path}]\n[IMAGE_URL:{image_url}]\n🎨 {prompt}"
                 return f"[IMAGE:{path}]\n🎨 {prompt}"
             errors.append(f"fal.ai: {err}")
         except requests.HTTPError as e:
@@ -154,6 +178,9 @@ def execute(tool_name, arguments):
         try:
             path, err = _generate_hf(prompt, hf_token)
             if path:
+                image_url = _persist_for_web(path)
+                if image_url:
+                    return f"[IMAGE:{path}]\n[IMAGE_URL:{image_url}]\n🎨 {prompt}"
                 return f"[IMAGE:{path}]\n🎨 {prompt}"
             errors.append(f"HuggingFace: {err}")
         except requests.HTTPError as e:
@@ -169,6 +196,9 @@ def execute(tool_name, arguments):
         try:
             path, err = _generate_gemini(prompt, gemini_key)
             if path:
+                image_url = _persist_for_web(path)
+                if image_url:
+                    return f"[IMAGE:{path}]\n[IMAGE_URL:{image_url}]\n🎨 {prompt}"
                 return f"[IMAGE:{path}]\n🎨 {prompt}"
             errors.append(f"Gemini: {err}")
         except requests.HTTPError as e:

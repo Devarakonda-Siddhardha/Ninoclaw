@@ -1,8 +1,11 @@
 """
 Telegram bot for Ninoclaw
 """
+import os
 import re
+import uuid
 import base64
+from pathlib import Path
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from ai import chat, list_models, test_connection
@@ -13,6 +16,83 @@ from tools import get_tool_definitions, execute_tool
 from summarizer import extract_urls, is_youtube, get_youtube_transcript, get_url_content, build_summary_prompt
 
 memory = Memory()
+
+WEB_ROOT = Path(__file__).resolve().parent / "websites"
+WEB_ASSETS_DIR = WEB_ROOT / "assets"
+MAX_TOOL_ROUNDS = 6
+
+
+def _public_base_url():
+    port = os.getenv("DASHBOARD_PORT", "8080")
+    return f"http://localhost:{port}"
+
+
+def _save_image_asset(image_bytes, prefix="image", suffix=".jpg"):
+    """Persist bytes for website reuse and return public URL."""
+    WEB_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+    safe_suffix = suffix if re.fullmatch(r"\.[a-zA-Z0-9]{1,5}", suffix or "") else ".jpg"
+    filename = f"{prefix}_{uuid.uuid4().hex[:12]}{safe_suffix.lower()}"
+    asset_path = WEB_ASSETS_DIR / filename
+    asset_path.write_bytes(bytes(image_bytes))
+    return f"{_public_base_url()}/builds-assets/{filename}"
+
+
+def _extract_image_paths(text):
+    if not isinstance(text, str):
+        return []
+    return re.findall(r"\[IMAGE:([^\]]+)\]", text)
+
+
+def _extract_image_urls(text):
+    if not isinstance(text, str):
+        return []
+    return re.findall(r"\[IMAGE_URL:([^\]]+)\]", text)
+
+
+def _strip_image_markers(text):
+    if not isinstance(text, str):
+        return text
+    cleaned = re.sub(r"\[IMAGE:[^\]]*\]\n?", "", text)
+    cleaned = re.sub(r"\[IMAGE_URL:[^\]]*\]\n?", "", cleaned)
+    return cleaned.strip()
+
+
+def _build_tool_feedback(step_results, available_image_urls):
+    clean_step = [_strip_image_markers(r) for r in step_results]
+    parts = ["Tool results:\n" + "\n\n".join(r for r in clean_step if r)]
+    if available_image_urls:
+        image_list = "\n".join(f"- {u}" for u in available_image_urls)
+        parts.append(
+            "Available image URLs for website/image tasks (use them directly in HTML <img src>):\n"
+            + image_list
+        )
+    parts.append("Continue until the task is fully done. Use more tools if needed; otherwise provide final answer.")
+    return "\n\n".join(parts)
+
+
+async def _send_images_from_tool_results(update: Update, tool_results):
+    sent_any = False
+    sent_paths = set()
+    for result in tool_results:
+        paths = _extract_image_paths(result)
+        if not paths:
+            continue
+        caption = _strip_image_markers(result) or "Generated image"
+        for img_path in paths:
+            if img_path in sent_paths:
+                continue
+            sent_paths.add(img_path)
+            try:
+                with open(img_path, "rb") as f:
+                    await update.message.reply_photo(photo=f, caption=caption[:1024])
+                try:
+                    os.unlink(img_path)
+                except Exception:
+                    pass
+                sent_any = True
+            except Exception as e:
+                await update.message.reply_text(f"Could not send image: {e}")
+    return sent_any
 
 # ── File extensions for known code languages ─────────────────────────────────
 _CODE_EXTS = {
@@ -511,150 +591,192 @@ You have access to tools to schedule and manage recurring tasks. When the user w
     # Get AI response — use streaming for plain messages, non-streaming when tools needed
     await update.message.chat.send_action(action="typing")
 
-    # First check if tools are needed (non-streaming path)
+    tools = get_tool_definitions()
+
+    def _extract_tool_calls(resp_obj, text_for_direct_map=None, allow_direct_map=False):
+        final_text = resp_obj if isinstance(resp_obj, str) else (resp_obj.get("content") or "")
+        tcalls = resp_obj.get("tool_calls") if isinstance(resp_obj, dict) else None
+
+        # Parse hallucinated <tool_code> blocks from models that don't support native function calling
+        if not tcalls and final_text:
+            import re as _re2, json as _json2
+            tc_match = _re2.search(r'<tool_code>\s*(\{.*?\})\s*</tool_code>', final_text, _re2.DOTALL)
+            if tc_match:
+                try:
+                    tc_data = _json2.loads(tc_match.group(1))
+                    tool_name = tc_data.get("name")
+                    tool_args = tc_data.get("arguments", {})
+                    if isinstance(tool_args, str):
+                        tool_args = _json2.loads(tool_args)
+                    if tool_name:
+                        tcalls = [{"function": {"name": tool_name, "arguments": tool_args}}]
+                        final_text = _re2.sub(r'(?s).*?<tool_code>.*?</tool_code>\s*', '', final_text).strip()
+                except Exception:
+                    pass
+
+        # Parse stepfun/XML-style <tool_call><function=name>...</function></tool_call>
+        if not tcalls and final_text:
+            import re as _re2
+            tc_match = _re2.search(r'<tool_call>\s*<function=(\w+)>(.*?)</function>\s*</tool_call>', final_text, _re2.DOTALL)
+            if tc_match:
+                try:
+                    tool_name = tc_match.group(1)
+                    params_text = tc_match.group(2).strip()
+                    params = {}
+                    for pm in _re2.finditer(r'<parameter=(\w+)>\s*(.*?)\s*</parameter>', params_text, _re2.DOTALL):
+                        params[pm.group(1)] = pm.group(2).strip()
+                    if tool_name:
+                        tcalls = [{"function": {"name": tool_name, "arguments": params}}]
+                        final_text = _re2.sub(r'(?s)<tool_call>.*?</tool_call>', '', final_text).strip()
+                except Exception:
+                    pass
+
+        # Parse GLM-style <tool_call>name>\n<parameter=key>value</parameter>\n</name>
+        if not tcalls and final_text:
+            import re as _re2
+            tc_match = _re2.search(r'<tool_call>(\w+)>\s*(.*?)\s*</\1>', final_text, _re2.DOTALL)
+            if tc_match:
+                try:
+                    tool_name = tc_match.group(1)
+                    params_text = tc_match.group(2).strip()
+                    params = {}
+                    for pm in _re2.finditer(r'<parameter=(\w+)>\s*(.*?)\s*</parameter>', params_text, _re2.DOTALL):
+                        params[pm.group(1)] = pm.group(2).strip()
+                    if tool_name:
+                        tcalls = [{"function": {"name": tool_name, "arguments": params}}]
+                        final_text = _re2.sub(r'(?s)<tool_call>\w+>.*?</\w+>', '', final_text).strip()
+                except Exception:
+                    pass
+
+        # Direct intent mapping - bypass model hallucination for common tool commands
+        if allow_direct_map and not tcalls:
+            msg_l = (text_for_direct_map or "").lower().strip()
+            _direct = None
+            if any(w in msg_l for w in ["pause", "stop music", "stop song", "stop playing"]):
+                _direct = ("spotify_play_pause", {})
+            elif any(w in msg_l for w in ["resume", "unpause", "continue playing"]):
+                _direct = ("spotify_play_pause", {})
+            elif any(w in msg_l for w in ["next song", "skip song", "next track", "skip track", "skip this"]):
+                _direct = ("spotify_next", {})
+            elif any(w in msg_l for w in ["previous song", "prev song", "go back", "previous track"]):
+                _direct = ("spotify_previous", {})
+            elif any(w in msg_l for w in ["what's playing", "whats playing", "current song", "currently playing", "what song"]):
+                _direct = ("spotify_current", {})
+            elif msg_l.startswith("play ") and len(msg_l) > 5:
+                query = text_for_direct_map[5:].strip()
+                import re as _re3
+                query = _re3.sub(r'\s*(on spotify|using spotify|spotify)\s*$', '', query, flags=_re3.IGNORECASE).strip()
+                _direct = ("spotify_search_play", {"query": query, "type": "track"})
+            if _direct:
+                tcalls = [{"function": {"name": _direct[0], "arguments": _direct[1]}}]
+                final_text = ""
+
+        return final_text, tcalls
+
     response = chat(
         message=user_message,
         system_prompt=personalized_prompt,
         history=conv_history,
-        tools=get_tool_definitions(),
+        tools=tools,
         force_smart=True  # always use smart model when tools may be involved
     )
+    final_response, tool_calls = _extract_tool_calls(response, text_for_direct_map=user_message, allow_direct_map=True)
 
-    final_response = response if isinstance(response, str) else response.get("content") or ""
-    tool_calls = response.get("tool_calls") if isinstance(response, dict) else None
+    all_tool_results = []
+    available_image_urls = []
+    tool_history = list(conv_history)
+    progress_msg = None
+    last_progress = ""
 
-    # Parse hallucinated <tool_code> blocks from models that don't support native function calling
-    if not tool_calls and final_response:
-        import re as _re2, json as _json2
-        tc_match = _re2.search(r'<tool_code>\s*(\{.*?\})\s*</tool_code>', final_response, _re2.DOTALL)
-        if tc_match:
-            try:
-                tc_data = _json2.loads(tc_match.group(1))
-                tool_name = tc_data.get("name")
-                tool_args = tc_data.get("arguments", {})
-                if isinstance(tool_args, str):
-                    tool_args = _json2.loads(tool_args)
-                if tool_name:
-                    tool_calls = [{"function": {"name": tool_name, "arguments": tool_args}}]
-                    final_response = _re2.sub(r'(?s).*?<tool_code>.*?</tool_code>\s*', '', final_response).strip()
-            except Exception:
-                pass
+    async def _set_progress(text):
+        nonlocal progress_msg, last_progress
+        if text == last_progress:
+            return
+        last_progress = text
+        try:
+            if progress_msg is None:
+                progress_msg = await update.message.reply_text(text)
+            else:
+                await progress_msg.edit_text(text)
+        except Exception:
+            pass
 
-    # Parse stepfun/XML-style <tool_call><function=name>...</function></tool_call>
-    if not tool_calls and final_response:
-        import re as _re2, json as _json2
-        tc_match = _re2.search(r'<tool_call>\s*<function=(\w+)>(.*?)</function>\s*</tool_call>', final_response, _re2.DOTALL)
-        if tc_match:
-            try:
-                tool_name = tc_match.group(1)
-                params_text = tc_match.group(2).strip()
-                # Parse <parameter=key>value</parameter> pairs
-                params = {}
-                for pm in _re2.finditer(r'<parameter=(\w+)>\s*(.*?)\s*</parameter>', params_text, _re2.DOTALL):
-                    params[pm.group(1)] = pm.group(2).strip()
-                if tool_name:
-                    tool_calls = [{"function": {"name": tool_name, "arguments": params}}]
-                    final_response = _re2.sub(r'(?s)<tool_call>.*?</tool_call>', '', final_response).strip()
-            except Exception:
-                pass
+    for round_idx in range(MAX_TOOL_ROUNDS):
+        if not tool_calls:
+            break
 
-    # Parse GLM-style <tool_call>name>\n<parameter=key>value</parameter>\n</name>
-    if not tool_calls and final_response:
-        import re as _re2
-        tc_match = _re2.search(r'<tool_call>(\w+)>\s*(.*?)\s*</\1>', final_response, _re2.DOTALL)
-        if tc_match:
-            try:
-                tool_name = tc_match.group(1)
-                params_text = tc_match.group(2).strip()
-                params = {}
-                for pm in _re2.finditer(r'<parameter=(\w+)>\s*(.*?)\s*</parameter>', params_text, _re2.DOTALL):
-                    params[pm.group(1)] = pm.group(2).strip()
-                if tool_name:
-                    tool_calls = [{"function": {"name": tool_name, "arguments": params}}]
-                    final_response = _re2.sub(r'(?s)<tool_call>\w+>.*?</\w+>', '', final_response).strip()
-            except Exception:
-                pass
-
-    # Direct intent mapping — bypass model hallucination for common tool commands
-    if not tool_calls:
-        msg_l = user_message.lower().strip()
-        _direct = None
-        if any(w in msg_l for w in ["pause", "stop music", "stop song", "stop playing"]):
-            _direct = ("spotify_play_pause", {})
-        elif any(w in msg_l for w in ["resume", "unpause", "continue playing"]):
-            _direct = ("spotify_play_pause", {})
-        elif any(w in msg_l for w in ["next song", "skip song", "next track", "skip track", "skip this"]):
-            _direct = ("spotify_next", {})
-        elif any(w in msg_l for w in ["previous song", "prev song", "go back", "previous track"]):
-            _direct = ("spotify_previous", {})
-        elif any(w in msg_l for w in ["what's playing", "whats playing", "current song", "currently playing", "what song"]):
-            _direct = ("spotify_current", {})
-        elif msg_l.startswith("play ") and len(msg_l) > 5:
-            query = user_message[5:].strip()
-            # Remove trailing "on spotify", "song", etc.
-            import re as _re3
-            query = _re3.sub(r'\s*(on spotify|using spotify|spotify)\s*$', '', query, flags=_re3.IGNORECASE).strip()
-            _direct = ("spotify_search_play", {"query": query, "type": "track"})
-        if _direct:
-            tool_calls = [{"function": {"name": _direct[0], "arguments": _direct[1]}}]
-            final_response = ""
-
-    # Execute tool calls if any
-    tool_results = []
-    if tool_calls:
+        await _set_progress(f"Working... step {round_idx + 1}/{MAX_TOOL_ROUNDS}")
+        step_results = []
         for tool_call in tool_calls:
             tool_name = tool_call.get("function", {}).get("name")
             raw_args = tool_call.get("function", {}).get("arguments", "{}")
             if isinstance(raw_args, str):
                 import json
-                tool_args = json.loads(raw_args)
+                try:
+                    tool_args = json.loads(raw_args)
+                except Exception:
+                    tool_args = {}
             else:
                 tool_args = raw_args
             if tool_name:
+                await _set_progress(f"Working... step {round_idx + 1}: using {tool_name}")
                 print(f"[Tool] Calling: {tool_name}({tool_args})")
                 result = await execute_tool(tool_name, tool_args, user_id, task_manager)
                 print(f"[Tool] Result: {str(result)[:100]}")
-                tool_results.append(result)
+                step_results.append(result)
 
-        if tool_results:
-            import re as _re
-            if final_response:
-                final_response += "\n\n"
-            # Strip [IMAGE:...] markers before appending to text response
-            clean_results = [_re.sub(r'\[IMAGE:[^\]]*\]\n?', '', r).strip() for r in tool_results]
-            final_response += "\n\n".join(r for r in clean_results if r)
+        if not step_results:
+            break
 
+        all_tool_results.extend(step_results)
+        for result in step_results:
+            for img_url in _extract_image_urls(result):
+                if img_url not in available_image_urls:
+                    available_image_urls.append(img_url)
+
+        # Feed results back so model can continue autonomously.
+        tool_history.append({
+            "role": "user",
+            "content": _build_tool_feedback(step_results, available_image_urls)
+        })
+
+        response = chat(
+            message="Continue.",
+            system_prompt=personalized_prompt,
+            history=tool_history,
+            tools=tools,
+            force_smart=True
+        )
+        final_response, tool_calls = _extract_tool_calls(response, allow_direct_map=False)
+
+    if all_tool_results:
+        if progress_msg:
+            try:
+                await progress_msg.delete()
+            except Exception:
+                pass
+
+        if not final_response.strip():
+            clean_results = [_strip_image_markers(r) for r in all_tool_results]
+            final_response = "\n\n".join(r for r in clean_results if r)
+
+        final_response = _strip_image_markers(final_response)
         memory.add_message(user_id, "assistant", final_response)
         asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
 
-        # Check if any tool result contains an image
-        image_sent = False
-        for result in tool_results:
-            if result and result.startswith("[IMAGE:"):
-                import os as _os, re as _re
-                lines = result.split("\n", 1)
-                img_path = lines[0][7:].rstrip("]")
-                caption = lines[1].strip() if len(lines) > 1 else "🎨 Generated image"
-                try:
-                    with open(img_path, "rb") as f:
-                        await update.message.reply_photo(photo=f, caption=caption[:1024])
-                    _os.unlink(img_path)
-                    image_sent = True
-                except Exception as e:
-                    await update.message.reply_text(f"❌ Could not send image: {e}")
-                # Strip [IMAGE:...] markers and the caption echo from text response
-                import re as _re2
-                final_response = _re2.sub(r'\[IMAGE:[^\]]*\]\n?', '', final_response).strip()
-                # If what remains is just the caption, suppress the text message
-                if final_response == caption or not final_response:
-                    final_response = ""
-                break
+        await _send_images_from_tool_results(update, all_tool_results)
 
         if final_response:
             await send_with_code_files(update, final_response)
         return
 
-    # No tool calls — stream response, editing message as chunks arrive
+    if progress_msg:
+        try:
+            await progress_msg.delete()
+        except Exception:
+            pass
+
+    # No tool calls - stream response, editing message as chunks arrive
     accumulated = ""
     sent_msg = None
     last_edit = 0
@@ -682,6 +804,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
         pass
 
     final_response = accumulated.strip() or final_response or "⚠️ No response."
+    final_response = _strip_image_markers(final_response)
 
     # Final update — handle code files or long responses
     has_code = bool(__import__('re').search(r'```\w*\n[\s\S]{300,}```', final_response))
@@ -787,7 +910,9 @@ async def handle_onboarding(update, user_id, message, user_data):
     pass  # Onboarding moved to CLI wizard — this stub kept for safety
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle photo messages - send image to vision model"""
+    """Handle photo messages with multimodal + tool-call support."""
+    import asyncio
+    import json
     user_id = update.effective_user.id
 
     # Get caption as the user's question (optional)
@@ -798,6 +923,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await context.bot.get_file(photo.file_id)
     photo_bytes = await file.download_as_bytearray()
     image_b64 = base64.b64encode(photo_bytes).decode("utf-8")
+    try:
+        uploaded_image_url = _save_image_asset(photo_bytes, prefix=f"tg_{user_id}", suffix=".jpg")
+    except Exception:
+        uploaded_image_url = ""
 
     personalized_prompt = f"""{SYSTEM_PROMPT}
 
@@ -807,22 +936,164 @@ Your purpose is to {BOT_PURPOSE}."""
     await update.message.chat.send_action(action="typing")
 
     conv_history = memory.get_conversation_context(user_id)
+    tools = get_tool_definitions()
+    if uploaded_image_url:
+        user_message = (
+            f"{caption}\n\n"
+            f"Uploaded image URL (use this directly in websites if relevant): {uploaded_image_url}"
+        )
+    else:
+        user_message = caption
+
+    def _extract_tool_calls(resp_obj):
+        final_text = resp_obj if isinstance(resp_obj, str) else (resp_obj.get("content") or "")
+        tcalls = resp_obj.get("tool_calls") if isinstance(resp_obj, dict) else None
+        if not tcalls and final_text:
+            import re as _re2
+            import json as _json2
+            tc_match = _re2.search(r'<tool_code>\s*(\{.*?\})\s*</tool_code>', final_text, _re2.DOTALL)
+            if tc_match:
+                try:
+                    tc_data = _json2.loads(tc_match.group(1))
+                    tool_name = tc_data.get("name")
+                    tool_args = tc_data.get("arguments", {})
+                    if isinstance(tool_args, str):
+                        tool_args = _json2.loads(tool_args)
+                    if tool_name:
+                        tcalls = [{"function": {"name": tool_name, "arguments": tool_args}}]
+                        final_text = _re2.sub(r'(?s).*?<tool_code>.*?</tool_code>\s*', '', final_text).strip()
+                except Exception:
+                    pass
+        # Parse stepfun/XML-style <tool_call><function=name>...</function></tool_call>
+        if not tcalls and final_text:
+            import re as _re2
+            tc_match = _re2.search(r'<tool_call>\s*<function=(\w+)>(.*?)</function>\s*</tool_call>', final_text, _re2.DOTALL)
+            if tc_match:
+                try:
+                    tool_name = tc_match.group(1)
+                    params_text = tc_match.group(2).strip()
+                    params = {}
+                    for pm in _re2.finditer(r'<parameter=(\w+)>\s*(.*?)\s*</parameter>', params_text, _re2.DOTALL):
+                        params[pm.group(1)] = pm.group(2).strip()
+                    if tool_name:
+                        tcalls = [{"function": {"name": tool_name, "arguments": params}}]
+                        final_text = _re2.sub(r'(?s)<tool_call>.*?</tool_call>', '', final_text).strip()
+                except Exception:
+                    pass
+        # Parse GLM-style <tool_call>name>\n<parameter=key>value</parameter>\n</name>
+        if not tcalls and final_text:
+            import re as _re2
+            tc_match = _re2.search(r'<tool_call>(\w+)>\s*(.*?)\s*</\1>', final_text, _re2.DOTALL)
+            if tc_match:
+                try:
+                    tool_name = tc_match.group(1)
+                    params_text = tc_match.group(2).strip()
+                    params = {}
+                    for pm in _re2.finditer(r'<parameter=(\w+)>\s*(.*?)\s*</parameter>', params_text, _re2.DOTALL):
+                        params[pm.group(1)] = pm.group(2).strip()
+                    if tool_name:
+                        tcalls = [{"function": {"name": tool_name, "arguments": params}}]
+                        final_text = _re2.sub(r'(?s)<tool_call>\w+>.*?</\w+>', '', final_text).strip()
+                except Exception:
+                    pass
+        return final_text, tcalls
 
     response = chat(
-        message=caption,
+        message=user_message,
         system_prompt=personalized_prompt,
         history=conv_history,
-        tools=get_tool_definitions(),
-        image_b64=image_b64
+        tools=tools,
+        image_b64=image_b64,
+        force_smart=True
     )
+    final_response, tool_calls = _extract_tool_calls(response)
 
-    final_response = response if isinstance(response, str) else response.get("content") or ""
+    all_tool_results = []
+    available_image_urls = [uploaded_image_url] if uploaded_image_url else []
+    tool_history = list(conv_history)
+    progress_msg = None
+    last_progress = ""
 
-    memory.add_message(user_id, "user", f"[Image] {caption}")
+    async def _set_progress(text):
+        nonlocal progress_msg, last_progress
+        if text == last_progress:
+            return
+        last_progress = text
+        try:
+            if progress_msg is None:
+                progress_msg = await update.message.reply_text(text)
+            else:
+                await progress_msg.edit_text(text)
+        except Exception:
+            pass
+
+    for round_idx in range(MAX_TOOL_ROUNDS):
+        if not tool_calls:
+            break
+        await _set_progress(f"Working... step {round_idx + 1}/{MAX_TOOL_ROUNDS}")
+        step_results = []
+        for tool_call in tool_calls:
+            tool_name = tool_call.get("function", {}).get("name")
+            raw_args = tool_call.get("function", {}).get("arguments", "{}")
+            if isinstance(raw_args, str):
+                try:
+                    tool_args = json.loads(raw_args)
+                except Exception:
+                    tool_args = {}
+            else:
+                tool_args = raw_args
+            if not tool_name:
+                continue
+            await _set_progress(f"Working... step {round_idx + 1}: using {tool_name}")
+            result = await execute_tool(tool_name, tool_args, user_id, task_manager)
+            step_results.append(result)
+
+        if not step_results:
+            break
+
+        all_tool_results.extend(step_results)
+        for result in step_results:
+            for img_url in _extract_image_urls(result):
+                if img_url not in available_image_urls:
+                    available_image_urls.append(img_url)
+
+        tool_history.append({
+            "role": "user",
+            "content": _build_tool_feedback(step_results, available_image_urls)
+        })
+        response = chat(
+            message="Continue.",
+            system_prompt=personalized_prompt,
+            history=tool_history,
+            tools=tools,
+            force_smart=True
+        )
+        final_response, tool_calls = _extract_tool_calls(response)
+
+    if progress_msg:
+        try:
+            await progress_msg.delete()
+        except Exception:
+            pass
+
+    if all_tool_results:
+        if not final_response.strip():
+            clean_results = [_strip_image_markers(r) for r in all_tool_results]
+            final_response = "\n\n".join(r for r in clean_results if r)
+        await _send_images_from_tool_results(update, all_tool_results)
+
+    final_response = _strip_image_markers(final_response)
+    if not final_response and uploaded_image_url:
+        final_response = f"I saved your image for website use: {uploaded_image_url}"
+    elif not final_response:
+        final_response = "Image received."
+
+    user_mem = f"[Image] {caption}"
+    if uploaded_image_url:
+        user_mem += f"\nImage URL: {uploaded_image_url}"
+    memory.add_message(user_id, "user", user_mem)
     memory.add_message(user_id, "assistant", final_response)
-
-    if final_response.strip():
-        await update.message.reply_text(final_response)
+    await send_with_code_files(update, final_response)
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):

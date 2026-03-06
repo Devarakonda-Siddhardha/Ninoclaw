@@ -211,8 +211,8 @@ You have access to the following tools:
 - list_running_apps: List currently running applications on the PC.
 - crypto_price: Get live cryptocurrency price (BTC, ETH, SOL, etc). Use when user asks about crypto prices.
 - stock_price: Get live stock price (TSLA, AAPL, RELIANCE, etc). Use when user asks about stock prices.
-- web_build: Create a website by generating a complete HTML document with inline CSS and JS. Use when user says "build me a website", "create a portfolio", "make a landing page", etc. Generate beautiful, modern HTML with gradients, animations, and stunning design. After creating, user gets a live preview link at /builds/<name>/.
-- web_edit: Edit an existing website — provide the full updated HTML to replace the current file.
+- web_build: Create a website by generating a complete HTML document with inline CSS and JS. Use when user says "build me a website", "create a portfolio", "make a landing page", etc. Generate beautiful, modern HTML with gradients, animations, and stunning design. After creating, user gets a live preview link at /builds/<name>/. If image URLs are provided in context (uploaded photos or generated images), use them directly in <img src='...'>.
+- web_edit: Edit an existing website — provide the full updated HTML to replace the current file. Preserve and reuse any provided image URLs when relevant.
 - web_list: List all built websites with preview links.
 - web_delete: Delete a built website project.
 
