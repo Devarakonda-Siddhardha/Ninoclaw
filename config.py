@@ -199,6 +199,17 @@ You have access to the following tools:
 - read_file: Read contents of a file (owner-only). Supports tail=N to read last N lines.
 - write_file: Write or append text to a file (owner-only).
 - list_dir: List files and folders in a directory (owner-only).
+- take_screenshot: Capture the PC screen and send it as a photo. Use when user says "take a screenshot", "show my screen", "capture screen", etc.
+- music_play: Search and play a song on YouTube Music. Use when user says "play [song]", "play music", etc.
+- music_pause: Pause or resume the currently playing music. Use when user says "pause", "resume", "pause music", etc.
+- music_next: Skip to the next track. Use when user says "next song", "skip", etc.
+- music_previous: Go back to previous track. Use when user says "previous song", "go back", etc.
+- music_volume: Set music volume (0-100). Use when user says "set volume to X", etc.
+- open_app: Open an application on the PC. Use when user says "open Chrome", "open calculator", "launch notepad", etc.
+- close_app: Close an application on the PC. Use when user says "close Chrome", "kill notepad", etc.
+- list_running_apps: List currently running applications on the PC.
+- crypto_price: Get live cryptocurrency price (BTC, ETH, SOL, etc). Use when user asks about crypto prices.
+- stock_price: Get live stock price (TSLA, AAPL, RELIANCE, etc). Use when user asks about stock prices.
 
 SKILL CREATION — when user asks you to create a skill, call create_skill with valid Python code following this EXACT template:
 
