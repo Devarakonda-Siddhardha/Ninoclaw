@@ -126,6 +126,23 @@ _WIN_PROCESSES = {
 }
 
 
+def _fuzzy_match(name, mapping):
+    """Find the best match for a (possibly misspelled) app name."""
+    # Exact match
+    if name in mapping:
+        return name
+    # Substring: user input is contained in a known app name, or vice versa
+    for key in mapping:
+        if name in key or key in name:
+            return key
+    # Partial overlap: check if 3+ consecutive chars match (handles 'rome' → 'chrome')
+    for key in mapping:
+        for i in range(len(name) - 2):
+            if name[i:i+3] in key:
+                return key
+    return None
+
+
 def _open_app(app_name):
     if sys.platform != "win32":
         return "❌ App launcher currently supports Windows only."
@@ -134,12 +151,19 @@ def _open_app(app_name):
     cmd = _WIN_APPS.get(name)
 
     if not cmd:
-        # Try to launch it directly via start command
+        # Try fuzzy match
+        match = _fuzzy_match(name, _WIN_APPS)
+        if match:
+            cmd = _WIN_APPS[match]
+            name = match  # Use the matched name for the response
+
+    if not cmd:
+        # Last resort: try to launch it directly
         cmd = f"start {name}"
 
     try:
         subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return f"🚀 Opened **{app_name}**!"
+        return f"🚀 Opened **{name.title()}**!"
     except Exception as e:
         return f"❌ Could not open {app_name}: {e}"
 
