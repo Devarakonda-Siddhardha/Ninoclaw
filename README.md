@@ -1,10 +1,20 @@
-# Ninoclaw
+<div align="center">
 
-Personal AI assistant for Telegram, self-hosted on your own machine/phone.
+# 🐾 Ninoclaw
+
+**Your personal AI assistant — running 24/7 on your phone via Telegram**
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://python.org)
 [![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?logo=telegram)](https://telegram.org)
+[![Gemini](https://img.shields.io/badge/Google-Gemini-4285F4?logo=google)](https://ai.google.dev)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Termux](https://img.shields.io/badge/Runs%20on-Termux-black?logo=android)](https://termux.dev)
+
+> A fully offline-capable, self-hosted Telegram AI assistant that lives on your Android phone. No servers. No monthly bills. Just you, your bot, and pure AI power.
+
+</div>
+
+---
 
 ## What It Does
 
