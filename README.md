@@ -1,236 +1,175 @@
-<div align="center">
+# Ninoclaw
 
-# 🐾 Ninoclaw
-
-**Your personal AI assistant — running 24/7 on your phone via Telegram**
+Personal AI assistant for Telegram, self-hosted on your own machine/phone.
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://python.org)
 [![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?logo=telegram)](https://telegram.org)
-[![Gemini](https://img.shields.io/badge/Google-Gemini-4285F4?logo=google)](https://ai.google.dev)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Termux](https://img.shields.io/badge/Runs%20on-Termux-black?logo=android)](https://termux.dev)
 
-> A fully offline-capable, self-hosted Telegram AI assistant that lives on your Android phone. No servers. No monthly bills. Just you, your bot, and pure AI power.
+## What It Does
 
-</div>
+Ninoclaw is a memory-aware AI assistant with tools:
 
----
+- Persistent chat memory (SQLite)
+- Web search and URL/YouTube summarization
+- One-time reminders and recurring cron schedules
+- Multi-model fallback and optional fast/smart routing
+- Telegram photo understanding (multimodal)
+- Image generation (fal.ai / HuggingFace / Gemini fallback)
+- Web builder skill with live previews
+- Web dashboard for config, history, tasks, models, plugins, and builds
 
-## ✨ What is Ninoclaw?
+## Major Features
 
-Ninoclaw is a **personal AI assistant Telegram bot** you host yourself — on your own Android phone using Termux. It uses Google Gemini (or any OpenAI-compatible API) as its brain and gives you a smart, memory-aware assistant that:
+- Web dashboard is live (default: `http://localhost:8080`)
+- Builds tab lists generated websites
+- Generated websites are previewed at `/builds/<name>/`
+- Shared image assets are served at `/builds-assets/<filename>`
+- Telegram image -> website flow:
+  - Send an image with caption like `build a landing page using this image`
+  - Bot saves image and can embed it in generated HTML
+- Tool execution supports multi-step flow
+  - Default mode: shorter rounds for speed
+  - Deep mode: more rounds for complex requests or prompts like `think harder`
 
-- **Remembers your conversations** across sessions (SQLite-backed memory)
-- **Searches the web** for real-time information (Google Serper)
-- **Sees images** you send it (vision/multimodal support)
-- **Sets reminders** and **schedules recurring tasks** with cron
-- **Summarizes YouTube videos and web pages** automatically
-- **Falls back across multiple AI models** so it never goes down
-- **Updates itself** from GitHub with a single command
+## Architecture
 
----
+Core files:
 
-## 🚀 Features
+- `main.py`: startup, scheduler, dashboard thread, bot runtime
+- `telegram_bot.py`: Telegram handlers, tool loops, multimodal image flow
+- `tools.py`: tool definitions and execution dispatch
+- `dashboard.py`: Flask dashboard and build/static serving routes
+- `skills/web_builder.py`: `web_build`, `web_edit`, `web_list`, `web_delete`
+- `skills/image_gen.py`: `generate_image` with website asset persistence
+- `memory.py`, `tasks.py`: SQLite-backed memory and scheduling
+- `security.py`: owner checks and safety guards
 
-| Feature | Description |
-|---|---|
-| 🧠 **Persistent Memory** | Remembers your chats using SQLite. Configurable context window (default: last 20 messages) |
-| 🔍 **Web Search** | Searches Google via Serper API for live news, scores, prices, weather |
-| 👁️ **Image Vision** | Send any photo and the AI will analyze, describe, or answer questions about it |
-| ⏰ **Smart Reminders** | Say "remind me in 30 mins" — one-time reminders that fire at the right time |
-| 🔄 **Cron Scheduling** | "Every day at 9am remind me to drink water" — full recurring cron support |
-| 📺 **URL Summarizer** | Paste any YouTube link or webpage URL and get an instant summary |
-| 🔁 **Model Fallback Chain** | Define multiple AI models — auto-falls back if one is rate-limited or down |
-| 🔐 **Owner Lock** | Sensitive commands (update, admin) locked to your Telegram user ID |
-| ♻️ **Self Update** | Tell the bot "update yourself" — it pulls from GitHub and restarts |
-| 🌍 **Timezone Aware** | Set your timezone once, reminders and crons use it correctly |
+## Quick Start
 
----
+### Windows
 
-## 📱 Architecture
-
-```
-Your Phone (Termux)
-│
-├── ninoclaw (CLI entry point)
-│   ├── ninoclaw setup     → Interactive setup wizard
-│   ├── ninoclaw start     → Start the bot
-│   ├── ninoclaw status    → Check if bot is running
-│   ├── ninoclaw reset     → Wipe config and start fresh
-│   ├── ninoclaw update    → Pull latest from GitHub
-│   └── ninoclaw memory    → View / clear conversation memory
-│
-├── main.py               → App entry point, starts bot + scheduler
-├── telegram_bot.py       → Handles all Telegram messages & commands
-├── ai.py                 → Multi-model AI engine with fallback chain
-├── tools.py              → AI tool definitions (search, reminders, cron)
-├── memory.py             → SQLite conversation + user data storage
-├── tasks.py              → SQLite task + cron job storage & scheduler
-├── summarizer.py         → YouTube transcript + webpage extractor
-├── updater.py            → Git pull + pip install + auto-restart
-├── wizard.py             → Arrow-key interactive setup wizard
-├── config.py             → All configuration, loaded from .env
-└── ninoclaw.db           → SQLite database (auto-created, not committed)
-```
-
----
-
-## ⚡ Quick Start
-
-### Windows 🪟
 ```powershell
-# 1. Clone the repository
 git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
 cd Ninoclaw
-
-# 2. Install dependencies
 pip install -r requirements.txt
-
-# 3. Run setup wizard and start
 .\ninoclaw setup
 .\ninoclaw start
 ```
 
-### Linux / macOS / Termux 🐧🍎
-```bash
-# 1. Install system requirements (examples for apt or pkg)
-sudo apt install python3 git -y    # Ubuntu/Debian
-pkg install python git -y          # Termux
+### Linux / macOS / Termux
 
-# 2. Clone the repository
+```bash
 git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
 cd Ninoclaw
-
-# 3. Install Python dependencies
 pip install -r requirements.txt
-
-# 4. Make CLI available globally (optional)
-chmod +x ninoclaw
-sudo ln -s "$(pwd)/ninoclaw" "/usr/local/bin/ninoclaw"  # Linux/macOS
-ln -s "$(pwd)/ninoclaw" "$PREFIX/bin/ninoclaw"          # Termux
-
-# 5. Run setup wizard and start
-ninoclaw setup
-ninoclaw start
+./ninoclaw setup
+./ninoclaw start
 ```
 
-The interactive wizard will walk you through:
-- 🤖 Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
-- 🔑 AI API Key (Gemini, OpenAI, or any compatible provider)
-- 🧠 Model selection (Gemini Flash, GPT-4, etc.)
-- 🔍 Serper API Key (optional, for web search)
-- 👤 Your Telegram User ID (for owner-only commands)
-- 🌍 Your timezone
+## Telegram Usage Examples
 
-### 5. Start the bot
+- `Remind me in 20 minutes to call mom`
+- `Every day at 8am send me a checklist`
+- `Summarize https://youtube.com/watch?v=...`
+- Send photo with caption: `make a website like this`
+- `Generate an image of a modern SaaS hero section`
+- `Use that generated image in my website`
+- `Think harder and keep iterating until the page is polished`
 
-```bash
-ninoclaw start
-```
+## Web Builder and Builds
 
----
+Tools:
 
-## 🤖 Talking to Your Bot
+- `web_build`: create website from full HTML
+- `web_edit`: replace website HTML
+- `web_list`: list built websites
+- `web_delete`: delete a build
 
-Once running, open Telegram and chat with your bot:
+Preview routes:
 
-| What you say | What happens |
-|---|---|
-| `Hey, what's the weather in Hyderabad?` | Searches Google for live weather |
-| `Remind me in 20 minutes to call mom` | Sets a one-time reminder |
-| `Every day at 8am say good morning` | Creates a recurring cron job |
-| `[Send a photo]` | AI analyzes the image |
-| `https://youtube.com/watch?v=...` | Summarizes the video |
-| `Update yourself to the latest version` | Pulls from GitHub and restarts |
-| `What tasks do I have scheduled?` | Lists all your reminders and cron jobs |
+- Build preview: `http://localhost:8080/builds/<name>/`
+- Shared assets: `http://localhost:8080/builds-assets/<filename>`
 
----
+Dashboard route:
 
-## ⚙️ Configuration
+- `http://localhost:8080/builds`
 
-All config lives in `.env` (created by the setup wizard, never committed):
+## Configuration
+
+Main config is in `.env`:
 
 ```env
-TELEGRAM_BOT_TOKEN=your_bot_token
-OPENAI_API_KEY=your_gemini_or_openai_key
-OPENAI_API_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-MODEL=gemini-2.0-flash-exp
-SERPER_API_KEY=your_serper_key        # optional, enables web search
-OWNER_ID=your_telegram_user_id        # optional, locks admin commands
-CONTEXT_WINDOW=20                     # messages sent to AI per request
-FALLBACK_MODEL=gemini-1.5-flash       # optional fallback model
+TELEGRAM_BOT_TOKEN=...
+OWNER_ID=123456789
+
+OPENAI_API_KEY=...
+OPENAI_API_URL=https://generativelanguage.googleapis.com/v1beta/openai
+OPENAI_MODEL=gemini-3-flash-preview
+
+SERPER_API_KEY=...
+
+ENABLE_WEB_SEARCH=true
+ENABLE_VISION=true
+ENABLE_SUMMARIZER=true
+ENABLE_REMINDERS=true
+ENABLE_CRON=true
+
+DASHBOARD_PORT=8080
+DASHBOARD_PASSWORD=change_me
+
+CONTEXT_WINDOW=20
+
+# Optional image providers
+FAL_KEY=
+HF_TOKEN=
+GEMINI_API_KEY=
 ```
 
-### Multi-model fallback chain
-
-For maximum uptime, define a full fallback chain in `.env`:
+Optional multi-model chain:
 
 ```env
 MODELS_JSON=[
-  {"api_url": "https://...gemini...", "api_key": "key1", "model": "gemini-2.0-flash-exp"},
-  {"api_url": "https://api.openai.com/v1", "api_key": "key2", "model": "gpt-4o-mini"},
-  {"api_url": "http://localhost:11434/v1", "api_key": "ollama", "model": "llama3"}
+  {"api_url":"https://generativelanguage.googleapis.com/v1beta/openai","api_key":"...","model":"gemini-3-flash-preview"},
+  {"api_url":"https://api.openai.com/v1","api_key":"...","model":"gpt-4o-mini"}
 ]
 ```
 
-The bot will automatically try each model in order if one fails or is rate-limited.
+## CLI Commands
 
----
-
-## 💬 CLI Commands
-
-```
-ninoclaw setup       Run the interactive setup wizard
-ninoclaw start       Start the Telegram bot
-ninoclaw status      Check if the bot is currently running
-ninoclaw stop        Stop the running bot
-ninoclaw restart     Restart the bot
-ninoclaw update      Pull latest code from GitHub
-ninoclaw reset       Wipe all config and start fresh
-ninoclaw memory      Show memory stats
-ninoclaw memory clear  Clear all conversation history
-ninoclaw version     Show current version
+```text
+ninoclaw start
+ninoclaw setup
+ninoclaw status
+ninoclaw dashboard
+ninoclaw update
+ninoclaw reset
+ninoclaw memory stats
+ninoclaw memory clear
+ninoclaw model
+ninoclaw route
+ninoclaw imagegen
+ninoclaw version
 ```
 
----
+## Security Notes
 
-## 📦 Requirements
+- Set `OWNER_ID` to restrict dangerous/admin tools.
+- Dashboard now enforces non-default password generation if missing/weak.
+- Sensitive tools are owner-gated in tool execution.
+- Keep `.env` private and never commit real tokens.
 
-- **Android phone** running [Termux](https://termux.dev)
-- **Python 3.10+**
-- **Telegram Bot Token** — free from [@BotFather](https://t.me/BotFather)
-- **AI API Key** — [Google AI Studio](https://aistudio.google.com) (free tier available)
-- **Serper API Key** — optional, [serper.dev](https://serper.dev) (free tier: 2500 searches/month)
+## Roadmap
 
----
+- Export chat history
+- Better mobile-first dashboard UX
+- Voice message transcription workflow
+- Multi-user policy controls
 
-## 🔒 Privacy
+## Contributing
 
-- All data stays **on your device** — no third-party servers involved
-- Conversation history stored in local SQLite DB (`ninoclaw.db`)
-- `.env` and database files are git-ignored and never uploaded
-- Only you (via `OWNER_ID`) can trigger admin operations
+PRs are welcome. For major changes, open an issue first.
 
----
+## License
 
-## 🗺️ Roadmap
-
-- [ ] Inline keyboard buttons for tasks
-- [ ] Export chat history (`/export`)
-- [ ] Voice message transcription
-- [ ] Multi-user support
-- [ ] Web dashboard
-
----
-
-## 🤝 Contributing
-
-Pull requests are welcome! For major changes, open an issue first.
-
----
-
-<div align="center">
-
-Made with ❤️ by [Siddhardha](https://github.com/Devarakonda-Siddhardha) • Running on Termux • Powered by Gemini
-
-</div>
+MIT
