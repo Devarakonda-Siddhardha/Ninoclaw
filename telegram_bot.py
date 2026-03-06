@@ -70,6 +70,64 @@ def _build_tool_feedback(step_results, available_image_urls):
     return "\n\n".join(parts)
 
 
+def _dedupe_preserve(items):
+    seen = set()
+    out = []
+    for item in items:
+        key = item.strip() if isinstance(item, str) else str(item)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def _tool_call_key(tool_name, tool_args):
+    import json as _json
+    try:
+        args_key = _json.dumps(tool_args or {}, sort_keys=True, separators=(",", ":"))
+    except Exception:
+        args_key = str(tool_args)
+    return f"{tool_name}:{args_key}"
+
+
+def _step_fingerprint(step_results):
+    parts = [_strip_image_markers(r) for r in step_results if r]
+    return " || ".join(p for p in parts if p)
+
+
+def _looks_like_tool_dump(text):
+    t = (text or "").lower()
+    return t.count("preview: http") > 1 or t.count("website updated") > 1
+
+
+def _finalize_after_tools(personalized_prompt, tool_history, all_tool_results, fallback=""):
+    clean_results = _dedupe_preserve([_strip_image_markers(r) for r in all_tool_results])
+    fallback_text = fallback.strip() if isinstance(fallback, str) else ""
+    if not fallback_text:
+        fallback_text = "\n\n".join(clean_results)
+
+    summary_prompt = (
+        "Tool execution is complete. Write a concise natural final response for the user.\n"
+        "Do not repeat duplicate tool outputs. If there is a preview/link, include it once.\n"
+        "If a website was created/updated, briefly confirm what changed and what to do next."
+    )
+    try:
+        resp = chat(
+            message=summary_prompt,
+            system_prompt=personalized_prompt,
+            history=tool_history,
+            force_smart=True,
+        )
+        text = resp if isinstance(resp, str) else (resp.get("content") or "")
+        text = _strip_image_markers(text)
+        if text and not _looks_like_tool_dump(text):
+            return text
+    except Exception:
+        pass
+    return fallback_text or "Done."
+
+
 async def _send_images_from_tool_results(update: Update, tool_results):
     sent_any = False
     sent_paths = set()
@@ -685,6 +743,8 @@ You have access to tools to schedule and manage recurring tasks. When the user w
     all_tool_results = []
     available_image_urls = []
     tool_history = list(conv_history)
+    last_step_fp = ""
+    no_progress_rounds = 0
     progress_msg = None
     last_progress = ""
 
@@ -707,6 +767,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
 
         await _set_progress(f"Working... step {round_idx + 1}/{MAX_TOOL_ROUNDS}")
         step_results = []
+        seen_call_keys = set()
         for tool_call in tool_calls:
             tool_name = tool_call.get("function", {}).get("name")
             raw_args = tool_call.get("function", {}).get("arguments", "{}")
@@ -719,6 +780,10 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             else:
                 tool_args = raw_args
             if tool_name:
+                ckey = _tool_call_key(tool_name, tool_args)
+                if ckey in seen_call_keys:
+                    continue
+                seen_call_keys.add(ckey)
                 await _set_progress(f"Working... step {round_idx + 1}: using {tool_name}")
                 print(f"[Tool] Calling: {tool_name}({tool_args})")
                 result = await execute_tool(tool_name, tool_args, user_id, task_manager)
@@ -727,6 +792,13 @@ You have access to tools to schedule and manage recurring tasks. When the user w
 
         if not step_results:
             break
+
+        step_fp = _step_fingerprint(step_results)
+        if step_fp and step_fp == last_step_fp:
+            no_progress_rounds += 1
+        else:
+            no_progress_rounds = 0
+            last_step_fp = step_fp
 
         all_tool_results.extend(step_results)
         for result in step_results:
@@ -748,6 +820,8 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             force_smart=True
         )
         final_response, tool_calls = _extract_tool_calls(response, allow_direct_map=False)
+        if no_progress_rounds >= 1:
+            break
 
     if all_tool_results:
         if progress_msg:
@@ -756,11 +830,12 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             except Exception:
                 pass
 
-        if not final_response.strip():
-            clean_results = [_strip_image_markers(r) for r in all_tool_results]
-            final_response = "\n\n".join(r for r in clean_results if r)
-
-        final_response = _strip_image_markers(final_response)
+        final_response = _finalize_after_tools(
+            personalized_prompt=personalized_prompt,
+            tool_history=tool_history,
+            all_tool_results=all_tool_results,
+            fallback=final_response,
+        )
         memory.add_message(user_id, "assistant", final_response)
         asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
 
@@ -1011,6 +1086,8 @@ Your purpose is to {BOT_PURPOSE}."""
     all_tool_results = []
     available_image_urls = [uploaded_image_url] if uploaded_image_url else []
     tool_history = list(conv_history)
+    last_step_fp = ""
+    no_progress_rounds = 0
     progress_msg = None
     last_progress = ""
 
@@ -1032,6 +1109,7 @@ Your purpose is to {BOT_PURPOSE}."""
             break
         await _set_progress(f"Working... step {round_idx + 1}/{MAX_TOOL_ROUNDS}")
         step_results = []
+        seen_call_keys = set()
         for tool_call in tool_calls:
             tool_name = tool_call.get("function", {}).get("name")
             raw_args = tool_call.get("function", {}).get("arguments", "{}")
@@ -1044,12 +1122,23 @@ Your purpose is to {BOT_PURPOSE}."""
                 tool_args = raw_args
             if not tool_name:
                 continue
+            ckey = _tool_call_key(tool_name, tool_args)
+            if ckey in seen_call_keys:
+                continue
+            seen_call_keys.add(ckey)
             await _set_progress(f"Working... step {round_idx + 1}: using {tool_name}")
             result = await execute_tool(tool_name, tool_args, user_id, task_manager)
             step_results.append(result)
 
         if not step_results:
             break
+
+        step_fp = _step_fingerprint(step_results)
+        if step_fp and step_fp == last_step_fp:
+            no_progress_rounds += 1
+        else:
+            no_progress_rounds = 0
+            last_step_fp = step_fp
 
         all_tool_results.extend(step_results)
         for result in step_results:
@@ -1069,6 +1158,8 @@ Your purpose is to {BOT_PURPOSE}."""
             force_smart=True
         )
         final_response, tool_calls = _extract_tool_calls(response)
+        if no_progress_rounds >= 1:
+            break
 
     if progress_msg:
         try:
@@ -1077,9 +1168,12 @@ Your purpose is to {BOT_PURPOSE}."""
             pass
 
     if all_tool_results:
-        if not final_response.strip():
-            clean_results = [_strip_image_markers(r) for r in all_tool_results]
-            final_response = "\n\n".join(r for r in clean_results if r)
+        final_response = _finalize_after_tools(
+            personalized_prompt=personalized_prompt,
+            tool_history=tool_history,
+            all_tool_results=all_tool_results,
+            fallback=final_response,
+        )
         await _send_images_from_tool_results(update, all_tool_results)
 
     final_response = _strip_image_markers(final_response)
