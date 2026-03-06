@@ -19,7 +19,8 @@ memory = Memory()
 
 WEB_ROOT = Path(__file__).resolve().parent / "websites"
 WEB_ASSETS_DIR = WEB_ROOT / "assets"
-MAX_TOOL_ROUNDS = 6
+DEFAULT_TOOL_ROUNDS = 3
+DEEP_TOOL_ROUNDS = 6
 
 
 def _public_base_url():
@@ -99,6 +100,38 @@ def _step_fingerprint(step_results):
 def _looks_like_tool_dump(text):
     t = (text or "").lower()
     return t.count("preview: http") > 1 or t.count("website updated") > 1
+
+
+def _should_use_deep_mode(user_message):
+    text = (user_message or "").lower()
+    deep_hints = (
+        "think harder",
+        "go deep",
+        "deep mode",
+        "continue until done",
+        "full automation",
+        "keep going",
+        "do not stop",
+    )
+    if any(h in text for h in deep_hints):
+        return True
+
+    complex_hints = (
+        "analyze",
+        "compare",
+        "multi-step",
+        "step by step",
+        "refactor",
+        "debug",
+        "build",
+        "iterate",
+        "comprehensive",
+    )
+    return len(text) >= 220 and any(h in text for h in complex_hints)
+
+
+def _tool_round_limit(user_message):
+    return DEEP_TOOL_ROUNDS if _should_use_deep_mode(user_message) else DEFAULT_TOOL_ROUNDS
 
 
 def _finalize_after_tools(personalized_prompt, tool_history, all_tool_results, fallback=""):
@@ -743,6 +776,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
     all_tool_results = []
     available_image_urls = []
     tool_history = list(conv_history)
+    max_tool_rounds = _tool_round_limit(user_message)
     last_step_fp = ""
     no_progress_rounds = 0
     progress_msg = None
@@ -761,11 +795,11 @@ You have access to tools to schedule and manage recurring tasks. When the user w
         except Exception:
             pass
 
-    for round_idx in range(MAX_TOOL_ROUNDS):
+    for round_idx in range(max_tool_rounds):
         if not tool_calls:
             break
 
-        await _set_progress(f"Working... step {round_idx + 1}/{MAX_TOOL_ROUNDS}")
+        await _set_progress(f"Working... step {round_idx + 1}/{max_tool_rounds}")
         step_results = []
         seen_call_keys = set()
         for tool_call in tool_calls:
@@ -1086,6 +1120,7 @@ Your purpose is to {BOT_PURPOSE}."""
     all_tool_results = []
     available_image_urls = [uploaded_image_url] if uploaded_image_url else []
     tool_history = list(conv_history)
+    max_tool_rounds = _tool_round_limit(caption)
     last_step_fp = ""
     no_progress_rounds = 0
     progress_msg = None
@@ -1104,10 +1139,10 @@ Your purpose is to {BOT_PURPOSE}."""
         except Exception:
             pass
 
-    for round_idx in range(MAX_TOOL_ROUNDS):
+    for round_idx in range(max_tool_rounds):
         if not tool_calls:
             break
-        await _set_progress(f"Working... step {round_idx + 1}/{MAX_TOOL_ROUNDS}")
+        await _set_progress(f"Working... step {round_idx + 1}/{max_tool_rounds}")
         step_results = []
         seen_call_keys = set()
         for tool_call in tool_calls:
