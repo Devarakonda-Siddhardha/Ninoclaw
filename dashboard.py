@@ -2,8 +2,9 @@
 Ninoclaw Web Dashboard — configure plugins, view memory, manage tasks
 Run with: ninoclaw dashboard  (or python dashboard.py)
 """
-import os, sys, json, sqlite3, subprocess
+import os, re, sys, json, sqlite3, subprocess
 from functools import wraps
+from pathlib import Path
 from dotenv import load_dotenv, set_key, dotenv_values
 
 # Lazy Flask import so the rest of the app doesn't depend on it
@@ -1211,12 +1212,11 @@ def tasks_page():
 @app.route("/builds")
 @require_login
 def builds_page():
-    from pathlib import Path
     websites_dir = Path(__file__).parent / "websites"
     projects = []
     if websites_dir.exists():
         for d in sorted(websites_dir.iterdir()):
-            if d.is_dir() and (d / "index.html").exists():
+            if d.is_dir() and re.fullmatch(r"[a-z0-9_-]{1,50}", d.name) and (d / "index.html").exists():
                 size = (d / "index.html").stat().st_size
                 import datetime
                 mtime = datetime.datetime.fromtimestamp((d / "index.html").stat().st_mtime)
@@ -1273,20 +1273,30 @@ def builds_page():
 @app.route("/builds/<name>/", defaults={"filename": "index.html"})
 @app.route("/builds/<name>/<path:filename>")
 def builds_serve(name, filename):
-    """Serve generated website files — no auth required for previews."""
-    from pathlib import Path
-    websites_dir = Path(__file__).parent / "websites"
-    project_dir = websites_dir / name
-    if not project_dir.exists():
+    """Serve generated website files without auth for easy previews."""
+    if not re.fullmatch(r"[a-z0-9_-]{1,50}", name or ""):
         return "Project not found", 404
-    file_path = project_dir / filename
-    if not file_path.exists():
-        return "File not found", 404
-    # Security: ensure the path is within the project directory
+
+    websites_dir = (Path(__file__).parent / "websites").resolve()
+    project_dir = (websites_dir / name).resolve()
+
     try:
-        file_path.resolve().relative_to(project_dir.resolve())
+        project_dir.relative_to(websites_dir)
     except ValueError:
         return "Access denied", 403
+
+    if not project_dir.is_dir():
+        return "Project not found", 404
+
+    file_path = (project_dir / filename).resolve()
+    try:
+        file_path.relative_to(project_dir)
+    except ValueError:
+        return "Access denied", 403
+
+    if not file_path.is_file():
+        return "File not found", 404
+
     return send_file(str(file_path))
 
 

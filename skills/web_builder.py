@@ -102,11 +102,25 @@ def _sanitize_name(name):
 def _get_preview_url(name):
     """Get the preview URL for a project."""
     port = os.getenv("DASHBOARD_PORT", "8080")
-    return f"http://localhost:{port}/builds/{name}"
+    return f"http://localhost:{port}/builds/{name}/"
+
+
+def _validate_html(html):
+    html = (html or "").strip()
+    if not html:
+        return False, "HTML is required."
+    if "<html" not in html.lower():
+        return False, "HTML must include an <html> document."
+    return True, ""
 
 
 def _web_build(name, html):
+    ok, err = _validate_html(html)
+    if not ok:
+        return f"❌ Invalid website content: {err}"
+
     name = _sanitize_name(name)
+    WEBSITES_DIR.mkdir(parents=True, exist_ok=True)
     project_dir = WEBSITES_DIR / name
     project_dir.mkdir(parents=True, exist_ok=True)
 
@@ -124,6 +138,10 @@ def _web_build(name, html):
 
 
 def _web_edit(name, html):
+    ok, err = _validate_html(html)
+    if not ok:
+        return f"❌ Invalid website content: {err}"
+
     name = _sanitize_name(name)
     project_dir = WEBSITES_DIR / name
 
@@ -154,7 +172,7 @@ def _web_list():
     for p in projects:
         size = (p / "index.html").stat().st_size
         size_str = f"{size:,} bytes" if size < 1024 else f"{size/1024:.1f} KB"
-        url = f"http://localhost:{port}/builds/{p.name}"
+        url = f"http://localhost:{port}/builds/{p.name}/"
         lines.append(f"  • **{p.name}** ({size_str}) — {url}")
 
     return "\n".join(lines)
