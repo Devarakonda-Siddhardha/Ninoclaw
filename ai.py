@@ -258,9 +258,9 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64):
         msg = data["choices"][0]["message"]
 
         if "tool_calls" in msg:
-            return {"content": msg.get("content", ""), "tool_calls": msg["tool_calls"]}, None
+            return {"content": msg.get("content") or "", "tool_calls": msg["tool_calls"]}, None
 
-        return msg.get("content", "").strip(), None
+        return (msg.get("content") or "").strip(), None
 
     except requests.RequestException as e:
         return None, str(e)
