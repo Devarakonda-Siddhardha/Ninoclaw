@@ -198,6 +198,9 @@ BASE = """<!DOCTYPE html>
     <a href="{{ url_for('builds_page') }}" class="nav-link {{ 'active' if active=='builds' }}">
       <i class="bi bi-code-slash"></i> Builds
     </a>
+    <a href="{{ url_for('mobile_apps_page') }}" class="nav-link {{ 'active' if active=='mobile' }}">
+      <i class="bi bi-phone"></i> Mobile Apps
+    </a>
   </nav>
   <div style="padding: 12px 16px; border-top: 1px solid var(--border);">
     <a href="{{ url_for('logout') }}" class="nav-link" style="padding: 8px 0;">
@@ -764,8 +767,14 @@ def plugins_page():
 @require_login
 def models_page():
     env = get_env()
+    models_json_display = env.get("MODELS_JSON", "")
+    if models_json_display:
+        try:
+            models_json_display = json.dumps(json.loads(models_json_display), indent=2)
+        except json.JSONDecodeError:
+            pass
     if request.method == "POST":
-        section = request.form.get("section", "fallback")
+        section = request.form.get("section", "primary")
         if section == "primary":
             model = request.form.get("OPENAI_MODEL", "").strip()
             url   = request.form.get("OPENAI_API_URL", "").strip()
@@ -773,20 +782,27 @@ def models_page():
             if model: save_env_key("OPENAI_MODEL", model)
             if url:   save_env_key("OPENAI_API_URL", url)
             if key:   save_env_key("OPENAI_API_KEY", key)
-        else:
-            fallback_model = request.form.get("FALLBACK_MODEL", "").strip()
-            fallback_key   = request.form.get("FALLBACK_API_KEY", "").strip()
-            fallback_url   = request.form.get("FALLBACK_API_URL", "").strip()
-            if fallback_model: save_env_key("FALLBACK_MODEL", fallback_model)
-            if fallback_key:   save_env_key("FALLBACK_API_KEY", fallback_key)
-            if fallback_url:   save_env_key("FALLBACK_API_URL", fallback_url)
-        flash("Model settings saved!", "success")
+        elif section == "routing":
+            save_env_key("FAST_MODEL", request.form.get("FAST_MODEL", "").strip())
+            save_env_key("SMART_MODEL", request.form.get("SMART_MODEL", "").strip())
+        elif section == "chain":
+            models_json = request.form.get("MODELS_JSON", "").strip()
+            if models_json:
+                try:
+                    parsed = json.loads(models_json)
+                    if not isinstance(parsed, list):
+                        raise ValueError("MODELS_JSON must be a JSON array.")
+                except (json.JSONDecodeError, ValueError) as e:
+                    flash(f"Invalid MODELS_JSON: {e}", "error")
+                    return redirect(url_for("models_page"))
+            save_env_key("MODELS_JSON", models_json)
+        flash("Model settings saved. New requests will use the updated config.", "success")
         return redirect(url_for("models_page"))
 
     tmpl = BASE + """
 
 <div class="page-title">AI Models</div>
-<div class="page-sub">Configure primary and fallback AI models. The bot tries each in order.</div>
+<div class="page-sub">Configure the live model runtime. New requests pick up these changes immediately without restarting the bot.</div>
 
 <div class="card">
   <div class="card-header"><i class="bi bi-1-circle"></i> Primary Model</div>
@@ -812,23 +828,38 @@ def models_page():
 </div>
 
 <div class="card">
-  <div class="card-header"><i class="bi bi-2-circle"></i> Fallback Model</div>
+  <div class="card-header"><i class="bi bi-2-circle"></i> Smart Routing</div>
   <div class="card-body">
-    <p style="color:var(--muted);font-size:0.88rem">Used automatically if the primary model fails or is rate-limited.</p>
+    <p style="color:var(--muted);font-size:0.88rem">Optional. Set a fast model to enable simple-vs-complex routing. Leave FAST_MODEL blank to keep a single-model setup.</p>
     <form method="POST">
-    <input type="hidden" name="section" value="fallback">
+    <input type="hidden" name="section" value="routing">
     <div style="margin-bottom:14px">
-      <input class="form-control" name="FALLBACK_MODEL" value="{{ env.get('FALLBACK_MODEL','') }}" placeholder="e.g. gemini-1.5-flash">
+      <label class="form-label">FAST_MODEL</label>
+      <input class="form-control" name="FAST_MODEL" value="{{ env.get('FAST_MODEL','') }}" placeholder="e.g. gemini-2.0-flash-exp">
     </div>
     <div style="margin-bottom:14px">
-      <label class="form-label">Fallback API Key (if different)</label>
-      <input class="form-control" type="password" name="FALLBACK_API_KEY" placeholder="Leave blank to use primary key" autocomplete="off">
+      <label class="form-label">SMART_MODEL</label>
+      <input class="form-control" name="SMART_MODEL" value="{{ env.get('SMART_MODEL','') }}" placeholder="Optional - defaults to OPENAI_MODEL when blank">
     </div>
+    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i> Save Routing</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><i class="bi bi-3-circle"></i> Advanced Chain</div>
+  <div class="card-body">
+    <p style="color:var(--muted);font-size:0.88rem">Optional. If set, <code>MODELS_JSON</code> overrides the automatic provider chain completely. Use an array of <code>{"api_url","api_key","model"}</code> objects.</p>
+    <form method="POST">
+    <input type="hidden" name="section" value="chain">
     <div style="margin-bottom:14px">
-      <label class="form-label">Fallback API URL (if different)</label>
-      <input class="form-control" name="FALLBACK_API_URL" value="{{ env.get('FALLBACK_API_URL','') }}" placeholder="Leave blank to use primary URL">
+      <label class="form-label">MODELS_JSON</label>
+      <textarea class="form-control" name="MODELS_JSON" rows="10" placeholder='[
+  {"api_url":"https://...","api_key":"...","model":"..."},
+  {"api_url":"https://...","api_key":"...","model":"..."}
+]' style="min-height:220px; font-family:Consolas, monospace">{{ models_json_display }}</textarea>
     </div>
-    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i> Save</button>
+    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i> Save Chain</button>
     </form>
   </div>
 </div>
@@ -856,7 +887,13 @@ def models_page():
 </div>
 
 """
-    return render_template_string(tmpl + FOOTER, active="models", version=git_version(), env=env)
+    return render_template_string(
+        tmpl + FOOTER,
+        active="models",
+        version=git_version(),
+        env=env,
+        models_json_display=models_json_display,
+    )
 
 
 @app.route("/memory")
@@ -1425,6 +1462,119 @@ def builds_delete(name):
     else:
         flash(f"Build not found: {name}", "error")
     return redirect(url_for("builds_page"))
+
+
+@app.route("/mobile-apps")
+@require_login
+def mobile_apps_page():
+    try:
+        from expo_manager import list_apps
+        apps = list_apps()
+    except Exception as e:
+        apps = []
+        flash(f"Failed to load Expo apps: {e}", "error")
+
+    tmpl = BASE + """
+<h1 class="page-title">Mobile Apps</h1>
+<p class="page-sub">React Native Expo apps generated by the AI. These run through the local Expo dev server and usually open in Expo Go via an <code>exp://</code> or tunnel link.</p>
+
+{% if apps %}
+<div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:16px;">
+  {% for app in apps %}
+  <div class="card">
+    <div class="card-header">
+      <i class="bi bi-phone"></i> {{ app.name }}
+    </div>
+    <div class="card-body">
+      <div style="display:flex; justify-content:space-between; margin-bottom:12px; gap:8px; flex-wrap:wrap;">
+        <span class="{{ 'badge-on' if app.is_running else 'badge-off' }}">{{ 'Running' if app.is_running else 'Stopped' }}</span>
+        <span style="color:var(--muted); font-size:0.82rem;">{{ app.template }}</span>
+      </div>
+      {% if app.launch_url or app.tunnel_url or app.web_url %}
+      <div style="display:grid; gap:8px; margin-bottom:14px;">
+        {% if app.launch_url %}<a href="{{ app.launch_url }}" class="btn btn-outline" target="_blank">Launch Link</a>{% endif %}
+        {% if app.tunnel_url and app.tunnel_url != app.launch_url %}<a href="{{ app.tunnel_url }}" class="btn btn-outline" target="_blank">Tunnel URL</a>{% endif %}
+        {% if app.web_url %}<a href="{{ app.web_url }}" class="btn btn-outline" target="_blank">Web URL</a>{% endif %}
+      </div>
+      {% else %}
+      <div style="margin-bottom:14px; color:var(--muted); font-size:0.88rem;">No preview link captured yet. Start the app and wait a few seconds.</div>
+      {% endif %}
+      <div style="color:var(--muted); font-size:0.82rem; margin-bottom:12px;">
+        {% if app.port %}Port {{ app.port }}{% else %}Port pending{% endif %}
+        {% if app.updated_at %} · Updated {{ app.updated_at }}{% endif %}
+      </div>
+      {% if app.last_error %}
+      <div class="alert alert-danger" style="margin-bottom:12px;">{{ app.last_error }}</div>
+      {% endif %}
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        {% if app.is_running %}
+        <form method="POST" action="/mobile-apps/{{ app.name }}/stop" style="margin:0;">
+          <button type="submit" class="btn btn-outline">Stop</button>
+        </form>
+        {% else %}
+        <form method="POST" action="/mobile-apps/{{ app.name }}/start" style="margin:0;">
+          <button type="submit" class="btn btn-primary">Start</button>
+        </form>
+        {% endif %}
+        <form method="POST" action="/mobile-apps/{{ app.name }}/delete" style="margin:0;" onsubmit="return confirm('Delete Expo app {{ app.name }}?');">
+          <button type="submit" class="btn btn-danger">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card">
+  <div class="card-body" style="text-align:center; padding:48px 20px;">
+    <i class="bi bi-phone" style="font-size:3rem; color:var(--muted); display:block; margin-bottom:16px;"></i>
+    <h5 style="color:var(--text); margin-bottom:8px;">No Expo apps yet</h5>
+    <p style="color:var(--muted); font-size:0.9rem; max-width:420px; margin:0 auto;">
+      Ask your AI on Telegram: <strong>"build me a React Native Expo app for ..."</strong>
+      <br>It will create the project, start Expo, and return the device preview link.
+    </p>
+  </div>
+</div>
+{% endif %}
+"""
+    return render_template_string(tmpl + FOOTER, active="mobile", version=git_version(), apps=apps)
+
+
+@app.route("/mobile-apps/<name>/start", methods=["POST"])
+@require_login
+def mobile_apps_start(name):
+    try:
+        from expo_manager import start_app
+        app = start_app(name, tunnel=True)
+        launch = app.get("launch_url") or app.get("tunnel_url") or app.get("web_url") or "starting"
+        flash(f"Expo app started: {name} ({launch})", "success")
+    except Exception as e:
+        flash(f"Failed to start Expo app {name}: {e}", "error")
+    return redirect(url_for("mobile_apps_page"))
+
+
+@app.route("/mobile-apps/<name>/stop", methods=["POST"])
+@require_login
+def mobile_apps_stop(name):
+    try:
+        from expo_manager import stop_app
+        stop_app(name)
+        flash(f"Expo app stopped: {name}", "success")
+    except Exception as e:
+        flash(f"Failed to stop Expo app {name}: {e}", "error")
+    return redirect(url_for("mobile_apps_page"))
+
+
+@app.route("/mobile-apps/<name>/delete", methods=["POST"])
+@require_login
+def mobile_apps_delete(name):
+    try:
+        from expo_manager import delete_app
+        delete_app(name)
+        flash(f"Deleted Expo app: {name}", "success")
+    except Exception as e:
+        flash(f"Failed to delete Expo app {name}: {e}", "error")
+    return redirect(url_for("mobile_apps_page"))
 
 
 @app.route("/builds/<name>/", defaults={"filename": "index.html"})
