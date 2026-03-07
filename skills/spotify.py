@@ -190,10 +190,13 @@ def _ensure_active(device_id):
         current_device = r.json().get("device", {}).get("id", "")
         if current_device == device_id and r.json().get("is_playing") is not None:
             return  # already active and connected
+    # Transfer playback to the device without forcing playback to start.
+    # Forcing play here can cause unexpected immediate resume when other tool calls
+    # transfer the active device; use play=False so explicit play() is required.
     requests.put(
         f"{_API}/me/player",
         headers={**_headers(), "Content-Type": "application/json"},
-        json={"device_ids": [device_id], "play": True},
+        json={"device_ids": [device_id], "play": False},
         timeout=10,
     )
     import time; time.sleep(2)
