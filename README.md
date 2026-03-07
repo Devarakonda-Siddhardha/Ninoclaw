@@ -1,79 +1,93 @@
-<div align="center">
+# Ninoclaw
 
-# 🐾 Ninoclaw
-
-**Your personal AI assistant — running 24/7 on your phone via Telegram**
+Personal AI assistant with Telegram chat, a local dashboard, memory/tasks, tool use, website generation, and React Native Expo app generation.
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://python.org)
 [![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?logo=telegram)](https://telegram.org)
-[![Gemini](https://img.shields.io/badge/Google-Gemini-4285F4?logo=google)](https://ai.google.dev)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![Termux](https://img.shields.io/badge/Runs%20on-Termux-black?logo=android)](https://termux.dev)
 
-> A fully offline-capable, self-hosted Telegram AI assistant that lives on your Android phone. No servers. No monthly bills. Just you, your bot, and pure AI power.
+## What It Is
 
-</div>
+Ninoclaw is no longer just a Telegram bot. The current project includes:
 
----
+- Telegram bot interface
+- local Flask dashboard
+- SQLite-backed memory and task scheduling
+- model fallback and fast/smart routing
+- plugin-style skills
+- website builder with live previews
+- React Native Expo app builder with Expo Go and web preview links
+- owner-gated system and admin tools
+- runtime hot reload for skills, plugin flags, and model settings
 
-## What It Does
+## Current Highlights
 
-Ninoclaw is a memory-aware AI assistant with tools:
+- Live dashboard at `http://localhost:8080` by default
+- Model changes from the dashboard apply to new requests without restarting
+- Web chat and Telegram both use the tool-capable agent path
+- Expo apps can be created, started, listed, stopped, and deleted from chat or dashboard
+- Mobile Apps dashboard page shows Expo Go links, web preview links, and QR codes
+- Plugin and skill toggles can hot-reload for new requests
+- Capability detection auto-hides unsupported tools on constrained or incompatible devices
+- Owner-only enforcement exists at both tool-definition time and execution time
 
-- Persistent chat memory (SQLite)
-- Web search and URL/YouTube summarization
-- One-time reminders and recurring cron schedules
-- Multi-model fallback and optional fast/smart routing
-- Telegram photo understanding (multimodal)
-- Image generation (fal.ai / HuggingFace / Gemini fallback)
-- Web builder skill with live previews
-- Web dashboard for config, history, tasks, models, plugins, and builds
+## Features
 
-## Major Features
+### Core assistant
 
-- Web dashboard is live (default: `http://localhost:8080`)
-- Builds tab lists generated websites
-- Generated websites are previewed at `/builds/<name>/`
-- Shared image assets are served at `/builds-assets/<filename>`
-- Telegram image -> website flow:
-  - Send an image with caption like `build a landing page using this image`
-  - Bot saves image and can embed it in generated HTML
-- Tool execution supports multi-step flow
-  - Default mode: shorter rounds for speed
-  - Deep mode: more rounds for complex requests or prompts like `think harder`
+- persistent conversation memory
+- long-term fact extraction
+- one-time reminders
+- recurring cron jobs
+- URL and YouTube summarization
+- multimodal image prompts in Telegram
 
-## Screenshots
+### AI routing
 
-Place image files in `docs/screenshots/` with the names below.
+- OpenAI-compatible providers
+- fallback model chain via `MODELS_JSON`
+- fast/smart model routing via `FAST_MODEL` and `SMART_MODEL`
+- optional local Ollama path
+
+### Builders
+
+- `web_build`, `web_edit`, `web_list`, `web_delete`
+- `expo_create_app`, `expo_edit_app`, `expo_start_app`, `expo_stop_app`, `expo_list_apps`, `expo_delete_app`
 
 ### Dashboard
 
-![Dashboard Overview](docs/screenshots/dashboard-overview.png)
-![Plugins and Skills](docs/screenshots/dashboard-plugins-skills.png)
-![Builds Tab](docs/screenshots/dashboard-builds-tab.png)
-
-### Telegram Flows
-
-![Image to Website Prompt](docs/screenshots/telegram-image-to-website-prompt.jpg)
-![Generated Build Reply](docs/screenshots/telegram-generated-build-reply.jpg)
-![Think Harder Deep Mode](docs/screenshots/telegram-think-harder-deep-mode.jpg)
-
-### Build Preview
-
-![Generated Website Preview](docs/screenshots/build-preview-website.png)
+- overview/system health
+- bot config
+- plugin and skill toggles
+- AI model config
+- memory viewer
+- chat history
+- tasks and cron management
+- builds page
+- mobile apps page
 
 ## Architecture
 
-Core files:
+Main runtime files:
 
-- `main.py`: startup, scheduler, dashboard thread, bot runtime
-- `telegram_bot.py`: Telegram handlers, tool loops, multimodal image flow
-- `tools.py`: tool definitions and execution dispatch
-- `dashboard.py`: Flask dashboard and build/static serving routes
-- `skills/web_builder.py`: `web_build`, `web_edit`, `web_list`, `web_delete`
-- `skills/image_gen.py`: `generate_image` with website asset persistence
-- `memory.py`, `tasks.py`: SQLite-backed memory and scheduling
-- `security.py`: owner checks and safety guards
+- [main.py](./main.py): startup, scheduler, dashboard thread, startup checks
+- [telegram_bot.py](./telegram_bot.py): Telegram handlers, tool loop, multimodal flow
+- [chat_runtime.py](./chat_runtime.py): shared tool-aware runner for dashboard/web chat
+- [tools.py](./tools.py): built-in tools, skill tool loading, owner gating, runtime reload
+- [ai.py](./ai.py): model routing, provider fallback, live model config reads
+- [dashboard.py](./dashboard.py): Flask dashboard and operational UI
+- [memory.py](./memory.py): conversation/fact persistence
+- [tasks.py](./tasks.py): reminders and cron execution
+- [expo_manager.py](./expo_manager.py): Expo project/process lifecycle
+- [runtime_capabilities.py](./runtime_capabilities.py): local capability detection and compatibility gating
+- [security.py](./security.py): owner checks, path/command guards, skill validation
+
+Important skill files:
+
+- [skills/web_builder.py](./skills/web_builder.py)
+- [skills/expo_builder.py](./skills/expo_builder.py)
+- [skills/image_gen.py](./skills/image_gen.py)
 
 ## Quick Start
 
@@ -97,73 +111,178 @@ pip install -r requirements.txt
 ./ninoclaw start
 ```
 
-## Telegram Usage Examples
+You can also run the core process directly:
+
+```bash
+python main.py
+```
+
+## Wizard and Compatibility Detection
+
+The setup wizard now detects the local runtime profile and writes conservative defaults for incompatible devices.
+
+Examples:
+
+- disable Windows-only skills on Linux/Termux
+- disable Expo builder on low-resource or Termux-like environments
+- surface detected device/profile in the wizard, startup logs, and dashboard overview
+
+This is local-only detection:
+
+- OS
+- device model when locally available
+- RAM
+- display availability
+- required binaries such as `node`, `npx`, `ollama`
+- optional bridge env vars
+
+It does not use hardware IDs, MAC addresses, or telemetry.
+
+## Platform Notes
+
+### Works well for the core gateway
+
+- Windows
+- Linux
+- macOS
+- Termux / Android-hosted setups
+- Raspberry Pi class devices for the core bot/dashboard flow
+
+### Conditional or limited
+
+- Expo builder needs `node` and `npx`, and is disabled automatically on low-resource or Termux-like environments
+- screenshot support depends on display/desktop environment and available libraries
+- local Ollama is a hardware question, not just a code-path question
+
+### Windows-only or Windows-biased skills
+
+- app launcher
+- some media-key based desktop controls
+
+## Dashboard Routes
+
+- `/overview`
+- `/config`
+- `/plugins`
+- `/models`
+- `/memory`
+- `/chat`
+- `/tasks`
+- `/builds`
+- `/mobile-apps`
+
+Build previews:
+
+- website preview: `/builds/<name>/`
+- website shared assets: `/builds-assets/<filename>`
+
+Expo previews:
+
+- Expo Go link shown in dashboard/mobile-app results
+- web preview link shown separately when Expo web starts successfully
+
+## Example Prompts
+
+### General
 
 - `Remind me in 20 minutes to call mom`
 - `Every day at 8am send me a checklist`
 - `Summarize https://youtube.com/watch?v=...`
-- Send photo with caption: `make a website like this`
-- `Generate an image of a modern SaaS hero section`
-- `Use that generated image in my website`
-- `Think harder and keep iterating until the page is polished`
+- `What is on my calendar tomorrow?`
 
-## Web Builder and Builds
+### Website builder
 
-Tools:
+- `Build me a SaaS landing page for an AI note-taking startup`
+- `Edit my portfolio site and add a pricing section`
+- `Use this uploaded image in the hero section`
 
-- `web_build`: create website from full HTML
-- `web_edit`: replace website HTML
-- `web_list`: list built websites
-- `web_delete`: delete a build
+### Expo builder
 
-Preview routes:
-
-- Build preview: `http://localhost:8080/builds/<name>/`
-- Shared assets: `http://localhost:8080/builds-assets/<filename>`
-
-Dashboard route:
-
-- `http://localhost:8080/builds`
+- `Build me a React Native Expo app called habit-tracker and return the preview link`
+- `Create a mobile to-do app in Expo and start it`
+- `Update the todos app UI and restart Expo`
 
 ## Configuration
 
-Main config is in `.env`:
+Main config lives in `.env`.
+
+Important keys:
 
 ```env
-TELEGRAM_BOT_TOKEN=...
-OWNER_ID=123456789
+TELEGRAM_BOT_TOKEN=
+OWNER_ID=
 
-OPENAI_API_KEY=...
+OPENAI_API_KEY=
 OPENAI_API_URL=https://generativelanguage.googleapis.com/v1beta/openai
 OPENAI_MODEL=gemini-3-flash-preview
 
-SERPER_API_KEY=...
+FAST_MODEL=
+SMART_MODEL=
+MODELS_JSON=
+
+SERPER_API_KEY=
 
 ENABLE_WEB_SEARCH=true
 ENABLE_VISION=true
 ENABLE_SUMMARIZER=true
 ENABLE_REMINDERS=true
 ENABLE_CRON=true
+ENABLE_SELF_UPDATE=true
 
 DASHBOARD_PORT=8080
 DASHBOARD_PASSWORD=change_me
 
-CONTEXT_WINDOW=20
+AGENT_NAME=Ninoclaw
+USER_NAME=friend
+BOT_PURPOSE=be your personal AI assistant
+TIMEZONE=UTC
 
-# Optional image providers
+DISABLED_SKILLS=
+```
+
+Optional image providers:
+
+```env
 FAL_KEY=
 HF_TOKEN=
 GEMINI_API_KEY=
 ```
 
-Optional multi-model chain:
+Optional music / IR bridges:
 
 ```env
-MODELS_JSON=[
-  {"api_url":"https://generativelanguage.googleapis.com/v1beta/openai","api_key":"...","model":"gemini-3-flash-preview"},
-  {"api_url":"https://api.openai.com/v1","api_key":"...","model":"gpt-4o-mini"}
-]
+MUSIC_BRIDGE_URL=
+IR_BRIDGE_URL=
 ```
+
+## Runtime Reload
+
+Ninoclaw can reload parts of the runtime without a full restart:
+
+- skill toggles
+- built-in plugin toggles
+- live tool catalog
+- model settings used for new requests
+
+The owner-only tool `reload_runtime` is available for explicit reloads.
+
+## Security Model
+
+Current security controls include:
+
+- owner-only filtering in tool definitions
+- owner-only enforcement again at tool execution time
+- command/path/skill validation in [security.py](./security.py)
+- prompt hardening against prompt injection from tool output or fetched content
+- unsupported tool auto-hiding via capability detection
+- dashboard password generation if missing or weak
+
+Recommended:
+
+- set `OWNER_ID`
+- keep `.env` private
+- do not paste live API keys or tokens into logs/chat
+- rotate any token that was ever exposed
 
 ## CLI Commands
 
@@ -182,23 +301,46 @@ ninoclaw imagegen
 ninoclaw version
 ```
 
-## Security Notes
+## Screenshots
 
-- Set `OWNER_ID` to restrict dangerous/admin tools.
-- Dashboard now enforces non-default password generation if missing/weak.
-- Sensitive tools are owner-gated in tool execution.
-- Keep `.env` private and never commit real tokens.
+Place screenshot assets under `docs/screenshots/`.
 
-## Roadmap
+Suggested current captures:
 
-- Export chat history
-- Better mobile-first dashboard UX
-- Voice message transcription workflow
-- Multi-user policy controls
+- dashboard overview
+- plugins and skills page
+- models page
+- builds page
+- mobile apps page
+- Telegram Expo reply
+- Telegram image-to-website flow
+
+## Hardware Guidance
+
+### Good fit
+
+- desktop/laptop
+- VPS or always-on Linux box for core bot/dashboard
+- Raspberry Pi 4 / Pi 5 for core gateway use
+
+### Not a good full-feature target
+
+- Raspberry Pi Zero 2 W for the full toolchain
+
+Reason:
+
+- core bot may run
+- heavy dev tooling like Expo and local model workloads are not a good fit
 
 ## Contributing
 
-PRs are welcome. For major changes, open an issue first.
+PRs are welcome. If you change runtime behavior, keep the README aligned with:
+
+- dashboard capabilities
+- install/setup flow
+- platform support
+- security behavior
+- builder workflows
 
 ## License
 
