@@ -43,7 +43,10 @@ def _build_tool_feedback(step_results, available_image_urls):
             "Available image URLs for website/image tasks (use them directly in HTML <img src>):\n"
             + image_list
         )
-    parts.append("Continue until the task is fully done. Use more tools if needed; otherwise provide final answer.")
+    parts.append(
+        "If the user's request is already satisfied, provide the final answer now. "
+        "Use more tools only when they are still necessary."
+    )
     return "\n\n".join(parts)
 
 
@@ -72,6 +75,20 @@ def _step_fingerprint(step_results):
     return " || ".join(p for p in parts if p)
 
 
+def _tool_result_failed(result):
+    raw = (result or "").strip()
+    text = raw.lower()
+    return (
+        not raw
+        or raw[:1] == "\u274c"
+        or text.startswith("blocked:")
+        or text.startswith("error:")
+        or text.startswith("failed:")
+        or "runtimeerror" in text
+        or "traceback" in text
+    )
+
+
 def _looks_like_tool_dump(text):
     t = (text or "").lower()
     return (
@@ -79,6 +96,39 @@ def _looks_like_tool_dump(text):
         or t.count("website updated") > 1
         or ("expo app" in t and "website" in t)
     )
+_FUN_SUPPORT_KEYWORDS = (
+    "cheer me up",
+    "make me laugh",
+    "tell me a joke",
+    "joke",
+    "funny",
+    "say something nice",
+    "comfort me",
+    "i'm sad",
+    "i am sad",
+    "depressed",
+    "feeling low",
+    "feeling down",
+    "motivate me",
+)
+_FUN_SUPPORT_TOOL_ALLOWLIST = {"tell_joke", "fun_fact"}
+
+
+def _is_fun_support_request(user_message):
+    text = (user_message or "").lower()
+    return any(hint in text for hint in _FUN_SUPPORT_KEYWORDS)
+
+
+def _filter_tools_for_request(user_message, tools):
+    if _is_fun_support_request(user_message):
+        filtered = [
+            tool for tool in tools
+            if tool.get("function", {}).get("name", "") in _FUN_SUPPORT_TOOL_ALLOWLIST
+        ]
+        if filtered:
+            return filtered
+    return tools
+
 
 
 def _should_use_deep_mode(user_message):
@@ -249,17 +299,31 @@ Remember these details and use them in your responses.
 You have access to tools to schedule and manage recurring tasks. When the user wants to schedule something (like "remind me every day at 9am"), use the schedule_cron tool."""
 
 
-def _should_stop_after_step(step_tool_names, step_results):
+def _should_stop_after_step(user_message, step_tool_names, step_results):
     expo_actions = {"expo_create_app", "expo_start_app", "expo_edit_app", "expo_stop_app", "expo_delete_app"}
     if not any(name in expo_actions for name in step_tool_names):
+        if _is_fun_support_request(user_message):
+            if step_tool_names and all(name in _FUN_SUPPORT_TOOL_ALLOWLIST for name in step_tool_names):
+                for result in step_results:
+                    if _tool_result_failed(result):
+                        continue
+                    return True
         return False
     for result in step_results:
         text = (result or "").lower()
-        if text.startswith("❌") or "runtimeerror" in text or "traceback" in text:
+        if _tool_result_failed(result):
             continue
-        if "expo app" in text or "preview link:" in text:
+        if "expo app" in text or "preview link:" in text or "expo go link:" in text:
             return True
     return False
+
+
+def _should_skip_final_summarization(user_message, step_tool_names):
+    return (
+        _is_fun_support_request(user_message)
+        and bool(step_tool_names)
+        and all(name in _FUN_SUPPORT_TOOL_ALLOWLIST for name in step_tool_names)
+    )
 
 
 async def generate_reply(user_id, user_message, memory=None):
@@ -269,7 +333,7 @@ async def generate_reply(user_id, user_message, memory=None):
         conv_history = conv_history[:-1]
 
     personalized_prompt = build_personalized_prompt(memory, user_id)
-    tools = get_tool_definitions(user_id)
+    tools = _filter_tools_for_request(user_message, get_tool_definitions(user_id))
 
     response = chat(
         message=user_message,
@@ -286,6 +350,7 @@ async def generate_reply(user_id, user_message, memory=None):
     max_tool_rounds = _tool_round_limit(user_message)
     last_step_fp = ""
     no_progress_rounds = 0
+    skip_final_summarization = False
 
     for _ in range(max_tool_rounds):
         if not tool_calls:
@@ -330,8 +395,9 @@ async def generate_reply(user_id, user_message, memory=None):
                 if img_url not in available_image_urls:
                     available_image_urls.append(img_url)
 
-        if _should_stop_after_step(step_tool_names, step_results):
-            final_response = step_results[-1]
+        if _should_stop_after_step(user_message, step_tool_names, step_results):
+            final_response = "\n\n".join(_dedupe_preserve([_strip_image_markers(r) for r in step_results if r]))
+            skip_final_summarization = _should_skip_final_summarization(user_message, step_tool_names)
             break
 
         tool_history.append({
@@ -350,7 +416,7 @@ async def generate_reply(user_id, user_message, memory=None):
         if no_progress_rounds >= 1:
             break
 
-    if all_tool_results:
+    if all_tool_results and not skip_final_summarization:
         final_response = _finalize_after_tools(
             personalized_prompt=personalized_prompt,
             tool_history=tool_history,
@@ -369,3 +435,6 @@ async def generate_reply(user_id, user_message, memory=None):
 
 def generate_reply_sync(user_id, user_message, memory=None):
     return asyncio.run(generate_reply(user_id, user_message, memory=memory))
+
+
+

@@ -71,7 +71,10 @@ def _build_tool_feedback(step_results, available_image_urls):
             "Available image URLs for website/image tasks (use them directly in HTML <img src>):\n"
             + image_list
         )
-    parts.append("Continue until the task is fully done. Use more tools if needed; otherwise provide final answer.")
+    parts.append(
+        "If the user's request is already satisfied, provide the final answer now. "
+        "Use more tools only when they are still necessary."
+    )
     return "\n\n".join(parts)
 
 
@@ -109,6 +112,20 @@ def _step_fingerprint(step_results):
     return " || ".join(p for p in parts if p)
 
 
+def _tool_result_failed(result):
+    raw = (result or "").strip()
+    text = raw.lower()
+    return (
+        not raw
+        or raw[:1] == "\u274c"
+        or text.startswith("blocked:")
+        or text.startswith("error:")
+        or text.startswith("failed:")
+        or "runtimeerror" in text
+        or "traceback" in text
+    )
+
+
 def _looks_like_tool_dump(text):
     t = (text or "").lower()
     return (
@@ -116,6 +133,41 @@ def _looks_like_tool_dump(text):
         or t.count("website updated") > 1
         or ("expo app" in t and "website" in t)
     )
+
+
+_FUN_SUPPORT_KEYWORDS = (
+    "cheer me up",
+    "make me laugh",
+    "tell me a joke",
+    "joke",
+    "fun fact",
+    "make me smile",
+    "i am sad",
+    "i'm sad",
+    "i feel sad",
+    "feeling low",
+    "depressed",
+    "feeling down",
+    "comfort me",
+    "motivate me",
+)
+_FUN_SUPPORT_TOOL_ALLOWLIST = {"tell_joke", "fun_fact"}
+
+
+def _is_fun_support_request(user_message):
+    text = (user_message or "").lower()
+    return any(hint in text for hint in _FUN_SUPPORT_KEYWORDS)
+
+
+def _filter_tools_for_request(user_message, tools):
+    if _is_fun_support_request(user_message):
+        filtered = [
+            tool for tool in tools
+            if tool.get("function", {}).get("name", "") in _FUN_SUPPORT_TOOL_ALLOWLIST
+        ]
+        if filtered:
+            return filtered
+    return tools
 
 
 def _should_use_deep_mode(user_message):
@@ -149,18 +201,31 @@ def _should_use_deep_mode(user_message):
 def _tool_round_limit(user_message):
     return DEEP_TOOL_ROUNDS if _should_use_deep_mode(user_message) else DEFAULT_TOOL_ROUNDS
 
-
-def _should_stop_after_step(step_tool_names, step_results):
+def _should_stop_after_step(user_message, step_tool_names, step_results):
     expo_actions = {"expo_create_app", "expo_start_app", "expo_edit_app", "expo_stop_app", "expo_delete_app"}
     if not any(name in expo_actions for name in step_tool_names):
+        if _is_fun_support_request(user_message):
+            if step_tool_names and all(name in _FUN_SUPPORT_TOOL_ALLOWLIST for name in step_tool_names):
+                for result in step_results:
+                    if _tool_result_failed(result):
+                        continue
+                    return True
         return False
     for result in step_results:
         text = (result or "").lower()
-        if text.startswith("❌") or "runtimeerror" in text or "traceback" in text:
+        if _tool_result_failed(result):
             continue
-        if "expo app" in text or "preview link:" in text:
+        if "expo app" in text or "preview link:" in text or "expo go link:" in text:
             return True
     return False
+
+
+def _should_skip_final_summarization(user_message, step_tool_names):
+    return (
+        _is_fun_support_request(user_message)
+        and bool(step_tool_names)
+        and all(name in _FUN_SUPPORT_TOOL_ALLOWLIST for name in step_tool_names)
+    )
 
 
 def _finalize_after_tools(personalized_prompt, tool_history, all_tool_results, fallback=""):
@@ -749,7 +814,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
     # Get AI response — use streaming for plain messages, non-streaming when tools needed
     await update.message.chat.send_action(action="typing")
 
-    tools = get_tool_definitions(user_id)
+    tools = _filter_tools_for_request(user_message, get_tool_definitions(user_id))
 
     def _extract_tool_calls(resp_obj, text_for_direct_map=None, allow_direct_map=False):
         final_text = resp_obj if isinstance(resp_obj, str) else (resp_obj.get("content") or "")
@@ -861,6 +926,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
     max_tool_rounds = _tool_round_limit(user_message)
     last_step_fp = ""
     no_progress_rounds = 0
+    skip_final_summarization = False
     progress_msg = None
     last_progress = ""
 
@@ -924,8 +990,9 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                 if img_url not in available_image_urls:
                     available_image_urls.append(img_url)
 
-        if _should_stop_after_step(step_tool_names, step_results):
-            final_response = step_results[-1]
+        if _should_stop_after_step(user_message, step_tool_names, step_results):
+            final_response = "\n\n".join(_dedupe_preserve([_strip_image_markers(r) for r in step_results if r]))
+            skip_final_summarization = _should_skip_final_summarization(user_message, step_tool_names)
             break
 
         # Feed results back so model can continue autonomously.
@@ -952,12 +1019,13 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             except Exception:
                 pass
 
-        final_response = _finalize_after_tools(
-            personalized_prompt=personalized_prompt,
-            tool_history=tool_history,
-            all_tool_results=all_tool_results,
-            fallback=final_response,
-        )
+        if not skip_final_summarization:
+            final_response = _finalize_after_tools(
+                personalized_prompt=personalized_prompt,
+                tool_history=tool_history,
+                all_tool_results=all_tool_results,
+                fallback=final_response,
+            )
         memory.add_message(user_id, "assistant", final_response)
         asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
 
@@ -1137,7 +1205,6 @@ Your purpose is to {BOT_PURPOSE}."""
     await update.message.chat.send_action(action="typing")
 
     conv_history = memory.get_conversation_context(user_id)
-    tools = get_tool_definitions(user_id)
     if uploaded_image_url:
         user_message = (
             f"{caption}\n\n"
@@ -1145,6 +1212,7 @@ Your purpose is to {BOT_PURPOSE}."""
         )
     else:
         user_message = caption
+    tools = _filter_tools_for_request(caption, get_tool_definitions(user_id))
 
     def _extract_tool_calls(resp_obj):
         final_text = resp_obj if isinstance(resp_obj, str) else (resp_obj.get("content") or "")
@@ -1231,6 +1299,7 @@ Your purpose is to {BOT_PURPOSE}."""
     max_tool_rounds = _tool_round_limit(caption)
     last_step_fp = ""
     no_progress_rounds = 0
+    skip_final_summarization = False
     progress_msg = None
     last_progress = ""
 
@@ -1291,8 +1360,9 @@ Your purpose is to {BOT_PURPOSE}."""
                 if img_url not in available_image_urls:
                     available_image_urls.append(img_url)
 
-        if _should_stop_after_step(step_tool_names, step_results):
-            final_response = step_results[-1]
+        if _should_stop_after_step(user_message, step_tool_names, step_results):
+            final_response = "\n\n".join(_dedupe_preserve([_strip_image_markers(r) for r in step_results if r]))
+            skip_final_summarization = _should_skip_final_summarization(caption, step_tool_names)
             break
 
         tool_history.append({
@@ -1316,7 +1386,7 @@ Your purpose is to {BOT_PURPOSE}."""
         except Exception:
             pass
 
-    if all_tool_results:
+    if all_tool_results and not skip_final_summarization:
         final_response = _finalize_after_tools(
             personalized_prompt=personalized_prompt,
             tool_history=tool_history,
@@ -1568,3 +1638,6 @@ def create_bot(token):
     task_manager.telegram_app = app
 
     return app
+
+
+
