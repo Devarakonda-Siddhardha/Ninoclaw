@@ -81,7 +81,7 @@ def create_bot(token: str):
                 message=user_text,
                 system_prompt=system_prompt,
                 history=conv_history,
-                tools=get_tool_definitions()
+                tools=get_tool_definitions(user_id)
             )
 
         final_response = response if isinstance(response, str) else response.get("content") or ""

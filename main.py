@@ -97,9 +97,16 @@ def start_dashboard():
     """Start the web dashboard in a background thread"""
     try:
         from dashboard import app as dash_app
-        from dotenv import dotenv_values
+        from dotenv import dotenv_values, set_key
+        import secrets
         import threading
-        env = dotenv_values(os.path.join(os.path.dirname(__file__), ".env"))
+        env_path = os.path.join(os.path.dirname(__file__), ".env")
+        env = dotenv_values(env_path)
+        pwd = (env.get("DASHBOARD_PASSWORD") or "").strip()
+        if not pwd or pwd == "admin":
+            pwd = secrets.token_urlsafe(18)
+            set_key(env_path, "DASHBOARD_PASSWORD", pwd)
+            print("⚠️  Generated a secure DASHBOARD_PASSWORD (default/empty password was unsafe).")
         port = int(env.get("DASHBOARD_PORT", "8080"))
         t = threading.Thread(
             target=lambda: dash_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False),
@@ -107,6 +114,7 @@ def start_dashboard():
         )
         t.start()
         print(f"✅ Dashboard started → http://localhost:{port}")
+        print(f"   Dashboard password: {pwd}")
     except Exception as e:
         print(f"⚠️  Dashboard failed to start: {e}")
 

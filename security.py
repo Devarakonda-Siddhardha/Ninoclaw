@@ -11,6 +11,17 @@ from typing import Optional
 
 # ── Owner check ───────────────────────────────────────────────────────────────
 
+def _normalize_user_id(user_id) -> Optional[int]:
+    """Normalize user IDs from Telegram/Discord-style values to an integer when possible."""
+    s = str(user_id).strip()
+    if s.isdigit():
+        return int(s)
+    m = re.search(r"(\d+)$", s)
+    if m:
+        return int(m.group(1))
+    return None
+
+
 def require_owner(user_id: int) -> Optional[str]:
     """
     Returns None if user is the owner, else an error string.
@@ -19,7 +30,8 @@ def require_owner(user_id: int) -> Optional[str]:
     from config import OWNER_ID
     if not OWNER_ID:
         return "❌ OWNER_ID is not set in .env — system tools are disabled until you configure it."
-    if int(user_id) != int(OWNER_ID):
+    uid = _normalize_user_id(user_id)
+    if uid is None or uid != int(OWNER_ID):
         return "❌ This action is restricted to the bot owner."
     return None
 

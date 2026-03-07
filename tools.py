@@ -4,6 +4,7 @@ Functions the AI can call to perform actions
 """
 import requests as _requests
 from typing import Dict, Any
+from dotenv import load_dotenv
 
 # Load skills and merge their tools
 try:
@@ -19,6 +20,18 @@ _BUILTIN_TOOLS = [
         "function": {
             "name": "self_update",
             "description": "Update the bot to the latest version from GitHub. Use when user says 'update yourself', 'pull latest version', 'update to latest', etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reload_runtime",
+            "description": "Reload runtime configuration, plugin flags, and enabled skills without restarting the bot. Use after changing dashboard plugin toggles, creating/editing/installing skills, or when asked to hot reload.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -312,12 +325,136 @@ _BUILTIN_TOOLS = [
     },
 ]
 
-# Combined tools list — built-ins + all loaded skills
-TOOLS = _BUILTIN_TOOLS + _SKILL_TOOLS
+_BUILTIN_TOOL_MAP = {tool["function"]["name"]: tool for tool in _BUILTIN_TOOLS}
+_FLAGGED_BUILTINS = {
+    "self_update": "ENABLE_SELF_UPDATE",
+    "web_search": "ENABLE_WEB_SEARCH",
+    "schedule_reminder": "ENABLE_REMINDERS",
+    "schedule_cron": "ENABLE_CRON",
+    "list_cron_jobs": "ENABLE_CRON",
+    "remove_cron_job": "ENABLE_CRON",
+    "toggle_cron_job": "ENABLE_CRON",
+}
 
-def get_tool_definitions() -> list:
-    """Get all tool definitions (built-ins + skills)"""
-    return TOOLS
+# ── Owner-only tools (blocked for non-owner users) ────────────────────────────
+_OWNER_ONLY_TOOLS = {
+    "self_update", "reload_runtime",
+    "run_command", "read_file", "write_file", "list_dir",
+    "create_skill", "delete_skill", "install_skill",
+    "run_agent",
+}
+
+# Dangerous content/system-control tools that should be owner-only
+_OWNER_ONLY_SKILL_TOOLS = {
+    "create_integration",
+    "open_app", "close_app", "list_running_apps",
+    "take_screenshot",
+    "voice_call",
+    "web_build", "web_edit", "web_list", "web_delete",
+    "expo_create_app", "expo_start_app", "expo_edit_app",
+    "expo_stop_app", "expo_list_apps", "expo_delete_app",
+}
+
+
+def _tool_requires_owner(tool_name: str) -> bool:
+    return tool_name in _OWNER_ONLY_TOOLS or tool_name in _OWNER_ONLY_SKILL_TOOLS
+
+
+def _sanitize_argument_value(value):
+    if isinstance(value, str):
+        return value.replace("\x00", "").strip()[:20000]
+    if isinstance(value, list):
+        return [_sanitize_argument_value(v) for v in value[:100]]
+    if isinstance(value, dict):
+        clean = {}
+        for k, v in list(value.items())[:100]:
+            clean[str(k)[:200]] = _sanitize_argument_value(v)
+        return clean
+    return value
+
+
+def _sanitize_tool_arguments(arguments):
+    if not isinstance(arguments, dict):
+        return {}
+    return {str(k)[:200]: _sanitize_argument_value(v) for k, v in list(arguments.items())[:100]}
+
+
+def _current_env():
+    from config import ENV_FILE, get_runtime_env
+    load_dotenv(ENV_FILE, override=True)
+    return get_runtime_env()
+
+
+def _is_flag_enabled(flag_name: str, env=None) -> bool:
+    env = env or _current_env()
+    return str(env.get(flag_name, "true")).strip().lower() != "false"
+
+
+def is_owner(user_id) -> bool:
+    """Check if user_id matches OWNER_ID."""
+    from config import OWNER_ID
+    if not OWNER_ID:
+        return False
+    try:
+        return int(user_id) == int(OWNER_ID)
+    except (ValueError, TypeError):
+        return False
+
+
+def _enabled_builtin_tools(env=None):
+    env = env or _current_env()
+    enabled = []
+    for tool in _BUILTIN_TOOLS:
+        name = tool["function"]["name"]
+        flag = _FLAGGED_BUILTINS.get(name)
+        if flag and not _is_flag_enabled(flag, env):
+            continue
+        enabled.append(tool)
+    return enabled
+
+
+def reload_runtime_state():
+    """Hot-reload runtime skills and tool definitions from current .env."""
+    global _SKILL_TOOLS, TOOLS
+    env = _current_env()
+    import skill_manager as sm
+    sm.load_skills()
+    _SKILL_TOOLS = sm.get_tools()
+    TOOLS = _enabled_builtin_tools(env) + _SKILL_TOOLS
+    return {
+        "tools": len(TOOLS),
+        "skills": len(sm.list_skills()),
+        "disabled_skills": sorted(s for s in str(env.get("DISABLED_SKILLS", "")).split(",") if s.strip()),
+    }
+
+
+# Combined tools list — built-ins + all loaded skills
+TOOLS = []
+try:
+    reload_runtime_state()
+except Exception:
+    TOOLS = _enabled_builtin_tools() + _SKILL_TOOLS
+
+def get_tool_definitions(user_id=None) -> list:
+    """Get tool definitions filtered by user access level.
+    Owner gets all tools; other users get only safe tools.
+    """
+    global TOOLS
+    try:
+        TOOLS = _enabled_builtin_tools() + _SKILL_TOOLS
+    except Exception:
+        pass
+    # No user_id = return all (backwards compat for dashboard/tasks)
+    if user_id is None or is_owner(user_id):
+        return TOOLS
+    # Non-owner: filter out dangerous tools
+    safe = []
+    for tool in TOOLS:
+        name = tool.get("function", {}).get("name", "")
+        if _tool_requires_owner(name):
+            continue
+        safe.append(tool)
+    return safe
 
 
 async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, task_manager) -> str:
@@ -337,8 +474,36 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
     from config import SERPER_API_KEY
     from security import require_owner, safe_path, safe_command, validate_skill_code
 
+    arguments = _sanitize_tool_arguments(arguments)
+
+    # ── Enforce owner-only access at execution time ───────────────────────
+    if _tool_requires_owner(tool_name):
+        err = require_owner(user_id)
+        if err:
+            return err
+
     memory = Memory()
     user_timezone = memory.get_timezone(user_id)
+
+    if tool_name == "reload_runtime":
+        err = require_owner(user_id)
+        if err:
+            return err
+        try:
+            state = reload_runtime_state()
+            disabled = ", ".join(state["disabled_skills"]) if state["disabled_skills"] else "none"
+            return (
+                "✅ Runtime reloaded.\n\n"
+                f"Tools available: {state['tools']}\n"
+                f"Loaded skills: {state['skills']}\n"
+                f"Disabled skills: {disabled}"
+            )
+        except Exception as e:
+            return f"❌ Runtime reload failed: {e}"
+
+    flag_name = _FLAGGED_BUILTINS.get(tool_name)
+    if flag_name and not _is_flag_enabled(flag_name):
+        return f"❌ {tool_name} is disabled in Plugins & Skills."
 
     if tool_name == "self_update":
         from updater import check_for_updates, do_update, get_current_version, restart
@@ -461,8 +626,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return f"❌ Skill '{skill_name}' not found."
         os.remove(skill_path)
         try:
-            import skill_manager as sm
-            sm.load_skills()
+            reload_runtime_state()
         except Exception:
             pass
         return f"🗑️ Skill '{skill_name}' deleted."
@@ -502,8 +666,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         try:
             import skill_manager as sm
             sm.load_skills()
-            import tools as _t
-            _t.TOOLS = _t._BUILTIN_TOOLS + sm.get_tools()
+            reload_runtime_state()
             return f"✅ Skill **{skill_name}** installed from:\n`{url}`\n\nReady to use — just ask me!"
         except Exception as e:
             return f"⚠️ Skill saved as skills/{skill_name}.py but reload failed: {e}\nRestart bot to activate."
@@ -529,8 +692,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         try:
             import skill_manager as sm
             sm.load_skills()
-            import tools as _t
-            _t.TOOLS = _t._BUILTIN_TOOLS + sm.get_tools()
+            reload_runtime_state()
             return (f"✅ Skill **{skill_name}** created and loaded!\n"
                     f"You can now use it — just ask me to use it.")
         except Exception as e:
@@ -548,7 +710,6 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         except Exception as e:
             return f"❌ Sub-agent failed: {e}"
 
-    # ── System tools (owner-only, hardened) ──────────────────────────────────
     _SYS_TOOLS = {"run_command", "read_file", "write_file", "list_dir"}
     if tool_name in _SYS_TOOLS:
         err = require_owner(user_id)

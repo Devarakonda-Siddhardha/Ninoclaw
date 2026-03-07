@@ -42,6 +42,26 @@ Ninoclaw is a memory-aware AI assistant with tools:
   - Default mode: shorter rounds for speed
   - Deep mode: more rounds for complex requests or prompts like `think harder`
 
+## Screenshots
+
+Place image files in `docs/screenshots/` with the names below.
+
+### Dashboard
+
+![Dashboard Overview](docs/screenshots/dashboard-overview.png)
+![Plugins and Skills](docs/screenshots/dashboard-plugins-skills.png)
+![Builds Tab](docs/screenshots/dashboard-builds-tab.png)
+
+### Telegram Flows
+
+![Image to Website Prompt](docs/screenshots/telegram-image-to-website-prompt.jpg)
+![Generated Build Reply](docs/screenshots/telegram-generated-build-reply.jpg)
+![Think Harder Deep Mode](docs/screenshots/telegram-think-harder-deep-mode.jpg)
+
+### Build Preview
+
+![Generated Website Preview](docs/screenshots/build-preview-website.png)
+
 ## Architecture
 
 Core files:

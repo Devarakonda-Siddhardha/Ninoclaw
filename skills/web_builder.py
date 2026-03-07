@@ -30,7 +30,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "web_build",
-            "description": "Create a new website. Generate beautiful, modern HTML with inline CSS and JS. The html parameter must contain a COMPLETE, valid HTML document (<!DOCTYPE html>...) with all styling and logic included inline. Make it visually stunning with gradients, animations, and modern design. If image URLs are provided in context, use them directly in <img src=\"...\">. After creating, the user gets a live preview link.",
+            "description": "Create a new website or web page. Generate beautiful, modern HTML with inline CSS and JS. Use this for websites, landing pages, portfolios, dashboards, and browser-based web apps. Do NOT use this for React Native, Expo, Android, iOS, or other mobile-native app requests. The html parameter must contain a COMPLETE, valid HTML document (<!DOCTYPE html>...) with all styling and logic included inline. Make it visually stunning with gradients, animations, and modern design. If image URLs are provided in context, use them directly in <img src=\"...\">. After creating, the user gets a live preview link.",
             "parameters": {
                 "type": "object",
                 "properties": {

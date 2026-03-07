@@ -4,7 +4,7 @@ AI integration — supports a chain of models with automatic fallback
 import requests
 import json
 import time
-from config import MODELS, OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_THINK, FAST_MODEL, _fast_cfg, _smart_cfg
+from config import get_runtime_ai_config
 
 
 # Keywords that signal a complex/expensive request
@@ -23,25 +23,25 @@ _TOOL_KEYWORDS = {
     "remind", "reminder", "cron", "what's playing", "next song",
 }
 
-def _pick_model_cfg(message: str, force_smart: bool = False, force_fast: bool = False):
+def _pick_model_cfg(message: str, runtime_cfg: dict, force_smart: bool = False, force_fast: bool = False):
     """
     Route to fast or smart model based on request complexity.
     Returns a model config dict, or None to use the normal MODELS chain.
     Only activates when FAST_MODEL is configured.
     """
-    if not FAST_MODEL:
+    if not runtime_cfg.get("fast_model"):
         return None  # routing disabled, use normal chain
     if force_fast:
-        return _fast_cfg()
+        return runtime_cfg.get("fast_cfg")
     if force_smart:
-        return _smart_cfg()
+        return runtime_cfg.get("smart_cfg")
     msg_lower = message.lower()
     is_complex = (
         len(message) > 300
         or any(kw in msg_lower for kw in _COMPLEX_KEYWORDS)
         or any(kw in msg_lower for kw in _TOOL_KEYWORDS)
     )
-    return _smart_cfg() if is_complex else _fast_cfg()
+    return runtime_cfg.get("smart_cfg") if is_complex else runtime_cfg.get("fast_cfg")
 
 def _try_gemini_tools(message, system_prompt, history, tools):
     """
@@ -119,18 +119,23 @@ def chat(message, system_prompt=None, history=None, tools=None, image_b64=None, 
     If FAST_MODEL is configured, routes simple vs complex requests automatically.
     """
     last_error = "No models configured."
+    runtime_cfg = get_runtime_ai_config()
 
-    routed = _pick_model_cfg(message, force_smart=force_smart, force_fast=force_fast)
-    model_list = [routed] if routed else MODELS
+    routed = _pick_model_cfg(message, runtime_cfg, force_smart=force_smart, force_fast=force_fast)
+    model_list = [routed] if routed else runtime_cfg["models"]
     for model_cfg in model_list:
-        result, error = _try_openai(model_cfg, message, system_prompt, history, tools, image_b64)
+        result, error = _try_openai(
+            model_cfg, message, system_prompt, history, tools, image_b64, runtime_cfg["ollama_think"]
+        )
         if result is not None:
             return result
         # If failed with image, retry without it (non-multimodal model).
         # The image URL is already embedded in the text message by the caller.
         if image_b64 and ("400" in str(error) or "Bad Request" in str(error)):
             print(f"[AI] Model {model_cfg['model']} rejected image payload, retrying text-only...")
-            result, error2 = _try_openai(model_cfg, message, system_prompt, history, tools, None)
+            result, error2 = _try_openai(
+                model_cfg, message, system_prompt, history, tools, None, runtime_cfg["ollama_think"]
+            )
             if result is not None:
                 return result
             error = error2
@@ -148,9 +153,10 @@ async def chat_stream(message, system_prompt=None, history=None):
     """
     import asyncio, httpx
     last_error = "No models configured."
+    runtime_cfg = get_runtime_ai_config()
 
-    routed = _pick_model_cfg(message)
-    model_list = [routed] if routed else MODELS
+    routed = _pick_model_cfg(message, runtime_cfg)
+    model_list = [routed] if routed else runtime_cfg["models"]
 
     for model_cfg in model_list:
         url = f"{model_cfg['api_url']}/chat/completions"
@@ -172,7 +178,7 @@ async def chat_stream(message, system_prompt=None, history=None):
             "stream": True,
         }
         if model_cfg.get("api_key") == "ollama" or "localhost:11434" in url:
-            payload["think"] = OLLAMA_THINK
+            payload["think"] = runtime_cfg["ollama_think"]
 
         try:
             _timeout = 180 if (model_cfg.get("api_key") == "ollama" or "localhost:11434" in url) else 60
@@ -204,7 +210,7 @@ async def chat_stream(message, system_prompt=None, history=None):
     yield f"⚠️ All models failed. Last error: {last_error}"
 
 
-def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64):
+def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64, ollama_think=False):
     """
     Single attempt against one model config.
     Returns (result, None) on success, (None, error_str) on failure.
@@ -235,7 +241,7 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64):
 
     payload = {"model": model_cfg["model"], "messages": messages, "temperature": 0.7}
     if _is_ollama:
-        payload["think"] = OLLAMA_THINK  # Qwen3 thinking mode (toggle via: ninoclaw think on/off)
+        payload["think"] = ollama_think  # Qwen3 thinking mode (toggle via: ninoclaw think on/off)
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
@@ -271,8 +277,9 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64):
 # ── Ollama (kept for legacy / local use) ──────────────────────────────────
 
 def _chat_ollama(message, system_prompt=None, history=None):
-    url = f"{OLLAMA_HOST}/api/chat"
-    payload = {"model": OLLAMA_MODEL, "messages": []}
+    runtime_cfg = get_runtime_ai_config()
+    url = f"{runtime_cfg['ollama_host']}/api/chat"
+    payload = {"model": runtime_cfg["ollama_model"], "messages": []}
     if system_prompt:
         payload["messages"].append({"role": "system", "content": system_prompt})
     if history:
@@ -294,13 +301,14 @@ def _chat_ollama(message, system_prompt=None, history=None):
 
 
 def list_models():
-    return [m["model"] for m in MODELS]
+    return [m["model"] for m in get_runtime_ai_config()["models"]]
 
 
 def test_connection():
-    if not MODELS:
+    runtime_cfg = get_runtime_ai_config()
+    if not runtime_cfg["models"]:
         return False
-    cfg = MODELS[0]
+    cfg = runtime_cfg["models"][0]
     try:
         url = f"{cfg['api_url']}/models"
         headers = {"Authorization": f"Bearer {cfg['api_key']}"}

@@ -616,7 +616,15 @@ def plugins_page():
             save_env_key("DISABLED_SKILLS", ",".join(disabled))
         except Exception:
             pass
-        flash("Settings saved! Restart bot to apply.", "success")
+        try:
+            from tools import reload_runtime_state
+            state = reload_runtime_state()
+            flash(
+                f"Settings saved and applied live. {state['skills']} skills loaded, {state['tools']} tools available.",
+                "success",
+            )
+        except Exception:
+            flash("Settings saved! Restart bot if a running session still shows old tools.", "success")
         return redirect(url_for("plugins_page"))
 
     def is_on(key, default="true"):
@@ -649,7 +657,7 @@ def plugins_page():
     tmpl = BASE + """
 
 <div class="page-title">Plugins & Skills</div>
-<div class="page-sub">Toggle built-in features and skills. Restart bot to apply changes.</div>
+<div class="page-sub">Toggle built-in features and skills. Changes apply live to new requests.</div>
 <form method="POST">
 
 <div class="card">
@@ -749,7 +757,7 @@ def plugins_page():
 </div>
 
 <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i> Save All Settings</button>
-<p style="color:var(--muted);font-size:0.8rem;margin-top:12px;">⚠ Run <code>ninoclaw restart</code> for changes to take effect.</p>
+<p style="color:var(--muted);font-size:0.8rem;margin-top:12px;">New requests pick up changes immediately. Restart only if you suspect a stale long-running session.</p>
 </form>
 
 """

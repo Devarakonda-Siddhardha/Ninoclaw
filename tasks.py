@@ -306,7 +306,7 @@ This is an automated task execution. Be helpful and concise."""
 
         try:
             from tools import get_tool_definitions, execute_tool
-            tools = get_tool_definitions()
+            tools = get_tool_definitions(user_id)
             result = chat(message=command, system_prompt=personalized_prompt, history=[], tools=tools)
 
             # Handle tool calls from the scheduled job

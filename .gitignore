@@ -6,3 +6,7 @@ __pycache__/
 memory.json
 tasks.json
 cron_jobs.json
+mobile_apps/*/node_modules/
+mobile_apps/*/.expo/
+mobile_apps/*/dist/
+mobile_apps/_logs/

@@ -1,11 +1,21 @@
 """
 Ninoclaw Setup Wizard — clean single-flow interactive CLI
 """
-import os, sys, getpass
+import os, sys, getpass, shutil
 
 _IS_WIN = sys.platform == "win32"
 if _IS_WIN:
     import msvcrt
+    try:
+        import ctypes
+        _kernel32 = ctypes.windll.kernel32
+        _h = _kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        _mode = ctypes.c_uint()
+        if _kernel32.GetConsoleMode(_h, ctypes.byref(_mode)):
+            # ENABLE_VIRTUAL_TERMINAL_PROCESSING for ANSI cursor/colors
+            _kernel32.SetConsoleMode(_h, _mode.value | 0x0004)
+    except Exception:
+        pass
 else:
     import tty, termios, select
 
@@ -52,6 +62,30 @@ def _getch():
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
+def _term_width():
+    try:
+        return shutil.get_terminal_size((100, 30)).columns
+    except Exception:
+        return 100
+
+
+def _fit_line(text: str, pad: int = 10) -> str:
+    """Trim long labels so each option stays on one console line."""
+    max_len = max(20, _term_width() - pad)
+    return text if len(text) <= max_len else (text[:max_len - 3] + "...")
+
+
+def _pick_existing_url(existing: str, fallback: str, must_contain=(), any_contains=()):
+    """Reuse an existing URL only if it matches expected provider patterns."""
+    existing = (existing or "").strip()
+    if existing:
+        ok_all = all(k in existing for k in must_contain) if must_contain else True
+        ok_any = any(k in existing for k in any_contains) if any_contains else True
+        if ok_all and ok_any:
+            return existing
+    return fallback
+
+
 def choose(prompt, options, default=0):
     """Arrow-key menu. options = list of (label, value)."""
     idx = default
@@ -65,6 +99,7 @@ def choose(prompt, options, default=0):
         for _ in range(n):
             sys.stdout.write(UP + "\r" + CLR)
         for i, (lbl, _) in enumerate(options):
+            lbl = _fit_line(lbl)
             if i == idx:
                 sys.stdout.write(f"\r  {G}❯ {W}{lbl}{RST}\n")
             else:
@@ -89,7 +124,11 @@ def choose(prompt, options, default=0):
 
 
 def ask(prompt, default=None, secret=False, optional=False):
-    hint = f" {DIM}[{default}]{RST}" if default else (f" {DIM}(optional — press Enter to skip){RST}" if optional else "")
+    if default:
+        shown_default = "saved" if secret else default
+        hint = f" {DIM}[{shown_default}]{RST}"
+    else:
+        hint = f" {DIM}(optional - press Enter to skip){RST}" if optional else ""
     try:
         if secret:
             val = getpass.getpass(f"  {C}❯{RST} {prompt}{hint}: ")
@@ -97,8 +136,12 @@ def ask(prompt, default=None, secret=False, optional=False):
             val = input(f"  {C}❯{RST} {prompt}{hint}: ").strip()
     except (KeyboardInterrupt, EOFError):
         print(f"\n{Y}Cancelled.{RST}"); sys.exit(0)
-    return (val.strip() or default) if val.strip() else (default if not optional else None)
-
+    val = (val or "").strip()
+    if val:
+        return val
+    if default not in (None, ""):
+        return default
+    return None if optional else default
 
 def section(title):
     print(f"\n{M}  ── {W}{title}{RST}")
@@ -142,7 +185,8 @@ def run_wizard():
         if not redo:
             return e
 
-    cfg = {}
+    # Preserve existing .env keys and only overwrite values changed in wizard.
+    cfg = dict(e)
 
     # ── 1. Messaging Platforms ────────────────────────────────────────────────
     section("Step 1 — Messaging Platforms")
@@ -171,6 +215,7 @@ def run_wizard():
         for _ in range(n):
             sys.stdout.write(UP + "\r" + CLR)
         for i, (lbl, val) in enumerate(_platforms):
+            lbl = _fit_line(lbl, pad=14)
             check = f"{G}◉{RST}" if val in selected else f"{DIM}○{RST}"
             cursor = f"{G}❯ {W}" if i == idx else f"    {DIM}"
             sys.stdout.write(f"\r  {cursor}{check}  {lbl}{RST}\n")
@@ -236,25 +281,26 @@ def run_wizard():
     # ── 2. AI Provider ────────────────────────────────────────────────────────
     section("Step 2 — AI Provider")
     provider = choose("Which AI provider?", [
-        ("OpenRouter      (100+ models, free tier available)",  "openrouter"),
-        ("Google Gemini   (free tier available)",               "gemini"),
-        ("Groq            (free, very fast)",                   "groq"),
-        ("OpenAI          (GPT-4o, GPT-4o-mini)",              "openai"),
-        ("Mistral         (mistral-small free)",                "mistral"),
+        ("OpenRouter      (100+ models, free tier)",            "openrouter"),
+        ("Google Gemini   (free tier)",                         "gemini"),
+        ("Groq            (fast, free)",                        "groq"),
+        ("OpenAI          (GPT-4o / GPT-4o-mini)",              "openai"),
+        ("Mistral         (mistral-small)",                     "mistral"),
         ("xAI Grok        (grok-3-mini)",                       "xai"),
-        ("ZhipuAI GLM     (glm-4-flash free)",                  "glm"),
-        ("ZhipuAI GLM Coding Plan (GLM-4.7, paid)",            "glm_coding"),
+        ("ZhipuAI GLM     (glm-4-flash)",                       "glm"),
+        ("ZhipuAI GLM Coding (glm-4.7 paid)",                   "glm_coding"),
         ("Anthropic Claude",                                    "anthropic"),
-        ("Ollama          (local, offline)",                    "ollama"),
-        ("Local Server    (llama.cpp, LM Studio, vLLM)",        "local"),
-        ("Custom endpoint",                                     "custom"),
+        ("Ollama          (local offline)",                     "ollama"),
+        ("Local Server    (OpenAI-compatible)",                 "local"),
+        ("Custom endpoint (manual URL)",                        "custom"),
     ])
 
     if provider == "openrouter":
         info("Get key: https://openrouter.ai/keys  (free signup)")
         info("Free models end with :free  e.g.  google/gemini-2.0-flash-exp:free")
         cfg["OPENAI_API_URL"] = "https://openrouter.ai/api/v1"
-        cfg["OPENAI_API_KEY"] = ask("OpenRouter API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        key_default = e.get("OPENROUTER_API_KEY") or (e.get("OPENAI_API_KEY") if "openrouter.ai" in (e.get("OPENAI_API_URL", "")) else "")
+        cfg["OPENAI_API_KEY"] = ask("OpenRouter API Key", default=key_default, secret=True) or ""
         cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "google/gemini-2.0-flash-exp:free")) or ""
         cfg["OPENROUTER_API_KEY"] = cfg["OPENAI_API_KEY"]
 
@@ -267,8 +313,10 @@ def run_wizard():
     elif provider == "groq":
         info("Get key: https://console.groq.com")
         cfg["OPENAI_API_URL"] = "https://api.groq.com/openai/v1"
-        cfg["OPENAI_API_KEY"] = ask("Groq API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        key_default = e.get("GROQ_API_KEY") or (e.get("OPENAI_API_KEY") if "api.groq.com" in (e.get("OPENAI_API_URL", "")) else "")
+        cfg["OPENAI_API_KEY"] = ask("Groq API Key", default=key_default, secret=True) or ""
         cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "llama-3.3-70b-versatile")) or ""
+        cfg["GROQ_API_KEY"] = cfg["OPENAI_API_KEY"]
 
     elif provider == "openai":
         cfg["OPENAI_API_URL"] = "https://api.openai.com/v1"
@@ -277,23 +325,30 @@ def run_wizard():
 
     elif provider == "mistral":
         cfg["OPENAI_API_URL"] = "https://api.mistral.ai/v1"
-        cfg["OPENAI_API_KEY"] = ask("Mistral API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        key_default = e.get("MISTRAL_API_KEY") or (e.get("OPENAI_API_KEY") if "api.mistral.ai" in (e.get("OPENAI_API_URL", "")) else "")
+        cfg["OPENAI_API_KEY"] = ask("Mistral API Key", default=key_default, secret=True) or ""
         cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "mistral-small-latest")) or ""
+        cfg["MISTRAL_API_KEY"] = cfg["OPENAI_API_KEY"]
 
     elif provider == "xai":
         cfg["OPENAI_API_URL"] = "https://api.x.ai/v1"
-        cfg["OPENAI_API_KEY"] = ask("xAI API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        key_default = e.get("XAI_API_KEY") or (e.get("OPENAI_API_KEY") if "api.x.ai" in (e.get("OPENAI_API_URL", "")) else "")
+        cfg["OPENAI_API_KEY"] = ask("xAI API Key", default=key_default, secret=True) or ""
         cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "grok-3-mini")) or ""
+        cfg["XAI_API_KEY"] = cfg["OPENAI_API_KEY"]
 
     elif provider == "glm":
         cfg["OPENAI_API_URL"] = "https://open.bigmodel.cn/api/paas/v4"
-        cfg["OPENAI_API_KEY"] = ask("ZhipuAI API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        key_default = e.get("GLM_API_KEY") or (e.get("OPENAI_API_KEY") if "open.bigmodel.cn" in (e.get("OPENAI_API_URL", "")) else "")
+        cfg["OPENAI_API_KEY"] = ask("ZhipuAI API Key", default=key_default, secret=True) or ""
         cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "glm-4-flash")) or ""
+        cfg["GLM_API_KEY"] = cfg["OPENAI_API_KEY"]
 
     elif provider == "glm_coding":
         info("Get key: https://z.ai  (GLM Coding Plan from $3/month)")
         cfg["OPENAI_API_URL"] = "https://api.z.ai/api/coding/paas/v4"
-        cfg["OPENAI_API_KEY"] = ask("Z.AI API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        key_default = e.get("GLM_CODING_API_KEY") or (e.get("OPENAI_API_KEY") if "api.z.ai" in (e.get("OPENAI_API_URL", "")) else "")
+        cfg["OPENAI_API_KEY"] = ask("Z.AI API Key", default=key_default, secret=True) or ""
         cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "glm-4.7")) or ""
         cfg["GLM_CODING_API_KEY"]   = cfg["OPENAI_API_KEY"]
         cfg["GLM_CODING_MODEL"]     = cfg["OPENAI_MODEL"]
@@ -305,14 +360,24 @@ def run_wizard():
 
     elif provider == "ollama":
         info("Make sure Ollama is running: ollama serve")
-        cfg["OPENAI_API_URL"] = ask("Ollama URL", default=e.get("OPENAI_API_URL", "http://localhost:11434/v1")) or ""
+        cfg["OPENAI_API_URL"] = _pick_existing_url(
+            e.get("OPENAI_API_URL", ""),
+            "http://localhost:11434/v1",
+            any_contains=("localhost:11434", "127.0.0.1:11434"),
+        )
+        info(f"Using endpoint: {cfg['OPENAI_API_URL']}  (preloaded)")
         cfg["OPENAI_API_KEY"] = "ollama"
         cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "llama3.2")) or ""
 
     elif provider == "local":
         info("Make sure your local server is running (e.g. llama-server -hf ... --port 8000)")
-        info("Warning: Do not use port 8080 if your Ninoclaw web dashboard uses it.")
-        cfg["OPENAI_API_URL"] = ask("Local API Base URL", default=e.get("OPENAI_API_URL", "http://127.0.0.1:8000/v1")) or ""
+        cfg["OPENAI_API_URL"] = _pick_existing_url(
+            e.get("OPENAI_API_URL", ""),
+            "http://127.0.0.1:8000/v1",
+            any_contains=("127.0.0.1", "localhost"),
+            must_contain=("/v1",),
+        )
+        info(f"Using endpoint: {cfg['OPENAI_API_URL']}  (preloaded)")
         cfg["OPENAI_API_KEY"] = ask("API Key (usually 'local')", default="local") or "local"
         cfg["OPENAI_MODEL"]   = ask("Model name (usually ignored by local servers)", default="local-model") or "local-model"
 
@@ -324,25 +389,173 @@ def run_wizard():
     ok(f"Provider: {provider}  |  Model: {cfg['OPENAI_MODEL']}")
 
     # ── 3. Fallback providers ─────────────────────────────────────────────────
-    section("Step 3 — Fallback Providers  (optional)")
-    info("Bot tries these in order if primary fails. Press Enter to skip any.")
-    _fallbacks = [
-        ("OpenRouter API Key",      "OPENROUTER_API_KEY", "https://openrouter.ai — free models available"),
-        ("Groq API Key",           "GROQ_API_KEY",        "https://console.groq.com — free"),
-        ("Mistral API Key",        "MISTRAL_API_KEY",      "https://console.mistral.ai"),
-        ("xAI Grok API Key",       "XAI_API_KEY",          "https://console.x.ai"),
-        ("GLM API Key",            "GLM_API_KEY",           "https://open.bigmodel.cn"),
-        ("GLM Coding API Key",     "GLM_CODING_API_KEY",    "https://z.ai — GLM-4.7 coding model"),
-        ("Ollama model name",      "OLLAMA_MODEL",          "e.g. llama3.2 — local"),
+    section("Step 3 - Fallback Providers (optional)")
+    info("Pick up to 2 fallback providers. Space = toggle | Enter = confirm | arrows = move")
+
+    fallback_specs = [
+        {
+            "id": "openrouter",
+            "label": "OpenRouter (100+ models)",
+            "key_env": "OPENROUTER_API_KEY",
+            "model_env": "OPENROUTER_MODEL",
+            "default_model": "openai/gpt-4o-mini",
+            "key_prompt": "OpenRouter API Key",
+            "model_prompt": "OpenRouter model",
+            "hint": "Get key: https://openrouter.ai/keys",
+        },
+        {
+            "id": "groq",
+            "label": "Groq (fast, free tier)",
+            "key_env": "GROQ_API_KEY",
+            "model_env": "GROQ_MODEL",
+            "default_model": "llama-3.3-70b-versatile",
+            "key_prompt": "Groq API Key",
+            "model_prompt": "Groq model",
+            "hint": "Get key: https://console.groq.com",
+        },
+        {
+            "id": "mistral",
+            "label": "Mistral",
+            "key_env": "MISTRAL_API_KEY",
+            "model_env": "MISTRAL_MODEL",
+            "default_model": "mistral-small-latest",
+            "key_prompt": "Mistral API Key",
+            "model_prompt": "Mistral model",
+            "hint": "Get key: https://console.mistral.ai",
+        },
+        {
+            "id": "xai",
+            "label": "xAI Grok",
+            "key_env": "XAI_API_KEY",
+            "model_env": "XAI_MODEL",
+            "default_model": "grok-3-mini",
+            "key_prompt": "xAI API Key",
+            "model_prompt": "xAI model",
+            "hint": "Get key: https://console.x.ai",
+        },
+        {
+            "id": "glm",
+            "label": "ZhipuAI GLM",
+            "key_env": "GLM_API_KEY",
+            "model_env": "GLM_MODEL",
+            "default_model": "glm-4-flash",
+            "key_prompt": "GLM API Key",
+            "model_prompt": "GLM model",
+            "hint": "Get key: https://open.bigmodel.cn",
+        },
+        {
+            "id": "glm_coding",
+            "label": "Z.AI GLM Coding",
+            "key_env": "GLM_CODING_API_KEY",
+            "model_env": "GLM_CODING_MODEL",
+            "default_model": "glm-4.7",
+            "key_prompt": "Z.AI API Key",
+            "model_prompt": "GLM Coding model",
+            "hint": "Get key: https://z.ai",
+        },
+        {
+            "id": "ollama",
+            "label": "Ollama (local model)",
+            "key_env": "",
+            "model_env": "OLLAMA_MODEL",
+            "default_model": "llama3.2",
+            "key_prompt": "",
+            "model_prompt": "Ollama fallback model",
+            "hint": "Run local server first: ollama serve",
+        },
     ]
-    for label, key, hint in _fallbacks:
-        if cfg.get(key): continue  # already set as primary
-        info(hint)
-        val = ask(label, default=e.get(key), optional=True,
-                  secret=(key != "OLLAMA_MODEL"))
-        if val:
-            cfg[key] = val
-            ok(f"{label.split()[0]} added")
+
+    fallback_specs = [s for s in fallback_specs if s["id"] != provider]
+    fallback_options = [(s["label"], s["id"]) for s in fallback_specs]
+
+    preselected_fallbacks = []
+    for spec in fallback_specs:
+        key_env = spec["key_env"]
+        model_env = spec["model_env"]
+        pick = False
+        if key_env:
+            if e.get(key_env):
+                pick = True
+        elif e.get(model_env):
+            pick = True
+        if pick and spec["id"] not in preselected_fallbacks:
+            preselected_fallbacks.append(spec["id"])
+
+    selected_fallbacks = set(preselected_fallbacks[:2])
+    if len(preselected_fallbacks) > 2:
+        info("Only 2 existing fallbacks were preselected. You can adjust selection now.")
+    idx = 0
+    n_fallbacks = len(fallback_options)
+    max_limit_hit = False
+
+    def _render_fallbacks():
+        for _ in range(n_fallbacks):
+            sys.stdout.write(UP + "\r" + CLR)
+        for i, (lbl, val) in enumerate(fallback_options):
+            lbl = _fit_line(lbl, pad=14)
+            check = f"{G}◉{RST}" if val in selected_fallbacks else f"{DIM}○{RST}"
+            cursor = f"{G}❯ {W}" if i == idx else f"    {DIM}"
+            sys.stdout.write(f"\r  {cursor}{check}  {lbl}{RST}\n")
+        sys.stdout.flush()
+
+    for _ in fallback_options:
+        print()
+    sys.stdout.write(HIDE); sys.stdout.flush()
+    try:
+        _render_fallbacks()
+        while True:
+            k = _getch()
+            if k in ('\x1b[A', '\x1b[D'):
+                idx = (idx - 1) % n_fallbacks
+            elif k in ('\x1b[B', '\x1b[C'):
+                idx = (idx + 1) % n_fallbacks
+            elif k == ' ':
+                val = fallback_options[idx][1]
+                if val in selected_fallbacks:
+                    selected_fallbacks.discard(val)
+                elif len(selected_fallbacks) < 2:
+                    selected_fallbacks.add(val)
+                else:
+                    max_limit_hit = True
+            elif k in ('\r', '\n'):
+                break
+            elif k == '\x03':
+                sys.stdout.write(SHOW); sys.exit(0)
+            _render_fallbacks()
+    finally:
+        sys.stdout.write(SHOW); sys.stdout.flush()
+
+    fallback_order = [val for _, val in fallback_options if val in selected_fallbacks]
+    if max_limit_hit:
+        info("Maximum 2 fallbacks allowed; extra selections were ignored.")
+    if fallback_order:
+        ok(f"Fallbacks selected: {', '.join(fallback_order)}")
+    else:
+        ok("No fallback selected")
+
+    # Disable unselected fallback providers to keep behavior clear.
+    for spec in fallback_specs:
+        if spec["id"] in selected_fallbacks:
+            continue
+        if spec["key_env"]:
+            cfg.pop(spec["key_env"], None)
+        if spec["model_env"]:
+            cfg.pop(spec["model_env"], None)
+
+    # Ask credentials/models only for selected fallback providers.
+    fallback_spec_by_id = {s["id"]: s for s in fallback_specs}
+    for fallback_id in fallback_order:
+        spec = fallback_spec_by_id[fallback_id]
+        info(spec["hint"])
+        if spec["key_env"]:
+            key_val = ask(spec["key_prompt"], default=e.get(spec["key_env"]), secret=True, optional=True)
+            if not key_val:
+                print(f"  {Y}⚠  Skipping {fallback_id} (no key provided){RST}")
+                continue
+            cfg[spec["key_env"]] = key_val
+        model_default = e.get(spec["model_env"], spec["default_model"])
+        model_val = ask(spec["model_prompt"], default=model_default, optional=True) or spec["default_model"]
+        cfg[spec["model_env"]] = model_val
 
     # ── 4. Web Search ─────────────────────────────────────────────────────────
     section("Step 4 — Web Search  (optional)")

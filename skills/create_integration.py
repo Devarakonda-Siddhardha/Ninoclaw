@@ -5,6 +5,7 @@ Lets the AI write new skill files on-the-fly for any app or service.
 import ast
 import os
 import sys
+import re
 from pathlib import Path
 
 # Allow importing from the parent (Ninoclaw root) directory
@@ -110,6 +111,17 @@ def _validate_syntax(code: str):
         return e
 
 
+def _safe_skill_name(app_name: str) -> str:
+    """Normalize user-provided app name to a safe Python module name."""
+    name = re.sub(r"[^a-z0-9_]", "_", app_name.lower().strip())
+    name = re.sub(r"_+", "_", name).strip("_")
+    if not name:
+        name = "integration"
+    if not re.match(r"^[a-z]", name):
+        name = f"skill_{name}"
+    return name[:50]
+
+
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
@@ -148,8 +160,15 @@ def _do_create_integration(app_name: str, description: str, api_docs_hint: str) 
         if syntax_err:
             return f"Error: generated code has a syntax error after retry: {syntax_err}"
 
+    from security import validate_skill_code
+
+    # Full safety validation before writing executable code to disk.
+    err = validate_skill_code(code)
+    if err:
+        return err
+
     # Save skill file
-    filename = app_name.lower().replace(" ", "_") + ".py"
+    filename = _safe_skill_name(app_name) + ".py"
     skill_path = Path(__file__).parent / filename
     try:
         skill_path.write_text(code, encoding="utf-8")

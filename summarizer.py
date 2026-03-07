@@ -3,6 +3,9 @@ URL and YouTube summarizer for Ninoclaw
 """
 import re
 import requests
+import socket
+import ipaddress
+from urllib.parse import urlparse
 from html.parser import HTMLParser
 
 
@@ -63,6 +66,15 @@ class _TextExtractor(HTMLParser):
 def get_url_content(url):
     """Fetch and extract readable text from any URL"""
     try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return None, "Only http/https URLs are allowed."
+        host = parsed.hostname
+        if not host:
+            return None, "Invalid URL."
+        if _is_private_or_local_host(host):
+            return None, "Blocked URL host for security."
+
         resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
         parser = _TextExtractor()
@@ -71,6 +83,42 @@ def get_url_content(url):
         return text[:12000], None  # Limit tokens
     except requests.RequestException as e:
         return None, f"Failed to fetch URL: {e}"
+
+
+def _is_private_or_local_host(host: str) -> bool:
+    """Block localhost/private/link-local/metadata targets to reduce SSRF risk."""
+    h = host.strip().lower()
+    if h in {"localhost"} or h.endswith(".local"):
+        return True
+
+    def _blocked_ip(ip_text: str) -> bool:
+        ip = ipaddress.ip_address(ip_text)
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        )
+
+    try:
+        return _blocked_ip(h)
+    except ValueError:
+        pass
+
+    try:
+        infos = socket.getaddrinfo(h, None, proto=socket.IPPROTO_TCP)
+    except Exception:
+        return False
+
+    for info in infos:
+        try:
+            if _blocked_ip(info[4][0]):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def build_summary_prompt(content, url, is_yt=False):
