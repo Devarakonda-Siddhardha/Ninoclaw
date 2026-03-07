@@ -99,7 +99,11 @@ def _step_fingerprint(step_results):
 
 def _looks_like_tool_dump(text):
     t = (text or "").lower()
-    return t.count("preview: http") > 1 or t.count("website updated") > 1
+    return (
+        t.count("preview: http") > 1
+        or t.count("website updated") > 1
+        or ("expo app" in t and "website" in t)
+    )
 
 
 def _should_use_deep_mode(user_message):
@@ -136,6 +140,9 @@ def _tool_round_limit(user_message):
 
 def _finalize_after_tools(personalized_prompt, tool_history, all_tool_results, fallback=""):
     clean_results = _dedupe_preserve([_strip_image_markers(r) for r in all_tool_results])
+    expo_results = [r for r in clean_results if "expo app" in r.lower() or "preview link:" in r.lower()]
+    if expo_results:
+        return "\n\n".join(expo_results)
     fallback_text = fallback.strip() if isinstance(fallback, str) else ""
     if not fallback_text:
         fallback_text = "\n\n".join(clean_results)
@@ -196,12 +203,38 @@ _CODE_EXTS = {
     "php": "php", "ruby": "rb", "r": "r", "toml": "toml",
 }
 
+
+def _clean_response_text(text: str) -> str:
+    """Strip raw HTML, leftover <tool_call> tags, and code noise from AI responses."""
+    import re as _re
+    # Strip any remaining <tool_call>...) patterns that weren't caught by parsers
+    text = _re.sub(r'<tool_call>\w+\).*', '', text, flags=_re.DOTALL).strip()
+    # Strip <tool_call>...</ patterns (XML-style)
+    text = _re.sub(r'<tool_call>.*?</\w+>', '', text, flags=_re.DOTALL).strip()
+    # Strip <tool_code>...</tool_code>
+    text = _re.sub(r'<tool_code>.*?</tool_code>', '', text, flags=_re.DOTALL).strip()
+    # Strip raw HTML blocks (<!DOCTYPE ...> through </html>)
+    text = _re.sub(r'<!DOCTYPE\s+html>.*?</html>', '', text, flags=_re.DOTALL | _re.IGNORECASE).strip()
+    # Strip standalone <html>...</html> blocks
+    text = _re.sub(r'<html\b[^>]*>.*?</html>', '', text, flags=_re.DOTALL | _re.IGNORECASE).strip()
+    # Strip <style>...</style> blocks that leak into text
+    text = _re.sub(r'<style\b[^>]*>.*?</style>', '', text, flags=_re.DOTALL | _re.IGNORECASE).strip()
+    # Clean up excessive whitespace left behind
+    text = _re.sub(r'\n{3,}', '\n\n', text).strip()
+    return text
+
+
 async def send_with_code_files(update: Update, text: str):
     """
     Send a response. If it contains code blocks (```lang\\n...```),
     extract them and send as downloadable files, then send remaining text.
     """
     import io
+
+    # Clean up raw HTML / tool call noise before sending
+    text = _clean_response_text(text)
+    if not text:
+        return
 
     # Find all fenced code blocks
     pattern = re.compile(r"```(\w+)?\n([\s\S]*?)```", re.MULTILINE)

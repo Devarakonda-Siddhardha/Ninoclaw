@@ -1494,10 +1494,10 @@ def mobile_apps_page():
       <div style="display:grid; gap:8px; margin-bottom:14px;">
         {% if app.launch_url %}<a href="{{ app.launch_url }}" class="btn btn-outline" target="_blank">Launch Link</a>{% endif %}
         {% if app.tunnel_url and app.tunnel_url != app.launch_url %}<a href="{{ app.tunnel_url }}" class="btn btn-outline" target="_blank">Tunnel URL</a>{% endif %}
-        {% if app.web_url %}<a href="{{ app.web_url }}" class="btn btn-outline" target="_blank">Web URL</a>{% endif %}
+        {% if app.web_url %}<a href="{{ app.web_url }}" class="btn btn-outline" target="_blank">Local Web URL</a>{% endif %}
       </div>
       {% else %}
-      <div style="margin-bottom:14px; color:var(--muted); font-size:0.88rem;">No preview link captured yet. Start the app and wait a few seconds.</div>
+      <div style="margin-bottom:14px; color:var(--muted); font-size:0.88rem;">No device preview link captured yet. Wait a bit longer or restart with tunnel mode.</div>
       {% endif %}
       <div style="color:var(--muted); font-size:0.82rem; margin-bottom:12px;">
         {% if app.port %}Port {{ app.port }}{% else %}Port pending{% endif %}
