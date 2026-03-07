@@ -8,7 +8,7 @@ import base64
 from pathlib import Path
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from ai import chat, list_models, test_connection
+from ai import chat, chat_vision, list_models, test_connection
 from memory import Memory, extract_and_store_facts
 from tasks import task_manager
 from config import SYSTEM_PROMPT, AGENT_NAME, USER_NAME, BOT_PURPOSE, get_runtime_env
@@ -1205,13 +1205,30 @@ Your purpose is to {BOT_PURPOSE}."""
     await update.message.chat.send_action(action="typing")
 
     conv_history = memory.get_conversation_context(user_id)
+    vision_prompt = (
+        "Analyze this image carefully. Describe the visible content, any text in the image, "
+        "important objects, people, scene details, and anything relevant to the user's request.\n\n"
+        f"User request: {caption}"
+    )
+    vision_system_prompt = (
+        "You are a vision analysis assistant. Describe only what is visible in the image. "
+        "If something is unclear, say that it is unclear. Do not invent unseen details."
+    )
+    vision_summary = chat_vision(
+        message=vision_prompt,
+        image_b64=image_b64,
+        system_prompt=vision_system_prompt,
+        history=None,
+    )
+
     if uploaded_image_url:
         user_message = (
             f"{caption}\n\n"
+            f"Image analysis:\n{vision_summary}\n\n"
             f"Uploaded image URL (use this directly in websites if relevant): {uploaded_image_url}"
         )
     else:
-        user_message = caption
+        user_message = f"{caption}\n\nImage analysis:\n{vision_summary}"
     tools = _filter_tools_for_request(caption, get_tool_definitions(user_id))
 
     def _extract_tool_calls(resp_obj):
@@ -1288,7 +1305,6 @@ Your purpose is to {BOT_PURPOSE}."""
         system_prompt=personalized_prompt,
         history=conv_history,
         tools=tools,
-        image_b64=image_b64,
         force_smart=True
     )
     final_response, tool_calls = _extract_tool_calls(response)

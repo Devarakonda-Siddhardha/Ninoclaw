@@ -23,6 +23,60 @@ _TOOL_KEYWORDS = {
     "remind", "reminder", "cron", "what's playing", "next song",
 }
 
+
+def _model_key(model_cfg):
+    return (
+        (model_cfg or {}).get("api_url", ""),
+        (model_cfg or {}).get("api_key", ""),
+        (model_cfg or {}).get("model", ""),
+    )
+
+
+def _is_multimodal_candidate(model_cfg):
+    model = ((model_cfg or {}).get("model") or "").lower()
+    api_url = ((model_cfg or {}).get("api_url") or "").lower()
+    multimodal_hints = (
+        "gemini",
+        "gpt-4o",
+        "gpt-4.1",
+        "vision",
+        "vl",
+        "llava",
+        "claude-3",
+        "claude-4",
+    )
+    return (
+        "generativelanguage.googleapis.com" in api_url
+        or any(hint in model for hint in multimodal_hints)
+    )
+
+
+def _vision_model_list(runtime_cfg):
+    candidates = []
+    seen = set()
+
+    def _add(cfg):
+        key = _model_key(cfg)
+        if not cfg or key in seen:
+            return
+        if _is_multimodal_candidate(cfg):
+            seen.add(key)
+            candidates.append(cfg)
+
+    gemini_cfg = next(
+        (
+            cfg for cfg in runtime_cfg.get("models", [])
+            if "gemini" in (cfg.get("model", "") or "").lower()
+            or "generativelanguage.googleapis.com" in (cfg.get("api_url", "") or "").lower()
+        ),
+        None,
+    )
+    _add(gemini_cfg)
+    _add(runtime_cfg.get("smart_cfg"))
+    for cfg in runtime_cfg.get("models", []):
+        _add(cfg)
+    return candidates
+
 def _pick_model_cfg(message: str, runtime_cfg: dict, force_smart: bool = False, force_fast: bool = False):
     """
     Route to fast or smart model based on request complexity.
@@ -143,6 +197,40 @@ def chat(message, system_prompt=None, history=None, tools=None, image_b64=None, 
         print(f"[AI] Model {model_cfg['model']} failed ({error}), trying next...")
 
     return f"⚠️ All models failed. Last error: {last_error}"
+
+
+def chat_vision(message, image_b64, system_prompt=None, history=None):
+    """
+    Run image understanding on a multimodal-capable model only.
+    Do not silently retry text-only, because that would fake vision.
+    """
+    if not image_b64:
+        return "No image provided."
+
+    runtime_cfg = get_runtime_ai_config()
+    candidates = _vision_model_list(runtime_cfg)
+    if not candidates:
+        return "No multimodal model is configured for image analysis."
+
+    last_error = "No multimodal models available."
+    for model_cfg in candidates:
+        result, error = _try_openai(
+            model_cfg,
+            message,
+            system_prompt,
+            history,
+            None,
+            image_b64,
+            runtime_cfg["ollama_think"],
+        )
+        if result is not None:
+            if isinstance(result, dict):
+                return (result.get("content") or "").strip()
+            return result
+        last_error = error
+        print(f"[AI] Vision model {model_cfg['model']} failed ({error}), trying next...")
+
+    return f"All multimodal models failed. Last error: {last_error}"
 
 
 async def chat_stream(message, system_prompt=None, history=None):
