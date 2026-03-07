@@ -30,7 +30,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "web_build",
-            "description": "Create a new website or web page. Generate beautiful, modern HTML with inline CSS and JS. Use this for websites, landing pages, portfolios, dashboards, and browser-based web apps. Do NOT use this for React Native, Expo, Android, iOS, or other mobile-native app requests. The html parameter must contain a COMPLETE, valid HTML document (<!DOCTYPE html>...) with all styling and logic included inline. Make it visually stunning with gradients, animations, and modern design. If image URLs are provided in context, use them directly in <img src=\"...\">. After creating, the user gets a live preview link.",
+            "description": "MUST USE THIS TOOL to create a website. DO NOT provide Python code or instructions - ONLY call this tool with HTML. Generate beautiful, modern HTML with inline CSS and JS. The html parameter must contain a COMPLETE, valid HTML document (<!DOCTYPE html>...) with all styling and logic included inline. Make it visually stunning with gradients, animations, and modern design. If image URLs are provided in context, use them directly in <img src=\"...\">. CRITICAL: Never show Python code to the user - always call this tool.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -51,7 +51,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "web_edit",
-            "description": "Edit an existing website's HTML. Provide the full updated HTML to replace the current file. Reuse provided image URLs when requested.",
+            "description": "MUST USE THIS TOOL to edit a website. DO NOT provide Python code or instructions - ONLY call this tool with updated HTML. Provide the full updated HTML to replace the current file. Reuse provided image URLs when requested. CRITICAL: Never show Python code to the user - always call this tool.",
             "parameters": {
                 "type": "object",
                 "properties": {

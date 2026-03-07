@@ -335,18 +335,22 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64, ol
         payload["tool_choice"] = "auto"
 
     try:
-        for attempt in range(3):
+        max_retries = 5
+        for attempt in range(max_retries):
             _timeout = 180 if (headers.get("Authorization", "") == "Bearer ollama" or "localhost:11434" in url) else 60
             resp = requests.post(url, json=payload, headers=headers, timeout=_timeout)
             if resp.status_code == 429:
-                time.sleep(2 ** attempt)
+                # Rate limited - wait longer with exponential backoff
+                wait_time = min(30, 5 * (2 ** attempt))  # 5s, 10s, 20s, 30s, 30s
+                print(f"[AI] Rate limited, waiting {wait_time}s before retry {attempt + 1}/{max_retries}...")
+                time.sleep(wait_time)
                 continue
             if resp.status_code >= 500:
                 return None, f"HTTP {resp.status_code}"
             resp.raise_for_status()
             break
         else:
-            return None, "Rate limited after 3 retries"
+            return None, f"Rate limited after {max_retries} retries. Please wait a few minutes before trying again."
 
         data = resp.json()
         msg = data["choices"][0]["message"]
