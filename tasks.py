@@ -320,7 +320,7 @@ This is an automated task execution. Be helpful and concise."""
                         import json as _json
                         try: args = _json.loads(args)
                         except Exception: args = {}
-                    tool_output = execute_tool(tool_name, args, user_id)
+                    tool_output = await execute_tool(tool_name, args, user_id, self)
                     tool_results.append(f"✅ {tool_name}: {tool_output}")
                 response = "\n".join(tool_results) if tool_results else "✅ Done."
             else:

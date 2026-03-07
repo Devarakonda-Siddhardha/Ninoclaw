@@ -1279,11 +1279,11 @@ def tasks_page():
     if conn:
         try:
             tasks = conn.execute(
-                "SELECT id, user_id, description, due_time, completed "
-                "FROM tasks ORDER BY due_time ASC"
+                "SELECT id, user_id, name, scheduled_time, completed "
+                "FROM tasks ORDER BY scheduled_time ASC"
             ).fetchall()
             crons = conn.execute(
-                "SELECT id, user_id, description, cron_expr, is_active "
+                "SELECT id, user_id, name, cron_expression, is_active "
                 "FROM cron_jobs ORDER BY id DESC"
             ).fetchall()
         except Exception:
