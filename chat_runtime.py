@@ -206,6 +206,25 @@ def _extract_tool_calls(resp_obj, text_for_direct_map=None, allow_direct_map=Fal
     final_text = resp_obj if isinstance(resp_obj, str) else (resp_obj.get("content") or "")
     tcalls = resp_obj.get("tool_calls") if isinstance(resp_obj, dict) else None
 
+    # If the user's input looks like a math expression or LaTeX, skip the
+    # tool/XML parsing so symbols like <, >, $ and raw equation syntax are preserved.
+    try:
+        _probe = text_for_direct_map if text_for_direct_map is not None else final_text
+        if isinstance(_probe, str) and _probe.strip():
+            # Inline/display LaTeX like $...$
+            if re.search(r'\$.*?\$', _probe):
+                return final_text, None
+            # Typical equation: contains '=' and both digits and math operators
+            if '=' in _probe and re.search(r'\d', _probe) and re.search(r'[\+\-\*\/\^]', _probe):
+                return final_text, None
+            # Multi-line math where at least one line looks math-like
+            if '\n' in _probe:
+                math_lines = [l for l in _probe.splitlines() if re.search(r'\d', l) and re.search(r'[\+\-\*\/\^=]', l)]
+                if len(math_lines) >= 1:
+                    return final_text, None
+    except Exception:
+        pass
+
     if not tcalls and final_text:
         tc_match = re.search(r"<tool_code>\s*(\{.*?\})\s*</tool_code>", final_text, re.DOTALL)
         if tc_match:
