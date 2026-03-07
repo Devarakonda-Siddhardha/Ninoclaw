@@ -88,7 +88,7 @@ def build_model_chain(env=None):
         _provider("https://open.bigmodel.cn/api/paas/v4", "GLM_API_KEY", "GLM_MODEL", "glm-4-flash", env=env),
         _provider("https://api.z.ai/api/coding/paas/v4", "GLM_CODING_API_KEY", "GLM_CODING_MODEL", "glm-4.7", env=env),
         # Google Gemini — free tier, multimodal
-        _provider("https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY", "GEMINI_MODEL", "gemini-2.5-flash", env=env),
+        _provider("https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY", "GEMINI_MODEL", "gemini-3-flash-preview", env=env),
         _provider("https://api.minimax.chat/v1", "MINIMAX_API_KEY", "MINIMAX_MODEL", "MiniMax-Text-01", env=env),
         _provider("https://api.together.xyz/v1", "TOGETHER_API_KEY", "TOGETHER_MODEL", "meta-llama/Llama-3-70b-chat-hf", env=env),
         _provider("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "openai/gpt-4o-mini", env=env),
