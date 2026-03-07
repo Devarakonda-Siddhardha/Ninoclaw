@@ -126,6 +126,14 @@ def chat(message, system_prompt=None, history=None, tools=None, image_b64=None, 
         result, error = _try_openai(model_cfg, message, system_prompt, history, tools, image_b64)
         if result is not None:
             return result
+        # If failed with image, retry without it (non-multimodal model).
+        # The image URL is already embedded in the text message by the caller.
+        if image_b64 and ("400" in str(error) or "Bad Request" in str(error)):
+            print(f"[AI] Model {model_cfg['model']} rejected image payload, retrying text-only...")
+            result, error2 = _try_openai(model_cfg, message, system_prompt, history, tools, None)
+            if result is not None:
+                return result
+            error = error2
         last_error = error
         print(f"[AI] Model {model_cfg['model']} failed ({error}), trying next...")
 
