@@ -1003,7 +1003,9 @@ def chat_send(user_id):
         from ai import chat as ai_chat
         mem.add_message(user_id, "user", text)
         context = mem.get_conversation_context(user_id)
-        reply = ai_chat(context)
+        # Pass the last user message as `message`, prior messages as `history`
+        history = context[:-1] if len(context) > 1 else []
+        reply = ai_chat(message=text, history=history)
         # strip tool-call noise if any
         if isinstance(reply, dict):
             reply = reply.get("content", str(reply))
