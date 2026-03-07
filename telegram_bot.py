@@ -739,6 +739,21 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                 except Exception:
                     pass
 
+        # Parse GLM JSON-style <tool_call>name){"key": "value"}
+        if not tcalls and final_text:
+            import re as _re2, json as _json2
+            tc_match = _re2.search(r'<tool_call>(\w+)\)\s*(\{.*)', final_text, _re2.DOTALL)
+            if tc_match:
+                try:
+                    tool_name = tc_match.group(1)
+                    raw_json = tc_match.group(2).strip()
+                    tool_args = _json2.loads(raw_json)
+                    if tool_name:
+                        tcalls = [{"function": {"name": tool_name, "arguments": tool_args}}]
+                        final_text = final_text[:tc_match.start()].strip()
+                except Exception:
+                    pass
+
         # Direct intent mapping - bypass model hallucination for common tool commands
         if allow_direct_map and not tcalls:
             msg_l = (text_for_direct_map or "").lower().strip()
@@ -1105,6 +1120,22 @@ Your purpose is to {BOT_PURPOSE}."""
                         final_text = _re2.sub(r'(?s)<tool_call>\w+>.*?</\w+>', '', final_text).strip()
                 except Exception:
                     pass
+
+        # Parse GLM JSON-style <tool_call>name){"key": "value"}
+        if not tcalls and final_text:
+            import re as _re2, json as _json2
+            tc_match = _re2.search(r'<tool_call>(\w+)\)\s*(\{.*)', final_text, _re2.DOTALL)
+            if tc_match:
+                try:
+                    tool_name = tc_match.group(1)
+                    raw_json = tc_match.group(2).strip()
+                    tool_args = _json2.loads(raw_json)
+                    if tool_name:
+                        tcalls = [{"function": {"name": tool_name, "arguments": tool_args}}]
+                        final_text = final_text[:tc_match.start()].strip()
+                except Exception:
+                    pass
+
         return final_text, tcalls
 
     response = chat(
