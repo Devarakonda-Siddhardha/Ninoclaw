@@ -73,6 +73,22 @@ def check_environment():
 
     return True
 
+
+def print_capability_summary():
+    """Print detected runtime profile and any auto-hidden tools."""
+    try:
+        from runtime_capabilities import summarized_capability_report
+
+        report = summarized_capability_report()
+        print(f"🧭 Runtime profile: {report['profile']} ({report['device']}, {report['ram_gb']} GB RAM)")
+        if report["disabled_tools"]:
+            preview = ", ".join(item["tool"] for item in report["disabled_tools"][:8])
+            extra = len(report["disabled_tools"]) - 8
+            suffix = f" (+{extra} more)" if extra > 0 else ""
+            print(f"⚠️  Auto-hidden incompatible tools: {preview}{suffix}")
+    except Exception as e:
+        print(f"⚠️  Capability detection unavailable: {e}")
+
 def setup_bot_commands(application):
     """Set up bot commands for the menu"""
     commands = [
@@ -228,6 +244,7 @@ def main():
     if not check_environment():
         print("\n❌ Environment check failed. Please fix issues above.")
         sys.exit(1)
+    print_capability_summary()
 
     print("\n🚀 Starting Ninoclaw...")
 

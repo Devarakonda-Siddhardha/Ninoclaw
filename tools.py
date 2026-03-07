@@ -413,18 +413,33 @@ def _enabled_builtin_tools(env=None):
     return enabled
 
 
+def _tool_supported(tool_name: str, capabilities=None):
+    from runtime_capabilities import detect_capabilities, tool_unavailable_reason
+
+    capabilities = capabilities or detect_capabilities()
+    reason = tool_unavailable_reason(tool_name, capabilities)
+    return reason is None, reason
+
+
 def reload_runtime_state():
     """Hot-reload runtime skills and tool definitions from current .env."""
     global _SKILL_TOOLS, TOOLS
     env = _current_env()
+    from runtime_capabilities import detect_capabilities, summarized_capability_report
     import skill_manager as sm
     sm.load_skills()
     _SKILL_TOOLS = sm.get_tools()
-    TOOLS = _enabled_builtin_tools(env) + _SKILL_TOOLS
+    capabilities = detect_capabilities(force_refresh=True)
+    capability_report = summarized_capability_report(capabilities)
+    combined = _enabled_builtin_tools(env) + _SKILL_TOOLS
+    TOOLS = [tool for tool in combined if _tool_supported(tool.get("function", {}).get("name", ""), capabilities)[0]]
     return {
         "tools": len(TOOLS),
         "skills": len(sm.list_skills()),
         "disabled_skills": sorted(s for s in str(env.get("DISABLED_SKILLS", "")).split(",") if s.strip()),
+        "capability_profile": capability_report["profile"],
+        "capability_device": capability_report["device"],
+        "capability_disabled_tools": capability_report["disabled_tools"],
     }
 
 
@@ -433,7 +448,7 @@ TOOLS = []
 try:
     reload_runtime_state()
 except Exception:
-    TOOLS = _enabled_builtin_tools() + _SKILL_TOOLS
+    TOOLS = [tool for tool in (_enabled_builtin_tools() + _SKILL_TOOLS) if _tool_supported(tool.get("function", {}).get("name", ""))[0]]
 
 def get_tool_definitions(user_id=None) -> list:
     """Get tool definitions filtered by user access level.
@@ -441,7 +456,10 @@ def get_tool_definitions(user_id=None) -> list:
     """
     global TOOLS
     try:
-        TOOLS = _enabled_builtin_tools() + _SKILL_TOOLS
+        from runtime_capabilities import detect_capabilities
+        capabilities = detect_capabilities()
+        combined = _enabled_builtin_tools() + _SKILL_TOOLS
+        TOOLS = [tool for tool in combined if _tool_supported(tool.get("function", {}).get("name", ""), capabilities)[0]]
     except Exception:
         pass
     # No user_id = return all (backwards compat for dashboard/tasks)
@@ -475,6 +493,9 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
     from security import require_owner, safe_path, safe_command, validate_skill_code
 
     arguments = _sanitize_tool_arguments(arguments)
+    supported, unsupported_reason = _tool_supported(tool_name)
+    if not supported:
+        return f"Blocked: {unsupported_reason}"
 
     # ── Enforce owner-only access at execution time ───────────────────────
     if _tool_requires_owner(tool_name):
@@ -492,11 +513,15 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         try:
             state = reload_runtime_state()
             disabled = ", ".join(state["disabled_skills"]) if state["disabled_skills"] else "none"
+            unsupported = ", ".join(item["tool"] for item in state["capability_disabled_tools"]) if state["capability_disabled_tools"] else "none"
             return (
                 "✅ Runtime reloaded.\n\n"
                 f"Tools available: {state['tools']}\n"
                 f"Loaded skills: {state['skills']}\n"
-                f"Disabled skills: {disabled}"
+                f"Disabled skills: {disabled}\n"
+                f"Capability profile: {state['capability_profile']}\n"
+                f"Device: {state['capability_device']}\n"
+                f"Unsupported tools hidden: {unsupported}"
             )
         except Exception as e:
             return f"❌ Runtime reload failed: {e}"
@@ -813,3 +838,4 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         return f"❌ Skill error ({tool_name}): {e}"
 
     return f"Unknown tool: {tool_name}"
+

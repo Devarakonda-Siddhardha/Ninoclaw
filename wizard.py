@@ -2,6 +2,7 @@
 Ninoclaw Setup Wizard — clean single-flow interactive CLI
 """
 import os, sys, getpass, shutil
+from runtime_capabilities import detect_capabilities, recommended_env_overrides, summarized_capability_report
 
 _IS_WIN = sys.platform == "win32"
 if _IS_WIN:
@@ -176,6 +177,8 @@ def save_env(data):
 
 def run_wizard():
     e = load_existing_env()  # existing values
+    capabilities = detect_capabilities(force_refresh=True)
+    capability_report = summarized_capability_report(capabilities)
     print(BANNER)
 
     if e.get("TELEGRAM_BOT_TOKEN") and e["TELEGRAM_BOT_TOKEN"] != "YOUR_BOT_TOKEN_HERE":
@@ -629,6 +632,18 @@ def run_wizard():
     cfg["DASHBOARD_PASSWORD"] = ask("Dashboard password", default=e.get("DASHBOARD_PASSWORD", "admin")) or "admin"
     cfg["DASHBOARD_PORT"]     = ask("Dashboard port",     default=e.get("DASHBOARD_PORT", "8080"))       or "8080"
     ok(f"Dashboard at http://localhost:{cfg['DASHBOARD_PORT']}")
+
+    # ── 10. Compatibility Profile ─────────────────────────────────
+    section("Step 10 — Device Compatibility Profile")
+    info(f"Detected device: {capability_report['device']}")
+    info(f"Runtime profile: {capability_report['profile']}  |  RAM: {capability_report['ram_gb']} GB")
+    overrides = recommended_env_overrides(cfg, capabilities)
+    cfg.update(overrides)
+    disabled_skills = [s for s in overrides.get("DISABLED_SKILLS", "").split(",") if s]
+    if disabled_skills:
+        ok(f"Auto-disabled incompatible skills: {', '.join(disabled_skills)}")
+    else:
+        ok("No compatibility-based skill disables needed")
 
     # ── Save ──────────────────────────────────────────────────────────────────
     save_env(cfg)

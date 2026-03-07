@@ -304,6 +304,7 @@ def index():
 @require_login
 def overview_page():
     import datetime as _dt
+    from runtime_capabilities import summarized_capability_report
     db = get_db()
     total_messages = 0
     total_users = 0
@@ -337,6 +338,8 @@ def overview_page():
         "disk_pct": round(disk.used / disk.total * 100),
         "git": git_version(),
     }
+    capability = summarized_capability_report()
+    capability_disabled_preview = capability["disabled_tools"][:8]
 
     tmpl = BASE + """
 <div class="page-title">Overview</div>
@@ -384,6 +387,9 @@ def overview_page():
         <tr><td style="color:var(--muted); border:0; padding:4px 8px;">OS</td><td style="border:0; padding:4px 8px;">{{ sys.os }}</td></tr>
         <tr><td style="color:var(--muted); border:0; padding:4px 8px;">Python</td><td style="border:0; padding:4px 8px;">{{ sys.python }}</td></tr>
         <tr><td style="color:var(--muted); border:0; padding:4px 8px;">Git</td><td style="border:0; padding:4px 8px;"><code>{{ sys.git }}</code></td></tr>
+        <tr><td style="color:var(--muted); border:0; padding:4px 8px;">Profile</td><td style="border:0; padding:4px 8px;">{{ capability.profile }}</td></tr>
+        <tr><td style="color:var(--muted); border:0; padding:4px 8px;">Device</td><td style="border:0; padding:4px 8px;">{{ capability.device }}</td></tr>
+        <tr><td style="color:var(--muted); border:0; padding:4px 8px;">RAM</td><td style="border:0; padding:4px 8px;">{{ capability.ram_gb }} GB</td></tr>
         <tr><td style="color:var(--muted); border:0; padding:4px 8px;">Disk</td>
             <td style="border:0; padding:4px 8px;">
               {{ sys.disk_free }} free / {{ sys.disk_total }}
@@ -393,6 +399,19 @@ def overview_page():
             </td>
         </tr>
       </table>
+      {% if capability_disabled_preview %}
+      <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+        <div style="font-size:0.78rem; color:var(--muted); margin-bottom:8px;">Auto-hidden tools</div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          {% for item in capability_disabled_preview %}
+          <span class="badge text-bg-secondary" title="{{ item.reason }}">{{ item.tool }}</span>
+          {% endfor %}
+        </div>
+        {% if capability.disabled_tools|length > capability_disabled_preview|length %}
+        <div style="font-size:0.75rem; color:var(--muted); margin-top:8px;">and {{ capability.disabled_tools|length - capability_disabled_preview|length }} more</div>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
   </div>
 
@@ -426,7 +445,8 @@ def overview_page():
     return render_template_string(tmpl + FOOTER, active="home", version=git_version(),
                                   total_messages=total_messages, total_users=total_users,
                                   active_crons=active_crons, pending_tasks=pending_tasks,
-                                  total_builds=total_builds, sys=sys_info, recent=recent)
+                                  total_builds=total_builds, sys=sys_info, capability=capability,
+                                  capability_disabled_preview=capability_disabled_preview, recent=recent)
 
 
 @app.route("/config", methods=["GET", "POST"])
