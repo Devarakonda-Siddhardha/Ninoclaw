@@ -2,7 +2,7 @@
 Ninoclaw Web Dashboard — configure plugins, view memory, manage tasks
 Run with: ninoclaw dashboard  (or python dashboard.py)
 """
-import os, re, sys, json, sqlite3, subprocess
+import os, re, sys, json, sqlite3, subprocess, shutil, platform
 from functools import wraps
 from pathlib import Path
 from dotenv import load_dotenv, set_key, dotenv_values
@@ -119,7 +119,14 @@ BASE = """<!DOCTYPE html>
   .stat-label { color: var(--muted); font-size: 0.82rem; margin-top: 4px; }
   .toggle-wrap { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--border); }
   .toggle-wrap:last-child { border-bottom: none; }
-  .toggle-info strong { display: block; font-size: 0.9rem; }
+  .toggle-info strong {
+    display: block;
+    font-size: 0.9rem;
+    color: var(--text) !important;
+    opacity: 1 !important;
+    font-weight: 600;
+  }
+  .toggle-info strong i { color: var(--text); opacity: 0.95; }
   .toggle-info small { color: var(--muted); font-size: 0.82rem; }
   .form-switch .form-check-input { width: 44px; height: 24px; cursor: pointer; background-color: var(--surface2); border-color: var(--border); }
   .form-switch .form-check-input:checked { background-color: var(--green); border-color: var(--green); }
@@ -287,7 +294,136 @@ def logout():
 @app.route("/")
 @require_login
 def index():
-    return redirect(url_for("chat_page"))
+    return redirect(url_for("overview_page"))
+
+
+@app.route("/overview")
+@require_login
+def overview_page():
+    import datetime as _dt
+    db = get_db()
+    total_messages = 0
+    total_users = 0
+    active_crons = 0
+    pending_tasks = 0
+    recent = []
+    if db:
+        try:
+            total_messages = db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+            total_users = db.execute("SELECT COUNT(DISTINCT user_id) FROM conversations").fetchone()[0]
+            active_crons = db.execute("SELECT COUNT(*) FROM cron_jobs WHERE is_active=1").fetchone()[0]
+            pending_tasks = db.execute("SELECT COUNT(*) FROM tasks WHERE completed=0").fetchone()[0]
+            rows = db.execute("SELECT user_id, role, content, ts FROM conversations ORDER BY id DESC LIMIT 8").fetchall()
+            for r in rows:
+                recent.append({"user_id": r[0], "role": r[1], "content": (r[2] or "")[:120], "ts": (r[3] or "")[:16]})
+        except Exception:
+            pass
+        db.close()
+
+    websites_dir = Path(__file__).parent / "websites"
+    total_builds = 0
+    if websites_dir.exists():
+        total_builds = sum(1 for d in websites_dir.iterdir() if d.is_dir() and (d / "index.html").exists())
+
+    disk = shutil.disk_usage(os.path.dirname(__file__))
+    sys_info = {
+        "os": f"{platform.system()} {platform.release()}",
+        "python": platform.python_version(),
+        "disk_free": f"{disk.free / (1024**3):.1f} GB",
+        "disk_total": f"{disk.total / (1024**3):.1f} GB",
+        "disk_pct": round(disk.used / disk.total * 100),
+        "git": git_version(),
+    }
+
+    tmpl = BASE + """
+<div class="page-title">Overview</div>
+<div class="page-sub">System health, stats, and recent activity at a glance.</div>
+
+<div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap:14px; margin-bottom:24px;">
+  <div class="card" style="text-align:center;">
+    <div class="card-body" style="padding:20px 12px;">
+      <div style="font-size:2rem; font-weight:700; color:var(--accent);">{{ total_messages }}</div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-top:4px;">Total Messages</div>
+    </div>
+  </div>
+  <div class="card" style="text-align:center;">
+    <div class="card-body" style="padding:20px 12px;">
+      <div style="font-size:2rem; font-weight:700; color:var(--green);">{{ total_users }}</div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-top:4px;">Users</div>
+    </div>
+  </div>
+  <div class="card" style="text-align:center;">
+    <div class="card-body" style="padding:20px 12px;">
+      <div style="font-size:2rem; font-weight:700; color:var(--yellow);">{{ active_crons }}</div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-top:4px;">Active Crons</div>
+    </div>
+  </div>
+  <div class="card" style="text-align:center;">
+    <div class="card-body" style="padding:20px 12px;">
+      <div style="font-size:2rem; font-weight:700; color:var(--red);">{{ pending_tasks }}</div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-top:4px;">Pending Tasks</div>
+    </div>
+  </div>
+  <div class="card" style="text-align:center;">
+    <div class="card-body" style="padding:20px 12px;">
+      <div style="font-size:2rem; font-weight:700; color:#a371f7;">{{ total_builds }}</div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-top:4px;">Builds</div>
+    </div>
+  </div>
+</div>
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+
+  <div class="card">
+    <div class="card-header"><i class="bi bi-pc-display"></i> System</div>
+    <div class="card-body" style="font-size:0.88rem;">
+      <table class="table" style="margin:0;">
+        <tr><td style="color:var(--muted); border:0; padding:4px 8px;">OS</td><td style="border:0; padding:4px 8px;">{{ sys.os }}</td></tr>
+        <tr><td style="color:var(--muted); border:0; padding:4px 8px;">Python</td><td style="border:0; padding:4px 8px;">{{ sys.python }}</td></tr>
+        <tr><td style="color:var(--muted); border:0; padding:4px 8px;">Git</td><td style="border:0; padding:4px 8px;"><code>{{ sys.git }}</code></td></tr>
+        <tr><td style="color:var(--muted); border:0; padding:4px 8px;">Disk</td>
+            <td style="border:0; padding:4px 8px;">
+              {{ sys.disk_free }} free / {{ sys.disk_total }}
+              <div style="background:var(--surface2); border-radius:4px; height:6px; margin-top:4px; overflow:hidden;">
+                <div style="background:{% if sys.disk_pct > 90 %}var(--red){% elif sys.disk_pct > 70 %}var(--yellow){% else %}var(--green){% endif %}; width:{{ sys.disk_pct }}%; height:100%; border-radius:4px;"></div>
+              </div>
+            </td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><i class="bi bi-clock-history"></i> Recent Activity</div>
+    <div class="card-body" style="padding:8px 16px;">
+      {% if recent %}
+      {% for m in recent %}
+      <div style="display:flex; align-items:flex-start; gap:8px; padding:6px 0; border-bottom:1px solid var(--border);">
+        <span style="font-size:0.9rem;">{% if m.role == 'user' %}👤{% else %}🤖{% endif %}</span>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:0.82rem; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ m.content }}</div>
+          <div style="font-size:0.72rem; color:var(--muted);">{{ m.ts }}</div>
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div style="text-align:center; padding:24px 0; color:var(--muted);">No messages yet.</div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<style>
+  @media (max-width: 768px) {
+    div[style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+  }
+</style>
+"""
+    return render_template_string(tmpl + FOOTER, active="home", version=git_version(),
+                                  total_messages=total_messages, total_users=total_users,
+                                  active_crons=active_crons, pending_tasks=pending_tasks,
+                                  total_builds=total_builds, sys=sys_info, recent=recent)
 
 
 @app.route("/config", methods=["GET", "POST"])
@@ -1246,9 +1382,12 @@ def builds_page():
         <a href="/builds/{{ p.name }}/" target="_blank" class="btn btn-primary" style="flex:1; text-align:center;">
           <i class="bi bi-eye"></i> Preview
         </a>
-        <a href="/builds/{{ p.name }}/" target="_blank" class="btn btn-outline" style="text-align:center;">
-          <i class="bi bi-box-arrow-up-right"></i>
-        </a>
+        <form method="POST" action="/builds/{{ p.name }}/delete" style="margin:0;"
+              onsubmit="return confirm('Delete build {{ p.name }}?');">
+          <button type="submit" class="btn btn-danger" style="padding:6px 10px;">
+            <i class="bi bi-trash"></i>
+          </button>
+        </form>
       </div>
     </div>
   </div>
@@ -1269,6 +1408,21 @@ def builds_page():
 """
     return render_template_string(tmpl + FOOTER, active="builds", version=git_version(),
                                   projects=projects)
+
+
+@app.route("/builds/<name>/delete", methods=["POST"])
+@require_login
+def builds_delete(name):
+    if not re.fullmatch(r"[a-z0-9_-]{1,50}", name):
+        flash("Invalid project name.", "error")
+        return redirect(url_for("builds_page"))
+    project_dir = Path(__file__).parent / "websites" / name
+    if project_dir.exists() and project_dir.is_dir():
+        shutil.rmtree(project_dir)
+        flash(f"Deleted build: {name}", "success")
+    else:
+        flash(f"Build not found: {name}", "error")
+    return redirect(url_for("builds_page"))
 
 
 @app.route("/builds/<name>/", defaults={"filename": "index.html"})
