@@ -138,11 +138,33 @@ def _tool_round_limit(user_message):
     return DEEP_TOOL_ROUNDS if _should_use_deep_mode(user_message) else DEFAULT_TOOL_ROUNDS
 
 
+def _should_stop_after_step(step_tool_names, step_results):
+    expo_actions = {"expo_create_app", "expo_start_app", "expo_edit_app", "expo_stop_app", "expo_delete_app"}
+    if not any(name in expo_actions for name in step_tool_names):
+        return False
+    for result in step_results:
+        text = (result or "").lower()
+        if text.startswith("❌") or "runtimeerror" in text or "traceback" in text:
+            continue
+        if "expo app" in text or "preview link:" in text:
+            return True
+    return False
+
+
 def _finalize_after_tools(personalized_prompt, tool_history, all_tool_results, fallback=""):
     clean_results = _dedupe_preserve([_strip_image_markers(r) for r in all_tool_results])
-    expo_results = [r for r in clean_results if "expo app" in r.lower() or "preview link:" in r.lower()]
+    expo_with_preview = [r for r in clean_results if "preview link:" in r.lower()]
+    if expo_with_preview:
+        return expo_with_preview[-1]
+    expo_success = [
+        r for r in clean_results
+        if r.lower().startswith("✅ expo app created.") or r.lower().startswith("🚀 expo app started.")
+    ]
+    if expo_success:
+        return expo_success[-1]
+    expo_results = [r for r in clean_results if "expo app" in r.lower()]
     if expo_results:
-        return "\n\n".join(expo_results)
+        return expo_results[-1]
     fallback_text = fallback.strip() if isinstance(fallback, str) else ""
     if not fallback_text:
         fallback_text = "\n\n".join(clean_results)
@@ -850,6 +872,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
         await _set_progress(f"Working... step {round_idx + 1}/{max_tool_rounds}")
         step_results = []
         seen_call_keys = set()
+        step_tool_names = []
         for tool_call in tool_calls:
             tool_name = tool_call.get("function", {}).get("name")
             raw_args = tool_call.get("function", {}).get("arguments", "{}")
@@ -866,6 +889,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                 if ckey in seen_call_keys:
                     continue
                 seen_call_keys.add(ckey)
+                step_tool_names.append(tool_name)
                 await _set_progress(f"Working... step {round_idx + 1}: using {tool_name}")
                 print(f"[Tool] Calling: {tool_name}({tool_args})")
                 result = await execute_tool(tool_name, tool_args, user_id, task_manager)
@@ -887,6 +911,10 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             for img_url in _extract_image_urls(result):
                 if img_url not in available_image_urls:
                     available_image_urls.append(img_url)
+
+        if _should_stop_after_step(step_tool_names, step_results):
+            final_response = step_results[-1]
+            break
 
         # Feed results back so model can continue autonomously.
         tool_history.append({
@@ -1209,6 +1237,7 @@ Your purpose is to {BOT_PURPOSE}."""
         await _set_progress(f"Working... step {round_idx + 1}/{max_tool_rounds}")
         step_results = []
         seen_call_keys = set()
+        step_tool_names = []
         for tool_call in tool_calls:
             tool_name = tool_call.get("function", {}).get("name")
             raw_args = tool_call.get("function", {}).get("arguments", "{}")
@@ -1225,6 +1254,7 @@ Your purpose is to {BOT_PURPOSE}."""
             if ckey in seen_call_keys:
                 continue
             seen_call_keys.add(ckey)
+            step_tool_names.append(tool_name)
             await _set_progress(f"Working... step {round_idx + 1}: using {tool_name}")
             result = await execute_tool(tool_name, tool_args, user_id, task_manager)
             step_results.append(result)
@@ -1244,6 +1274,10 @@ Your purpose is to {BOT_PURPOSE}."""
             for img_url in _extract_image_urls(result):
                 if img_url not in available_image_urls:
                     available_image_urls.append(img_url)
+
+        if _should_stop_after_step(step_tool_names, step_results):
+            final_response = step_results[-1]
+            break
 
         tool_history.append({
             "role": "user",
