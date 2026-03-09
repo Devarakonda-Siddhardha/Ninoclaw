@@ -25,7 +25,15 @@ DEEP_TOOL_ROUNDS = 6
 
 def _public_base_url():
     port = os.getenv("DASHBOARD_PORT", "8080")
-    return f"http://localhost:{port}"
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        ip = "localhost"
+    return f"http://{ip}:{port}"
 
 
 def _save_image_asset(image_bytes, prefix="image", suffix=".jpg"):
