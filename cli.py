@@ -286,6 +286,16 @@ def cmd_imagegen(args):
     hf_token   = env.get("HF_TOKEN", "")
     gemini_key = env.get("GEMINI_API_KEY", "")
 
+    def clean_value(val):
+        """Strip quotes from values to prevent credential issues"""
+        val = val.strip()
+        # Remove both single and double quotes from start/end
+        if val.startswith("'") and val.endswith("'"):
+            val = val[1:-1]
+        elif val.startswith('"') and val.endswith('"'):
+            val = val[1:-1]
+        return val
+
     if not args:
         print(f"\n{C}🎨 Image Generation{RST}")
         if fal_key:
@@ -312,7 +322,7 @@ def cmd_imagegen(args):
         print(f"\n{R}Usage: ninoclaw imagegen hf|fal|gemini <api-key>{RST}\n")
         return
 
-    provider, key = args[0].lower(), args[1].strip()
+    provider, key = args[0].lower(), clean_value(args[1])
     if provider in ("hf", "huggingface"):
         set_key(env_path, "HF_TOKEN", key)
         print(f"\n{G}✔  HuggingFace token saved{RST} — FLUX.1-schnell enabled (free)")
@@ -404,6 +414,16 @@ def cmd_integrations(args):
     env_path = os.path.join(os.path.dirname(__file__), ".env")
     env = dotenv_values(env_path) if os.path.exists(env_path) else {}
 
+    def clean_value(val):
+        """Strip quotes from values to prevent credential issues"""
+        val = val.strip()
+        # Remove both single and double quotes from start/end
+        if val.startswith("'") and val.endswith("'"):
+            val = val[1:-1]
+        elif val.startswith('"') and val.endswith('"'):
+            val = val[1:-1]
+        return val
+
     INTEGRATION_VARS = [
         ("SLACK_WEBHOOK_URL",       "Slack Webhook"),
         ("SLACK_BOT_TOKEN",         "Slack Bot Token"),
@@ -451,17 +471,27 @@ def cmd_integrations(args):
     sub = args[0].lower()
 
     if sub == "slack" and len(args) >= 2:
-        set_key(env_path, "SLACK_WEBHOOK_URL", args[1])
+        set_key(env_path, "SLACK_WEBHOOK_URL", clean_value(args[1]))
         print(f"\n{G}✔  SLACK_WEBHOOK_URL saved.{RST}{DIM}  Restart: ninoclaw start{RST}\n")
 
     elif sub == "github" and len(args) >= 2:
-        set_key(env_path, "GITHUB_TOKEN", args[1])
+        set_key(env_path, "GITHUB_TOKEN", clean_value(args[1]))
         print(f"\n{G}✔  GITHUB_TOKEN saved.{RST}{DIM}  Restart: ninoclaw start{RST}\n")
 
     elif sub == "spotify" and len(args) >= 4:
-        set_key(env_path, "SPOTIFY_CLIENT_ID",     args[1])
-        set_key(env_path, "SPOTIFY_CLIENT_SECRET", args[2])
-        set_key(env_path, "SPOTIFY_REFRESH_TOKEN", args[3])
+        # Strip quotes from values to prevent credential issues
+        def clean_value(val):
+            val = val.strip()
+            # Remove both single and double quotes from start/end
+            if val.startswith("'") and val.endswith("'"):
+                val = val[1:-1]
+            elif val.startswith('"') and val.endswith('"'):
+                val = val[1:-1]
+            return val
+
+        set_key(env_path, "SPOTIFY_CLIENT_ID",     clean_value(args[1]))
+        set_key(env_path, "SPOTIFY_CLIENT_SECRET", clean_value(args[2]))
+        set_key(env_path, "SPOTIFY_REFRESH_TOKEN", clean_value(args[3]))
         print(f"\n{G}✔  Spotify credentials saved.{RST}{DIM}  Restart: ninoclaw start{RST}\n")
 
     elif sub == "spotify-setup" and len(args) >= 3:
@@ -510,14 +540,24 @@ def cmd_integrations(args):
         if not refresh_token:
             print(f"{R}❌ No refresh token returned.{RST}")
             return
-        set_key(env_path, "SPOTIFY_CLIENT_ID",     client_id)
-        set_key(env_path, "SPOTIFY_CLIENT_SECRET", client_secret)
-        set_key(env_path, "SPOTIFY_REFRESH_TOKEN", refresh_token)
+        # Strip quotes from values to prevent credential issues
+        def clean_value(val):
+            val = val.strip()
+            # Remove both single and double quotes from start/end
+            if val.startswith("'") and val.endswith("'"):
+                val = val[1:-1]
+            elif val.startswith('"') and val.endswith('"'):
+                val = val[1:-1]
+            return val
+
+        set_key(env_path, "SPOTIFY_CLIENT_ID",     clean_value(client_id))
+        set_key(env_path, "SPOTIFY_CLIENT_SECRET", clean_value(client_secret))
+        set_key(env_path, "SPOTIFY_REFRESH_TOKEN", clean_value(refresh_token))
         print(f"\n{G}✔  Spotify connected!{RST} Refresh token saved.")
         print(f"{DIM}Restart: ninoclaw start{RST}\n")
 
     elif sub == "gcal" and len(args) >= 2:
-        set_key(env_path, "GOOGLE_CREDENTIALS_JSON", args[1])
+        set_key(env_path, "GOOGLE_CREDENTIALS_JSON", clean_value(args[1]))
         print(f"\n{G}✔  GOOGLE_CREDENTIALS_JSON saved.{RST}{DIM}  Restart: ninoclaw start{RST}\n")
 
     else:
