@@ -105,6 +105,9 @@ def setup_bot_commands(application):
         BotCommand("timezone", "Set your timezone"),
         BotCommand("autoresearch", "Toggle autonomous research"),
         BotCommand("research_interval", "Set research frequency"),
+        BotCommand("autosearch", "Toggle auto job search"),
+        BotCommand("jobsearch_interval", "Set job search frequency"),
+        BotCommand("platform", "Show platform info"),
     ]
     # set_my_commands is async, but run_polling will handle it
     # Just set the commands, they will be configured on first poll
@@ -303,6 +306,31 @@ def main():
         research_thread = threading.Thread(target=research_checker, daemon=True)
         research_thread.start()
         print("✅ Research checker thread started (checks hourly)")
+
+    # Start autonomous job searcher (daily job alerts)
+    from autonomous_job_searcher import init_job_searcher
+    if OWNER_ID:
+        job_searcher = init_job_searcher(app.bot)
+        print("✅ Autonomous job searcher started")
+
+        # Add periodic task to check for autonomous job search
+        def job_search_checker():
+            while True:
+                try:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(job_searcher.check_and_search())
+                    loop.close()
+                except Exception as e:
+                    print(f"❌ Job search checker error: {e}")
+                # Check every hour
+                import time
+                time.sleep(3600)
+
+        job_search_thread = threading.Thread(target=job_search_checker, daemon=True)
+        job_search_thread.start()
+        print("✅ Job search checker thread started (checks hourly)")
 
     # Start Discord bot if configured
     if DISCORD_BOT_TOKEN:
