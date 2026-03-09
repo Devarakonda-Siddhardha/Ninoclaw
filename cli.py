@@ -432,6 +432,7 @@ def cmd_integrations(args):
         ("SPOTIFY_CLIENT_ID",       "Spotify Client ID"),
         ("SPOTIFY_CLIENT_SECRET",   "Spotify Client Secret"),
         ("SPOTIFY_REFRESH_TOKEN",   "Spotify Refresh Token"),
+        ("LINKEDIN_ACCESS_TOKEN",   "LinkedIn Access Token"),
         ("GOOGLE_CREDENTIALS_JSON", "Google Credentials JSON"),
         ("GOOGLE_CALENDAR_ID",      "Google Calendar ID"),
     ]
@@ -560,13 +561,18 @@ def cmd_integrations(args):
         set_key(env_path, "GOOGLE_CREDENTIALS_JSON", clean_value(args[1]))
         print(f"\n{G}✔  GOOGLE_CREDENTIALS_JSON saved.{RST}{DIM}  Restart: ninoclaw start{RST}\n")
 
+    elif sub == "linkedin" and len(args) >= 2:
+        set_key(env_path, "LINKEDIN_ACCESS_TOKEN", clean_value(args[1]))
+        print(f"\n{G}✔  LINKEDIN_ACCESS_TOKEN saved.{RST}{DIM}  Restart: ninoclaw start{RST}\n")
+
     else:
         print(f"\n{W}Usage:{RST}")
         print(f"  {G}ninoclaw integrations{RST}                            List all")
         print(f"  {G}ninoclaw integrations slack{RST} <webhook_url>        Save webhook")
         print(f"  {G}ninoclaw integrations github{RST} <token>             Save token")
         print(f"  {G}ninoclaw integrations spotify{RST} <id> <secret> <rt> Save credentials")
-        print(f"  {G}ninoclaw integrations gcal{RST} <path/to/creds.json>  Save creds path\n")
+        print(f"  {G}ninoclaw integrations gcal{RST} <path/to/creds.json>  Save creds path")
+        print(f"  {G}ninoclaw integrations linkedin{RST} <access_token>      Save LinkedIn token\n")
 
 
 def main():
