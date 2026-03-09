@@ -203,6 +203,8 @@ def _tool_round_limit(user_message):
 
 def _should_stop_after_step(user_message, step_tool_names, step_results):
     expo_actions = {"expo_create_app", "expo_start_app", "expo_edit_app", "expo_stop_app", "expo_delete_app"}
+    spotify_actions = {"spotify_play_pause", "spotify_next", "spotify_previous", "spotify_volume", "spotify_current", "spotify_search_play", "spotify_play_my_playlist", "spotify_my_playlists"}
+    personal_interests_actions = {"set_interests", "get_interests", "search_personalized_news", "add_interest"}
     if not any(name in expo_actions for name in step_tool_names):
         if _is_fun_support_request(user_message):
             if step_tool_names and all(name in _FUN_SUPPORT_TOOL_ALLOWLIST for name in step_tool_names):
@@ -211,6 +213,16 @@ def _should_stop_after_step(user_message, step_tool_names, step_results):
                         continue
                     return True
         return False
+    # Spotify tools should stop after execution - they are one-shot commands
+    if any(name in spotify_actions for name in step_tool_names):
+        for result in step_results:
+            if not _tool_result_failed(result):
+                return True
+    # Personal interests tools should stop after execution - they are one-shot commands
+    if any(name in personal_interests_actions for name in step_tool_names):
+        for result in step_results:
+            if not _tool_result_failed(result):
+                return True
     for result in step_results:
         text = (result or "").lower()
         if _tool_result_failed(result):
@@ -890,6 +902,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
         if allow_direct_map and not tcalls:
             msg_l = (text_for_direct_map or "").lower().strip()
             _direct = None
+            # Spotify commands
             if any(w in msg_l for w in ["pause", "stop music", "stop song", "stop playing"]):
                 _direct = ("spotify_play_pause", {})
             elif any(w in msg_l for w in ["resume", "unpause", "continue playing"]):
@@ -905,6 +918,39 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                 import re as _re3
                 query = _re3.sub(r'\s*(on spotify|using spotify|spotify)\s*$', '', query, flags=_re3.IGNORECASE).strip()
                 _direct = ("spotify_search_play", {"query": query, "type": "track"})
+            # Personal interests commands
+            elif any(w in msg_l for w in ["my interests", "my favorites", "what do you know about me", "what are my interests", "show my interests"]):
+                _direct = ("get_interests", {})
+            elif "news about" in msg_l or "news on" in msg_l or msg_l.endswith(" news"):
+                import re as _re4
+                match = _re4.search(r'(?:news about|news on)\s+(.+?)\s*$', msg_l)
+                if match:
+                    topic = match.group(1).strip()
+                    _direct = ("search_personalized_news", {"topic": topic})
+                else:
+                    _direct = ("search_personalized_news", {})
+            elif msg_l in ["news", "latest news", "personalized news", "my news"]:
+                _direct = ("search_personalized_news", {})
+            elif msg_l.startswith("i love ") or msg_l.startswith("i like ") or msg_l.startswith("i'm a fan of ") or msg_l.startswith("im a fan of ") or msg_l.startswith("my favorite ") or msg_l.startswith("my favourite "):
+                # Extract interest from phrases like "I love cricket", "I'm a fan of Virat Kohli"
+                import re as _re5
+                if msg_l.startswith("i love "):
+                    interest = msg_l[7:].strip()
+                elif msg_l.startswith("i like "):
+                    interest = msg_l[7:].strip()
+                elif msg_l.startswith("i'm a fan of ") or msg_l.startswith("im a fan of "):
+                    interest = msg_l[12:].strip()
+                elif msg_l.startswith("my favorite "):
+                    interest = msg_l[12:].strip()
+                elif msg_l.startswith("my favourite "):
+                    interest = msg_l[13:].strip()
+                else:
+                    interest = ""
+                if interest:
+                    _direct = ("add_interest", {"interest": interest})
+            elif msg_l in ["set my interests", "update my interests", "save my interests"]:
+                # Prompt user to provide their interests
+                _direct = ("get_interests", {})  # First show current, then ask for new
             if _direct:
                 tcalls = [{"function": {"name": _direct[0], "arguments": _direct[1]}}]
                 final_text = ""
@@ -1582,6 +1628,79 @@ async def forget_fact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Forgot: {key.strip()}")
 
 
+async def toggle_autoresearch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle autonomous research on/off: /autoresearch [on|off]"""
+    from config import OWNER_ID
+    user_id = update.effective_user.id
+
+    if user_id != OWNER_ID:
+        await update.message.reply_text("⛔ Only the bot owner can control autonomous research.")
+        return
+
+    from autonomous_researcher import get_researcher
+    researcher = get_researcher()
+
+    if not researcher:
+        await update.message.reply_text("⚠️ Autonomous researcher not initialized. Please restart the bot.")
+        return
+
+    if not context.args:
+        # Show current status
+        enabled = getattr(researcher, 'enabled', True)
+        interval = getattr(researcher, 'research_interval_hours', 24)
+        status = "🟢 Enabled" if enabled else "🔴 Disabled"
+        await update.message.reply_text(
+            f"🤖 **Autonomous Research Status**\n\n"
+            f"Status: {status}\n"
+            f"Interval: Every {interval} hours\n\n"
+            f"Use `/autoresearch on` to enable, `/autoresearch off` to disable\n"
+            f"Use `/research_interval <hours>` to set frequency"
+        )
+        return
+
+    action = context.args[0].lower()
+
+    if action in ["on", "enable", "start"]:
+        researcher.enabled = True
+        await update.message.reply_text("✅ Autonomous research **enabled**! I'll send you personalized updates based on your interests.")
+    elif action in ["off", "disable", "stop"]:
+        researcher.enabled = False
+        await update.message.reply_text("⏸️ Autonomous research **disabled**. Use `/autoresearch on` to re-enable.")
+    else:
+        await update.message.reply_text("Usage: /autoresearch [on|off]")
+
+
+async def set_research_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set autonomous research frequency: /research_interval <hours>"""
+    from config import OWNER_ID
+    user_id = update.effective_user.id
+
+    if user_id != OWNER_ID:
+        await update.message.reply_text("⛔ Only the bot owner can set research interval.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /research_interval <hours>\nExample: /research_interval 12")
+        return
+
+    try:
+        hours = int(context.args[0])
+        if hours < 1:
+            await update.message.reply_text("⚠️ Interval must be at least 1 hour.")
+            return
+
+        from autonomous_researcher import get_researcher
+        researcher = get_researcher()
+
+        if researcher:
+            researcher.set_research_interval(hours)
+            await update.message.reply_text(f"✅ Research interval set to **{hours} hours**. I'll check for updates every {hours} hours.")
+        else:
+            await update.message.reply_text("⚠️ Researcher not initialized. Please restart the bot.")
+    except ValueError:
+        await update.message.reply_text("⚠️ Invalid number. Usage: /research_interval <hours>")
+
+
 async def show_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show background agent jobs."""
     from bg_agent import bg_runner
@@ -1644,6 +1763,8 @@ def create_bot(token):
     app.add_handler(CommandHandler("remember", remember_fact))
     app.add_handler(CommandHandler("forget", forget_fact))
     app.add_handler(CommandHandler("jobs", show_jobs))
+    app.add_handler(CommandHandler("autoresearch", toggle_autoresearch))
+    app.add_handler(CommandHandler("research_interval", set_research_interval))
 
     # Add message handler for chat
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

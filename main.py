@@ -103,6 +103,8 @@ def setup_bot_commands(application):
         BotCommand("remind", "Set a reminder"),
         BotCommand("cron", "Manage recurring tasks"),
         BotCommand("timezone", "Set your timezone"),
+        BotCommand("autoresearch", "Toggle autonomous research"),
+        BotCommand("research_interval", "Set research frequency"),
     ]
     # set_my_commands is async, but run_polling will handle it
     # Just set the commands, they will be configured on first poll
@@ -275,6 +277,32 @@ def main():
     if OWNER_ID:
         security_auditor.start(_tg_notify, OWNER_ID)
         print("✅ Security auditor started (every 30 min)")
+
+    # Start autonomous researcher (daily personalized news/research)
+    from autonomous_researcher import init_researcher
+    if OWNER_ID:
+        researcher = init_researcher(app.bot)
+        print("✅ Autonomous researcher started")
+
+        # Add periodic task to check for autonomous research
+        import threading
+        def research_checker():
+            while True:
+                try:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(researcher.check_and_research())
+                    loop.close()
+                except Exception as e:
+                    print(f"❌ Research checker error: {e}")
+                # Check every hour
+                import time
+                time.sleep(3600)
+
+        research_thread = threading.Thread(target=research_checker, daemon=True)
+        research_thread.start()
+        print("✅ Research checker thread started (checks hourly)")
 
     # Start Discord bot if configured
     if DISCORD_BOT_TOKEN:
