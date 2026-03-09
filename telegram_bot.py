@@ -213,6 +213,7 @@ def _should_stop_after_step(user_message, step_tool_names, step_results):
     expo_actions = {"expo_create_app", "expo_start_app", "expo_edit_app", "expo_stop_app", "expo_delete_app"}
     spotify_actions = {"spotify_play_pause", "spotify_next", "spotify_previous", "spotify_volume", "spotify_current", "spotify_search_play", "spotify_play_my_playlist", "spotify_my_playlists"}
     personal_interests_actions = {"set_interests", "get_interests", "search_personalized_news", "add_interest"}
+    job_search_actions = {"set_job_preferences", "search_jobs", "get_job_preferences", "enable_auto_job_search"}
     if not any(name in expo_actions for name in step_tool_names):
         if _is_fun_support_request(user_message):
             if step_tool_names and all(name in _FUN_SUPPORT_TOOL_ALLOWLIST for name in step_tool_names):
@@ -228,6 +229,11 @@ def _should_stop_after_step(user_message, step_tool_names, step_results):
                 return True
     # Personal interests tools should stop after execution - they are one-shot commands
     if any(name in personal_interests_actions for name in step_tool_names):
+        for result in step_results:
+            if not _tool_result_failed(result):
+                return True
+    # Job search tools should stop after execution - they are one-shot commands
+    if any(name in job_search_actions for name in step_tool_names):
         for result in step_results:
             if not _tool_result_failed(result):
                 return True
@@ -959,6 +965,59 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             elif msg_l in ["set my interests", "update my interests", "save my interests"]:
                 # Prompt user to provide their interests
                 _direct = ("get_interests", {})  # First show current, then ask for new
+            # Job search commands
+            elif any(w in msg_l for w in ["find me a job", "job search", "search for jobs", "looking for jobs", "find jobs", "i need a job"]):
+                _direct = ("search_jobs", {})
+            elif "job" in msg_l and ("in" in msg_l or "at" in msg_l):
+                # Extract location from phrases like "Python job in Hyderabad" or "React job at remote"
+                import re as _re6
+                match = _re6.search(r'(?:job)\s+(?:in|at)\s+(.+)', msg_l)
+                if match:
+                    query = "developer"  # Default fallback
+                    location = match.group(1).strip()
+                    _direct = ("search_jobs", {"query": query, "location": location})
+                else:
+                    _direct = ("search_jobs", {})
+            elif "remote" in msg_l and "job" in msg_l:
+                _direct = ("search_jobs", {"remote": True, "query": "developer"})
+            elif msg_l.startswith("i want ") and "job" in msg_l:
+                # Extract details from "I want a Python developer job in Hyderabad"
+                import re as _re7
+                query_match = _re7.search(r'i want\s+a\s+(\w+)\s+job', msg_l)
+                if query_match:
+                    query = f"{query_match.group(1)} developer"
+                    location_match = _re7.search(r'(?:in|at)\s+(\w+)', msg_l)
+                    location = location_match.group(1) if location_match else ""
+                    _direct = ("search_jobs", {"query": query, "location": location})
+                else:
+                    _direct = ("search_jobs", {"query": "developer"})
+            elif msg_l.startswith("i am looking for ") and "job" in msg_l:
+                # Extract from "I am looking for a React remote job"
+                import re as _re8
+                query = "developer"  # Default
+                location = ""
+                remote = False
+
+                # Look for specific tech terms
+                tech_terms = ["python", "javascript", "react", "angular", "java", "aws", "docker", "kubernetes"]
+                for term in tech_terms:
+                    if term in msg_l.lower():
+                        query = term
+
+                if "remote" in msg_l.lower():
+                    remote = True
+                    location = ""
+                location_match = _re8.search(r'(?:in|at)\s+(\w+)', msg_l)
+                if location_match:
+                    location = location_match.group(1)
+
+                _direct = ("search_jobs", {"query": query, "location": location, "remote": remote})
+            elif any(w in msg_l for w in ["my job preferences", "job preferences", "what jobs am i looking for", "my job search settings"]):
+                _direct = ("get_job_preferences", {})
+            elif "enable auto job search" in msg_l or "disable auto job search" in msg_l:
+                enabled = "enable" in msg_l
+                _direct = ("enable_auto_job_search", {"enabled": enabled, "frequency_hours": 24})
+
             if _direct:
                 tcalls = [{"function": {"name": _direct[0], "arguments": _direct[1]}}]
                 final_text = ""
@@ -1709,6 +1768,44 @@ async def set_research_interval(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("⚠️ Invalid number. Usage: /research_interval <hours>")
 
 
+async def show_platform_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show platform information and available tools."""
+    from config import AGENT_NAME
+
+    # Platform detection (simplified - in production would detect OS)
+    # For now, show what's available on different platforms
+    response = f"🤖 **{AGENT_NAME} Platform Information**\n\n"
+    response += "📱 **Cross-Platform Tools (Windows + Android + iOS):**\n\n"
+    response += "✅ 🎵 **Spotify Music** - Play/pause/next/previous songs\n"
+    response += "✅ 💼 **Job Search** - Automated job hunting\n"
+    response += "✅ ❤️ **Personal Interests** - Save preferences, get personalized news\n"
+    response += "✅ 🤖 **Autonomous Research** - Automatic updates based on interests\n"
+    response += "✅ 🎵 **Song Search** - Find songs, play locally\n"
+    response += "✅ 🌐 **Web Builder** - Create websites\n"
+    response += "✅ 📊 **Calculator, Weather, News** - General tools\n"
+    response += "✅ 🧠 **Long-Term Memory** - Remembers conversations and facts\n"
+    response += "✅ 💬 **Background Agent** - Runs complex tasks\n"
+    response += "✅ 🎯 **Skills System** - Plugins for anything\n\n"
+
+    response += "📱 **Android-Only Tools (1% of tools):**\n\n"
+    response += "❌ 🏃 **GPY App Control** - Opens Android apps (YouTube, Chrome, Camera)\n"
+    response += "❌ 🗣️ **Telugu App Control** - Telugu language for Android\n"
+    response += "   → Only works on Android phone\n"
+    response += "   → Windows/Mac users: Use 'open YouTube' → Opens in browser instead\n\n"
+
+    response += "💡 **Windows/Mac/Linux Alternative:**\n"
+    response += "✅ **Cross-Platform** - Use all features (99% of what we built)\n"
+    response += "✅ **Web Browser** - 'open YouTube' opens YouTube.com in your browser\n"
+    response += "✅ **Spotify** - 'play music' works if you have Spotify connected\n\n"
+
+    response += "🎯 **Platform-Specific Commands:**\n"
+    response += "/platform - Show this information\n"
+    response += "Android users: Try 'open YouTube' for direct app control\n"
+    response += "All users: Enjoy all features everywhere!\n"
+
+    await update.message.reply_text(response)
+
+
 async def show_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show background agent jobs."""
     from bg_agent import bg_runner
@@ -1722,6 +1819,79 @@ async def show_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         emoji = {"queued": "⏳", "running": "⚙️", "done": "✅", "failed": "❌"}.get(j["status"], "❓")
         lines.append(f"{emoji} [{j['id']}] {j['goal'][:40]}\n   Status: {j['status']}")
     await update.message.reply_text("⚙️ Background jobs:\n\n" + "\n\n".join(lines))
+
+
+async def toggle_autosearch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle autonomous job search on/off: /autosearch [on|off]"""
+    from config import OWNER_ID
+    user_id = update.effective_user.id
+
+    if user_id != OWNER_ID:
+        await update.message.reply_text("⛔ Only the bot owner can control autonomous job search.")
+        return
+
+    from autonomous_job_searcher import get_job_searcher
+    job_searcher = get_job_searcher()
+
+    if not job_searcher:
+        await update.message.reply_text("⚠️ Autonomous job searcher not initialized. Please restart the bot.")
+        return
+
+    if not context.args:
+        # Show current status
+        enabled = getattr(job_searcher, 'enabled', True)
+        interval = getattr(job_searcher, 'search_interval_hours', 24)
+        status = "🟢 Enabled" if enabled else "🔴 Disabled"
+        await update.message.reply_text(
+            f"🤖 **Auto Job Search Status**\n\n"
+            f"Status: {status}\n"
+            f"Interval: Every {interval} hours\n\n"
+            f"Use `/autosearch on` to enable, `/autosearch off` to disable\n"
+            f"Use `/jobsearch_interval <hours>` to set frequency"
+        )
+        return
+
+    action = context.args[0].lower()
+
+    if action in ["on", "enable", "start"]:
+        job_searcher.enabled = True
+        await update.message.reply_text("✅ Autonomous job search **enabled**! I'll send you job alerts based on your preferences.")
+    elif action in ["off", "disable", "stop"]:
+        job_searcher.enabled = False
+        await update.message.reply_text("⏸️ Autonomous job search **disabled**. Use `/autosearch on` to re-enable.")
+    else:
+        await update.message.reply_text("Usage: /autosearch [on|off]")
+
+
+async def set_jobsearch_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set autonomous job search frequency: /jobsearch_interval <hours>"""
+    from config import OWNER_ID
+    user_id = update.effective_user.id
+
+    if user_id != OWNER_ID:
+        await update.message.reply_text("⛔ Only the bot owner can set job search interval.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /jobsearch_interval <hours>\nExample: /jobsearch_interval 12")
+        return
+
+    try:
+        hours = int(context.args[0])
+        if hours < 1:
+            await update.message.reply_text("⚠️ Interval must be at least 1 hour.")
+            return
+
+        from autonomous_job_searcher import get_job_searcher
+        job_searcher = get_job_searcher()
+
+        if job_searcher:
+            job_searcher.set_search_interval(hours)
+            await update.message.reply_text(f"✅ Job search interval set to **{hours} hours**. I'll check for jobs every {hours} hours.")
+        else:
+            await update.message.reply_text("⚠️ Job searcher not initialized. Please restart the bot.")
+    except ValueError:
+        await update.message.reply_text("⚠️ Invalid number. Usage: /jobsearch_interval <hours>")
 
 
 async def update_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1773,6 +1943,10 @@ def create_bot(token):
     app.add_handler(CommandHandler("jobs", show_jobs))
     app.add_handler(CommandHandler("autoresearch", toggle_autoresearch))
     app.add_handler(CommandHandler("research_interval", set_research_interval))
+    app.add_handler(CommandHandler("autosearch", toggle_autosearch))
+    app.add_handler(CommandHandler("research_interval", set_research_interval))
+    app.add_handler(CommandHandler("platform", show_platform_info))
+    app.add_handler(CommandHandler("jobsearch_interval", set_jobsearch_interval))
 
     # Add message handler for chat
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
