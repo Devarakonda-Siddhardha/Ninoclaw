@@ -572,3 +572,33 @@ def format_app_summary(app: dict) -> str:
     if app.get("last_error"):
         lines.append(f"Last error: {app['last_error']}")
     return "\n".join(lines)
+
+
+def install_package(name: str, packages: list[str]) -> str:
+    safe_name = _sanitize_name(name)
+    project_dir = _project_dir(safe_name)
+    if not (project_dir / "package.json").exists():
+        raise RuntimeError(f"Project '{safe_name}' does not exist")
+    
+    if not packages:
+        raise RuntimeError("No packages specified for installation")
+
+    cmd = [_npx_command(), "expo", "install", *packages]
+    kwargs = {
+        "cwd": str(project_dir),
+        "capture_output": True,
+        "text": True,
+        "timeout": 300,
+        "stdin": subprocess.DEVNULL,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        
+    result = subprocess.run(cmd, **kwargs)
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        message = stderr or stdout or f"Failed to install packages: {', '.join(packages)}"
+        raise RuntimeError(message[-1200:])
+        
+    return f"Successfully installed: {', '.join(packages)}"
