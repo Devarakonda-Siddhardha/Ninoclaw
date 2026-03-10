@@ -367,6 +367,13 @@ This is an automated task execution. Be helpful and concise."""
         self.running = True
 
         def run():
+            # Register nightly memory compression
+            try:
+                import memory_compressor
+                schedule.every().day.at("03:00").do(memory_compressor.run_compression)
+            except Exception as e:
+                print(f"[Scheduler] Failed to load memory compressor: {e}")
+                
             while self.running:
                 schedule.run_pending()
                 import asyncio
