@@ -10,3 +10,8 @@ mobile_apps/*/node_modules/
 mobile_apps/*/.expo/
 mobile_apps/*/dist/
 mobile_apps/_logs/
+
+# Removed folders
+$HOME/Desktop/
+docs/screenshots/
+mobile_apps/clicker_game/
