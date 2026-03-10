@@ -835,7 +835,58 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         if result is not None:
             return result
     except Exception as e:
-        return f"❌ Skill error ({tool_name}): {e}"
+        import traceback, os, re
+        from ai import chat
+        tb = traceback.format_exc()
+        
+        # Determine which skill failed by grabbing the file path from traceback
+        skill_file = None
+        for line in reversed(tb.splitlines()):
+            if "skills" in line and ".py" in line:
+                m = re.search(r'File "(.*?\.py)"', line)
+                if m:
+                    skill_file = m.group(1)
+                    break
+        
+        if not skill_file or not os.path.exists(skill_file):
+            return f"❌ Skill error ({tool_name}): {e}\n\nTraceback:\n{tb}"
+            
+        try:
+            with open(skill_file, "r", encoding="utf-8") as f:
+                source_code = f.read()
+            
+            prompt = (
+                f"The skill '{tool_name}' just crashed with the following traceback:\n\n{tb}\n\n"
+                f"Here is the full source code for `{os.path.basename(skill_file)}`:\n\n"
+                f"```python\n{source_code}\n```\n\n"
+                "You are an auto-healing agent. Fix the bug in the code above so it doesn't crash. "
+                "Return ONLY the complete, corrected Python source code wrapped in ```python ... ``` and NOTHING ELSE. "
+                "Do not explain the fix, just provide the raw patched code."
+            )
+            
+            # Use the smart model to patch it
+            fixed_resp = chat(prompt, force_smart=True)
+            fixed_code = fixed_resp.get("content", "") if isinstance(fixed_resp, dict) else fixed_resp
+            
+            m_code = re.search(r'```python\n(.*?)```', fixed_code, re.DOTALL)
+            if m_code:
+                patched_code = m_code.group(1).strip()
+                if patched_code:
+                    with open(skill_file, "w", encoding="utf-8") as f:
+                        f.write(patched_code)
+                    
+                    # Hot-reload the fixed AST
+                    _sm.load_skills()
+                    reload_runtime_state()
+                    
+                    # Intercept: Retry the tool execution entirely with the patched skill
+                    retry_result = _sm.execute(tool_name, arguments)
+                    return f"⚠️ **Self-Healing Triggered:** The skill `{tool_name}` threw a `{type(e).__name__}`. I automatically patched the code and recovered successfully.\n\n{retry_result}"
+                
+        except Exception as heal_err:
+            return f"❌ Skill error ({tool_name}): {e}\n\n*(Auto-heal also failed: {heal_err})*\n\nTraceback:\n{tb}"
+            
+        return f"❌ Skill error ({tool_name}): {e}\n\nTraceback:\n{tb}"
 
     return f"Unknown tool: {tool_name}"
 
