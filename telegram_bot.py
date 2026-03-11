@@ -488,13 +488,20 @@ async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Map user input to configured models
         model_mapping = {}
-        for provider, model_list in models.items():
-            if isinstance(model_list, dict):
-                for model_name in model_list.values():
-                    model_mapping[model_name.lower()] = model_name
-            elif isinstance(model_list, list):
-                for model_name in model_list:
-                    model_mapping[model_name.lower()] = model_name
+
+        # Handle models as dict or list
+        if isinstance(models, dict):
+            for provider, model_list in models.items():
+                if isinstance(model_list, dict):
+                    for model_name in model_list.values():
+                        model_mapping[model_name.lower()] = model_name
+                elif isinstance(model_list, list):
+                    for model_name in model_list:
+                        model_mapping[model_name.lower()] = model_name
+        elif isinstance(models, list):
+            # If models is a simple list (not from config), use it directly
+            for model_name in models:
+                model_mapping[model_name.lower()] = model_name
 
         # Find matching model (case-insensitive)
         matched_model = model_mapping.get(model_name.lower())
