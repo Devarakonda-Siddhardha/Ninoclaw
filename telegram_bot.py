@@ -6,8 +6,8 @@ import re
 import uuid
 import base64
 from pathlib import Path
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from ai import chat, chat_vision, list_models, test_connection
 from memory import Memory, extract_and_store_facts
 from tasks import task_manager
@@ -1085,6 +1085,37 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                 print(f"[Tool] Calling: {tool_name}({tool_args})")
                 result = await execute_tool(tool_name, tool_args, user_id, task_manager)
                 print(f"[Tool] Result: {str(result)[:100]}")
+                
+                if isinstance(result, str) and result.startswith("[REQUIRES_CONFIRMATION]"):
+                    import json
+                    try:
+                        payload_str = result.replace("[REQUIRES_CONFIRMATION]", "").strip()
+                        payload = json.loads(payload_str)
+                        
+                        # Store pending action
+                        memory.set_user_data(user_id, "pending_tool", payload)
+                        
+                        keyboard = [
+                            [
+                                InlineKeyboardButton("Approve ✅", callback_data="hitl_approve"),
+                                InlineKeyboardButton("Reject ❌", callback_data="hitl_reject"),
+                            ]
+                        ]
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        
+                        cmd_info = payload.get('arguments', {}).get('command', '')
+                        warning_msg = f"⚠️ *Action Required!*\\n\\nI need permission to run `{payload.get('name')}`."
+                        if cmd_info:
+                            warning_msg += f"\\n\\nCommand: `{cmd_info}`"
+                        
+                        await update.message.reply_text(warning_msg, reply_markup=reply_markup, parse_mode="Markdown")
+                        
+                        skip_final_summarization = True
+                        step_results.append(f"Paused execution waiting for user permission to run {payload.get('name')}.")
+                        break
+                    except Exception as e:
+                        result = f"❌ Failed to parse confirmation request: {e}"
+                
                 step_results.append(result)
 
         if not step_results:
@@ -1471,6 +1502,37 @@ Your purpose is to {BOT_PURPOSE}."""
             step_tool_names.append(tool_name)
             await _set_progress(f"Working... step {round_idx + 1}: using {tool_name}")
             result = await execute_tool(tool_name, tool_args, user_id, task_manager)
+            
+            if isinstance(result, str) and result.startswith("[REQUIRES_CONFIRMATION]"):
+                import json
+                try:
+                    payload_str = result.replace("[REQUIRES_CONFIRMATION]", "").strip()
+                    payload = json.loads(payload_str)
+                    
+                    # Store pending action
+                    memory.set_user_data(user_id, "pending_tool", payload)
+                    
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("Approve ✅", callback_data="hitl_approve"),
+                            InlineKeyboardButton("Reject ❌", callback_data="hitl_reject"),
+                        ]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    cmd_info = payload.get('arguments', {}).get('command', '')
+                    warning_msg = f"⚠️ *Action Required!*\\n\\nI need permission to run `{payload.get('name')}`."
+                    if cmd_info:
+                        warning_msg += f"\\n\\nCommand: `{cmd_info}`"
+                    
+                    await update.message.reply_text(warning_msg, reply_markup=reply_markup, parse_mode="Markdown")
+                    
+                    skip_final_summarization = True
+                    step_results.append(f"Paused execution waiting for user permission to run {payload.get('name')}.")
+                    break
+                except Exception as e:
+                    result = f"❌ Failed to parse confirmation request: {e}"
+            
             step_results.append(result)
 
         if not step_results:
@@ -1921,6 +1983,79 @@ async def update_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.get_event_loop().call_later(2, restart)
 
 
+async def allow_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle dangerous bypass of tool confirmation prompts for easier testing"""
+    user_id = update.effective_user.id
+    from config import OWNER_ID
+    if OWNER_ID and user_id != OWNER_ID:
+        await update.message.reply_text("⛔ Only the bot owner can use this dangerous command.")
+        return
+        
+    user_data = memory.get_user_data(user_id)
+    current = user_data.get("dangerously_allow_all", False)
+    
+    # Toggle it
+    new_state = not current
+    memory.set_user_data(user_id, "dangerously_allow_all", new_state)
+    
+    if new_state:
+        await update.message.reply_text("⚠️ **DANGER MODE ENABLED:** All tools (including commands and file edits) will now run IMMEDIATELY without asking for confirmation. Run `/allow_all` again to disable.", parse_mode="Markdown")
+        memory.add_message(user_id, "system", "[System] The user has enabled DANGER MODE. You may now run any tool without waiting for confirmation.")
+    else:
+        await update.message.reply_text("✅ **SAFE MODE ENABLED:** Destroying tools will require your button confirmation again.", parse_mode="Markdown")
+        memory.add_message(user_id, "system", "[System] The user has disabled DANGER MODE. You must ask for confirmation before dangerous actions.")
+
+async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    
+    if query.data == "hitl_approve":
+        user_data = memory.get_user_data(user_id)
+        pending = user_data.get("pending_tool")
+        if not pending:
+            await query.edit_message_text(text="⚠️ Approval expired or not found.")
+            return
+            
+        tool_name = pending.get("name")
+        tool_args = pending.get("arguments", {})
+        
+        await query.edit_message_text(text=f"✅ Approved. Executing `{tool_name}`...")
+        
+        # Bypass confirmation requirement
+        tool_args["_confirmed"] = True
+        
+        try:
+            result = await execute_tool(tool_name, tool_args, user_id, task_manager)
+            
+            # Inject result into memory
+            memory.add_message(user_id, "user", f"[System] User approved execution of {tool_name}. Result:\n{str(result)[:2000]}\n\nPlease continue.")
+            memory.set_user_data(user_id, "pending_tool", None)
+            
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id, 
+                text=f"🔧 **Tool Executed**\n\n```\n{str(result)[:1000]}\n```\n\n*Type 'continue' to let me proceed with the next steps.*",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"❌ Execution failed: {e}")
+            
+    elif query.data == "hitl_reject":
+        user_data = memory.get_user_data(user_id)
+        pending = user_data.get("pending_tool")
+        tool_name = pending.get("name") if pending else "unknown tool"
+        
+        await query.edit_message_text(text=f"❌ Rejected `{tool_name}`.")
+        memory.add_message(user_id, "user", f"[System] User REJECTED execution of {tool_name}. You must find an alternative approach or stop.")
+        memory.set_user_data(user_id, "pending_tool", None)
+        
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id, 
+            text="*Action cancelled. Type 'continue' or send new instructions to proceed.*",
+            parse_mode="Markdown"
+        )
+
 def create_bot(token):
     """Create and configure the Telegram bot"""
     app = Application.builder().token(token).build()
@@ -1944,9 +2079,12 @@ def create_bot(token):
     app.add_handler(CommandHandler("autoresearch", toggle_autoresearch))
     app.add_handler(CommandHandler("research_interval", set_research_interval))
     app.add_handler(CommandHandler("autosearch", toggle_autosearch))
-    app.add_handler(CommandHandler("research_interval", set_research_interval))
     app.add_handler(CommandHandler("platform", show_platform_info))
     app.add_handler(CommandHandler("jobsearch_interval", set_jobsearch_interval))
+    app.add_handler(CommandHandler("allow_all", allow_all_command))
+    
+    # Callback Handlers
+    app.add_handler(CallbackQueryHandler(handle_callback_query))
 
     # Add message handler for chat
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
