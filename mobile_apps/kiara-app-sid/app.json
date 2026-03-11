@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "kiara-app-sid",
+    "slug": "kiara-app-sid",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ]
+  }
+}
