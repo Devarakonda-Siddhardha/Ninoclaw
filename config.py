@@ -13,6 +13,32 @@ def _env(key, default=""):
     """Get env var, stripping accidental whitespace/tabs."""
     return os.getenv(key, default).strip()
 
+def get_runtime_env():
+    """
+    Reload .env and return latest environment values.
+    Dashboard writes land here immediately for new requests.
+    """
+    load_dotenv(ENV_FILE, override=True)
+    return dict(os.environ)
+
+def get_runtime_ai_config():
+    """Return live AI config used by the request path."""
+    env = get_runtime_env()
+    primary = _build_primary(env)
+    fast_model = _env_from(env, "FAST_MODEL", "")
+    smart_model = _env_from(env, "SMART_MODEL", "") or primary["model"]
+    return {
+        "models": build_model_chain(env),
+        "primary": primary,
+        "fast_model": fast_model,
+        "smart_model": smart_model,
+        "fast_cfg": {**primary, "model": fast_model} if fast_model else None,
+        "smart_cfg": {**primary, "model": smart_model},
+        "ollama_host": _env_from(env, "OLLAMA_HOST", "http://localhost:11434"),
+        "ollama_model": _env_from(env, "OLLAMA_MODEL", "llama3.2"),
+        "ollama_think": _env_from(env, "OLLAMA_THINK", "false").lower() == "true",
+    }
+
 
 def _env_from(source, key, default=""):
     """Get a normalized value from a mapping-like source."""
