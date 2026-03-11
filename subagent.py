@@ -67,9 +67,20 @@ async def run_subagent(agent_type: str, task: str, user_id: int, task_manager) -
 
     # Build allowed tool list
     all_tools = _BUILTIN_TOOLS + sm.get_tools()
+    
+    _ADVANCED_TOOL_NAMES = {
+        "run_command", "read_file", "write_file", "list_dir", 
+        "web_build", "web_edit", "expo_create_app", "expo_edit_app"
+    }
+
+    if agent_type in ["coder", "planner", "autonomous"]:
+        allowed_names = _SAFE_TOOL_NAMES | _ADVANCED_TOOL_NAMES
+    else:
+        allowed_names = _SAFE_TOOL_NAMES
+
     safe_tools = [
         t for t in all_tools
-        if t["function"]["name"] in _SAFE_TOOL_NAMES
+        if t["function"]["name"] in allowed_names
     ]
 
     history = []
@@ -104,11 +115,14 @@ async def run_subagent(agent_type: str, task: str, user_id: int, task_manager) -
             args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
             tc_id = tc.get("id", f"call_{iteration}")
 
-            if name not in _SAFE_TOOL_NAMES:
+            if name not in allowed_names:
                 result = f"⛔ Tool '{name}' is not available to sub-agents."
             else:
                 try:
                     result = await execute_tool(name, args, user_id, task_manager)
+                    if isinstance(result, str) and result.startswith("[REQUIRES_CONFIRMATION]"):
+                        # Pause autonomous loop and bubble up to user for permission
+                        return f"[PAUSED_FOR_HITL] The subagent needs permission to run {name}. Wait for user response.\n\n" + result
                 except Exception as e:
                     result = f"Tool error: {e}"
 

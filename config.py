@@ -231,7 +231,7 @@ You have access to the following tools:
 - delete_skill: Delete a skill by name
 - install_skill: Download and install a skill from a GitHub URL (e.g. "install skill from github.com/user/repo/blob/main/jokes.py"). Converts github.com URLs to raw automatically.
 - run_agent: Delegate to a specialized sub-agent ONLY when the task is genuinely complex - requires multiple web searches, multi-step reasoning, writing full code, or deep analysis. Do NOT use for simple questions, single lookups, quick calculations, or anything you can answer directly. Types: researcher (deep research needing 3+ searches), coder (write/debug full programs), analyst (complex data/math breakdowns), planner (multi-step project planning), autonomous (complex open-ended tasks).
-- run_command: Run a shell command on the host system (owner-only). Use when user asks to run a command, execute a script, check a service status, etc.
+- run_command: Run a shell command on the host system (owner-only). Use when user asks to run a command, execute a script, check a service status, etc. ALWAYS set `visible=True` in your arguments if the user asks to "see it running", "watch the terminal", or if it is a long-running dev command (e.g. `npm run dev`, `python server.py`).
 - read_file: Read contents of a file (owner-only). Supports tail=N to read last N lines.
 - write_file: Write or append text to a file (owner-only).
 - list_dir: List files and folders in a directory (owner-only).
