@@ -16,8 +16,12 @@ _BASE = os.path.dirname(__file__)
 # ── Individual checks ──────────────────────────────────────────────────────────
 
 def check_env_permissions():
-    """Warn if .env is readable by group/others."""
+    """Warn if .env is readable by group/others. Skip on Windows due to stat mode handling."""
     issues = []
+    import sys
+    if sys.platform == "win32":
+        return issues
+        
     env_path = os.path.join(_BASE, ".env")
     if os.path.exists(env_path):
         mode = os.stat(env_path).st_mode
