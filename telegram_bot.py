@@ -490,11 +490,11 @@ async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         model_mapping = {}
         for provider, model_list in models.items():
             if isinstance(model_list, dict):
-                for model in model_list.values():
-                    model_mapping[model.lower()] = model
+                for model_name in model_list.values():
+                    model_mapping[model_name.lower()] = model_name
             elif isinstance(model_list, list):
-                for model in model_list:
-                    model_mapping[model.lower()] = model
+                for model_name in model_list:
+                    model_mapping[model_name.lower()] = model_name
 
         # Find matching model (case-insensitive)
         matched_model = model_mapping.get(model_name.lower())
@@ -513,9 +513,14 @@ async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Show available models if requested model not found
             models_list = list_models()
             if models_list:
-                available = [m for m in models_list if model_name.lower() in m.lower()] or model_name.lower() in m.lower() or model_name[:5].lower() in m.lower()]
+                # Find matching models with case-insensitive matching
+                model_lower = model_name.lower()
+                available = [
+                    m for m in models_list
+                    if model_lower in m.lower() or model_name[:5].lower() in m.lower()
+                ]
             else:
-                available = []
+                available = models_list  # Use full list if filtering doesn't work
 
             await update.message.reply_text(
                 f"❌ **Model Not Found:** {model_name}\n\n"
