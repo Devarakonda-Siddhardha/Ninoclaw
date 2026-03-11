@@ -272,7 +272,8 @@ _BUILTIN_TOOLS = [
                 "type": "object",
                 "properties": {
                     "command": {"type": "string", "description": "Shell command to execute"},
-                    "timeout": {"type": "integer", "description": "Timeout in seconds (default 30)"}
+                    "timeout": {"type": "integer", "description": "Timeout in seconds (default 30)"},
+                    "visible": {"type": "boolean", "description": "Set to true to launch in a new visible terminal window on the host PC so the user can watch the output. Excellent for long-running scripts like npm run dev."}
                 },
                 "required": ["command"]
             }
@@ -358,6 +359,14 @@ _OWNER_ONLY_SKILL_TOOLS = {
 
 def _tool_requires_owner(tool_name: str) -> bool:
     return tool_name in _OWNER_ONLY_TOOLS or tool_name in _OWNER_ONLY_SKILL_TOOLS
+
+# ── Tools requiring Human-in-the-Loop Confirmation ────────────────────────────
+_CONFIRMATION_REQUIRED_TOOLS = {
+    "run_command", "expo_delete_app", "web_delete", "delete_skill", "create_integration"
+}
+
+def _tool_requires_confirmation(tool_name: str) -> bool:
+    return tool_name in _CONFIRMATION_REQUIRED_TOOLS
 
 
 def _sanitize_argument_value(value):
@@ -502,6 +511,21 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         err = require_owner(user_id)
         if err:
             return err
+
+    # ── Enforce Human-in-the-Loop Confirmation ────────────────────────────
+    if _tool_requires_confirmation(tool_name) and str(arguments.get("_confirmed", "")).lower() != "true":
+        # Check if user has dangerously allowed all tools
+        bypass_hitl = False
+        try:
+            bypass_hitl = Memory().get_user_data(user_id).get("dangerously_allow_all", False)
+        except Exception:
+            pass
+            
+        if not bypass_hitl:
+            import json
+            # Pack the pending call into a special JSON signal
+            return f"[REQUIRES_CONFIRMATION] {json.dumps({'name': tool_name, 'arguments': arguments})}"
+
 
     memory = Memory()
     user_timezone = memory.get_timezone(user_id)
@@ -742,12 +766,48 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
 
     if tool_name == "run_command":
         import subprocess
+        import os
         command = arguments.get("command", "").strip()
         timeout = int(arguments.get("timeout", 30))
+        visible = str(arguments.get("visible", "")).lower() == "true"
+        
         if not command:
             return "❌ No command provided."
         err = safe_command(command)
         if err: return err
+        
+        if visible:
+            try:
+                if os.name == 'nt':
+                    # Windows
+                    subprocess.Popen(f'start "Ninoclaw Agent" cmd /k "{command}"', shell=True)
+                    return "✅ Command launched in a new visible terminal window."
+                elif os.uname().sysname == 'Darwin':
+                    # macOS
+                    subprocess.Popen(['osascript', '-e', f'tell application "Terminal" to do script "{command}"'])
+                    return "✅ Command launched in a new visible terminal window."
+                elif 'TERMUX_VERSION' in os.environ:
+                    # Termux
+                    from shutil import which
+                    if which('tmux'):
+                        subprocess.Popen(f'tmux new-window -n "Ninoclaw" "{command}"', shell=True)
+                        return "✅ Command launched in a new tmux window."
+                    else:
+                        pass # Fallback to invisible
+                else:
+                    # Linux Desktop
+                    from shutil import which
+                    if which('x-terminal-emulator'):
+                        subprocess.Popen(f'x-terminal-emulator -e "bash -c \\"{command}; exec bash\\""', shell=True)
+                        return "✅ Command launched in a new visible terminal window."
+                    elif which('gnome-terminal'):
+                        subprocess.Popen(f'gnome-terminal -- bash -c "{command}; exec bash"', shell=True)
+                        return "✅ Command launched in a new visible terminal window."
+                    
+            except Exception as e:
+                return f"⚠️ Failed to launch visible terminal: {e}. Executing invisibly instead..."
+
+        # Invisible Execution
         try:
             result = subprocess.run(
                 command, shell=True, capture_output=True, text=True,
