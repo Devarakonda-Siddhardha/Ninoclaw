@@ -7,9 +7,19 @@ import os
 import json
 import asyncio
 from contextlib import AsyncExitStack
-from mcp.client.stdio import stdio_client, StdioServerParameters
-from mcp.client.session import ClientSession
 from dotenv import load_dotenv
+
+# MCP package import (optional - if not installed, returns empty tools)
+try:
+    from mcp.client.stdio import stdio_client, StdioServerParameters
+    from mcp.client.session import ClientSession
+    MCP_AVAILABLE = True
+except ImportError:
+    MCP_AVAILABLE = False
+    # Define placeholders if mcp not available
+    stdio_client = None
+    StdioServerParameters = None
+    ClientSession = None
 
 # Manage lifecycles of multiple subprocess streams
 _stack = None
@@ -29,10 +39,14 @@ def _clean_schema(schema: dict) -> dict:
 
 async def start_mcp_servers():
     """Start all servers defined in MCP_SERVERS env var"""
+    if not MCP_AVAILABLE:
+        print("[MCP] MCP package not installed. Skipping MCP server initialization.")
+        return
+
     global _stack
     if _stack is None:
         _stack = AsyncExitStack()
-        
+
     mcp_servers_env = os.getenv("MCP_SERVERS")
     if not mcp_servers_env:
         return
