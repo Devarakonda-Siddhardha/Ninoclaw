@@ -493,8 +493,11 @@ async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if isinstance(models_config, dict):
             for provider, model_list in models_config.items():
                 if isinstance(model_list, dict):
-                    for model_name in model_list.values():
-                        model_mapping[model_name.lower()] = model_name
+                    for model_name, model_list.values():
+                        # Extract actual model name string from provider dict
+                        actual_model = model_name.get("model", model_name)
+                        if actual_model:
+                            model_mapping[actual_model.lower()] = actual_model
                 elif isinstance(model_list, list):
                     for model_name in model_list:
                         model_mapping[model_name.lower()] = model_name
