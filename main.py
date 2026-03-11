@@ -108,6 +108,7 @@ def setup_bot_commands(application):
         BotCommand("autosearch", "Toggle auto job search"),
         BotCommand("jobsearch_interval", "Set job search frequency"),
         BotCommand("platform", "Show platform info"),
+        BotCommand("models", "List or switch AI models"),
     ]
     # set_my_commands is async, but run_polling will handle it
     # Just set the commands, they will be configured on first poll
