@@ -1503,10 +1503,11 @@ Your purpose is to {BOT_PURPOSE}."""
             await _set_progress(f"Working... step {round_idx + 1}: using {tool_name}")
             result = await execute_tool(tool_name, tool_args, user_id, task_manager)
             
-            if isinstance(result, str) and result.startswith("[REQUIRES_CONFIRMATION]"):
+            if isinstance(result, str) and "[REQUIRES_CONFIRMATION]" in result:
                 import json
                 try:
-                    payload_str = result.replace("[REQUIRES_CONFIRMATION]", "").strip()
+                    idx = result.find("[REQUIRES_CONFIRMATION]")
+                    payload_str = result[idx + len("[REQUIRES_CONFIRMATION]"):].strip()
                     payload = json.loads(payload_str)
                     
                     # Store pending action
@@ -2015,13 +2016,19 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         user_data = memory.get_user_data(user_id)
         pending = user_data.get("pending_tool")
         if not pending:
-            await query.edit_message_text(text="⚠️ Approval expired or not found.")
+            try:
+                await query.edit_message_text(text="⚠️ Approval expired or not found.")
+            except Exception:
+                pass
             return
             
         tool_name = pending.get("name")
         tool_args = pending.get("arguments", {})
         
-        await query.edit_message_text(text=f"✅ Approved. Executing `{tool_name}`...")
+        try:
+            await query.edit_message_text(text=f"✅ Approved. Executing `{tool_name}`...")
+        except Exception:
+            pass
         
         # Bypass confirmation requirement
         tool_args["_confirmed"] = True
@@ -2046,7 +2053,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         pending = user_data.get("pending_tool")
         tool_name = pending.get("name") if pending else "unknown tool"
         
-        await query.edit_message_text(text=f"❌ Rejected `{tool_name}`.")
+        try:
+            await query.edit_message_text(text=f"❌ Rejected `{tool_name}`.")
+        except Exception:
+            pass
         memory.add_message(user_id, "user", f"[System] User REJECTED execution of {tool_name}. You must find an alternative approach or stop.")
         memory.set_user_data(user_id, "pending_tool", None)
         
@@ -2058,7 +2068,15 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
 def create_bot(token):
     """Create and configure the Telegram bot"""
-    app = Application.builder().token(token).build()
+    
+    async def post_init(application: Application):
+        try:
+            import mcp_manager
+            await mcp_manager.start_mcp_servers()
+        except Exception as e:
+            print(f"❌ Failed to start MCP managers in post_init: {e}")
+            
+    app = Application.builder().token(token).post_init(post_init).build()
 
     # Add command handlers
     app.add_handler(CommandHandler("start", start))
