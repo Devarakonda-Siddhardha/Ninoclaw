@@ -484,23 +484,23 @@ async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         from config import get_runtime_ai_config
         cfg = get_runtime_ai_config()
-        models = cfg.get("models", {})
+        models_config = cfg.get("models", {})
 
         # Map user input to configured models
         model_mapping = {}
 
         # Handle models as dict or list
-        if isinstance(models, dict):
-            for provider, model_list in models.items():
+        if isinstance(models_config, dict):
+            for provider, model_list in models_config.items():
                 if isinstance(model_list, dict):
                     for model_name in model_list.values():
                         model_mapping[model_name.lower()] = model_name
                 elif isinstance(model_list, list):
                     for model_name in model_list:
                         model_mapping[model_name.lower()] = model_name
-        elif isinstance(models, list):
+        elif isinstance(models_config, list):
             # If models is a simple list (not from config), use it directly
-            for model_name in models:
+            for model_name in models_config:
                 model_mapping[model_name.lower()] = model_name
 
         # Find matching model (case-insensitive)
