@@ -458,13 +458,76 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(status_msg)
 
 async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List available models"""
-    models = list_models()
-    if models:
-        msg = "📦 Available models:\n\n" + "\n".join(f"• {m}" for m in models)
-    else:
-        msg = "❌ No models found. Make sure Ollama is running."
-    await update.message.reply_text(msg)
+    """List or switch available models"""
+    from config import OWNER_ID
+    user_id = update.effective_user.id
+
+    if not context.args:
+        # Just list models
+        models = list_models()
+        if models:
+            msg = "📦 Available models:\n\n" + "\n".join(f"• {m}" for m in models)
+        else:
+            msg = "❌ No models found. Make sure Ollama is running."
+        await update.message.reply_text(msg)
+        return
+
+    # User wants to switch model
+    if user_id != OWNER_ID:
+        await update.message.reply_text("⛔ Only the bot owner can switch models.")
+        return
+
+    model_name = context.args[0].strip()
+    from dotenv import set_key, dotenv_values
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+
+    try:
+        from config import get_runtime_ai_config
+        cfg = get_runtime_ai_config()
+        models = cfg.get("models", {})
+
+        # Map user input to configured models
+        model_mapping = {}
+        for provider, model_list in models.items():
+            if isinstance(model_list, dict):
+                for model in model_list.values():
+                    model_mapping[model.lower()] = model
+            elif isinstance(model_list, list):
+                for model in model_list:
+                    model_mapping[model.lower()] = model
+
+        # Find matching model (case-insensitive)
+        matched_model = model_mapping.get(model_name.lower())
+
+        if matched_model:
+            # Update .env with the matched model
+            set_key(env_path, "PRIMARY_MODEL", matched_model)
+
+            await update.message.reply_text(
+                f"✅ **Model Switched**\n\n"
+                f"🤖 New Model: {matched_model}\n"
+                f"💡 Restart the bot for changes to take effect.\n"
+                f"🔄 Use: /models <another_model> to switch again"
+            )
+        else:
+            # Show available models if requested model not found
+            models_list = list_models()
+            if models_list:
+                available = [m for m in models_list if model_name.lower() in m.lower()] or model_name.lower() in m.lower() or model_name[:5].lower() in m.lower()]
+            else:
+                available = []
+
+            await update.message.reply_text(
+                f"❌ **Model Not Found:** {model_name}\n\n"
+                f"📦 **Available Models:**\n"
+                + "\n".join(f"• {m}" for m in (available[:5] if available else models_list[:5])) +
+                f"\n\n💡 Use: /models <model_name> to switch to a configured model"
+                f"🔧 Model mapping is case-insensitive"
+            )
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error switching model: {str(e)}")
+
 
 async def show_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show conversation memory"""
