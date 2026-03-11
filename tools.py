@@ -472,8 +472,11 @@ def get_tool_definitions(user_id=None) -> list:
     except Exception:
         pass
     # No user_id = return all (backwards compat for dashboard/tasks)
+    import mcp_manager
+    mcp_tools = mcp_manager.get_tools()
+    
     if user_id is None or is_owner(user_id):
-        return TOOLS
+        return TOOLS + mcp_tools
     # Non-owner: filter out dangerous tools
     safe = []
     for tool in TOOLS:
@@ -497,6 +500,11 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
     Returns:
         Result message string
     """
+    # ── Route to external MCP Server if applicable ─────────────────────────
+    if tool_name.startswith("mcp__"):
+        import mcp_manager
+        return await mcp_manager.execute_tool(tool_name, arguments)
+
     from memory import Memory
     from config import SERPER_API_KEY
     from security import require_owner, safe_path, safe_command, validate_skill_code

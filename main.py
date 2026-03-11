@@ -356,6 +356,13 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\n👋 Shutting down Ninoclaw...")
         task_manager.stop_scheduler()
+        
+        try:
+            import asyncio, mcp_manager
+            asyncio.run(mcp_manager.cleanup())
+        except Exception:
+            pass
+            
         print("✅ Goodbye!")
     except Exception as e:
         print(f"\n❌ Error: {e}")
