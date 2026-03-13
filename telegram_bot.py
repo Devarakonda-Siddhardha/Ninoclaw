@@ -12,6 +12,7 @@ from ai import chat, chat_vision, list_models, test_connection
 from memory import Memory, extract_and_store_facts
 from tasks import task_manager
 from config import SYSTEM_PROMPT, AGENT_NAME, USER_NAME, BOT_PURPOSE, get_runtime_env
+from run_traces import clear_current_run, finish_run, log_event, start_run
 from tools import get_tool_definitions, execute_tool
 from summarizer import extract_urls, is_youtube, get_youtube_transcript, get_url_content, build_summary_prompt
 
@@ -841,6 +842,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from ai import chat_stream
     user_id = update.effective_user.id
     user_message = update.message.text
+    run_id = start_run(user_id, "telegram", user_message)
+    run_finished = False
+
+    def _finish_trace(status="completed", final_response=None, error=None):
+        nonlocal run_finished
+        if run_finished:
+            return
+        finish_run(final_response=final_response, status=status, error=error, run_id=run_id)
+        run_finished = True
 
     # Save user message to memory
     memory.add_message(user_id, "user", user_message)
@@ -856,6 +866,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             content, err = get_url_content(url)
 
         if err:
+            _finish_trace(status="error", error=err)
+            clear_current_run()
             await update.message.reply_text(f"❌ {err}")
             return
 
@@ -864,6 +876,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         final_response = response if isinstance(response, str) else response.get("content") or ""
         memory.add_message(user_id, "assistant", final_response)
         asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
+        _finish_trace(final_response=final_response)
+        clear_current_run()
         await update.message.reply_text(f"🔗 Summary of {url}\n\n{final_response}")
         return
 
@@ -875,6 +889,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for kw in _BG_KEYWORDS:
             goal = re.sub(rf'(?i)^{re.escape(kw)}[,:\s]*', '', goal).strip()
         job_id = bg_runner.queue_job(str(user_id), goal)
+        _finish_trace(final_response=f"Queued background job {job_id}")
+        clear_current_run()
         await update.message.reply_text(f"⚙️ Got it! Working on it in the background...\n\n🆔 Job ID: `{job_id}`\nUse /jobs to check status.")
         return
 
@@ -912,6 +928,8 @@ You have access to tools to schedule and manage recurring tasks. When the user w
             await status_msg.delete()
         except Exception:
             pass
+        _finish_trace(final_response=result)
+        clear_current_run()
         await send_with_code_files(update, result)
         return
 
@@ -1163,6 +1181,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                 print(f"[Tool] Calling: {tool_name}({tool_args})")
                 result = await execute_tool(tool_name, tool_args, user_id, task_manager)
                 print(f"[Tool] Result: {str(result)[:100]}")
+                log_event("tool_result", label=tool_name, payload={"result": str(result)[:3000]})
                 
                 if isinstance(result, str) and result.startswith("[REQUIRES_CONFIRMATION]"):
                     import json
@@ -1252,6 +1271,8 @@ You have access to tools to schedule and manage recurring tasks. When the user w
         asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
 
         await _send_images_from_tool_results(update, all_tool_results)
+        _finish_trace(final_response=final_response)
+        clear_current_run()
 
         if final_response:
             await send_with_code_files(update, final_response)
@@ -1318,6 +1339,8 @@ You have access to tools to schedule and manage recurring tasks. When the user w
 
     memory.add_message(user_id, "assistant", final_response)
     asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
+    _finish_trace(final_response=final_response)
+    clear_current_run()
 
 async def handle_onboarding(update: Update, user_id, message, user_data):
     """Handle onboarding flow"""
@@ -1401,13 +1424,22 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import asyncio
     import json
     user_id = update.effective_user.id
+    caption = update.message.caption or "Describe this image in detail."
+    run_id = start_run(user_id, "telegram_photo", caption)
+    run_finished = False
+
+    def _finish_trace(status="completed", final_response=None, error=None):
+        nonlocal run_finished
+        if run_finished:
+            return
+        finish_run(final_response=final_response, status=status, error=error, run_id=run_id)
+        run_finished = True
 
     if not _feature_enabled("ENABLE_VISION", True):
+        _finish_trace(status="error", error="Image vision is disabled")
+        clear_current_run()
         await update.message.reply_text("❌ Image vision is disabled in Plugins & Skills.")
         return
-
-    # Get caption as the user's question (optional)
-    caption = update.message.caption or "Describe this image in detail."
 
     # Download the highest-res photo
     photo = update.message.photo[-1]
@@ -1580,6 +1612,7 @@ Your purpose is to {BOT_PURPOSE}."""
             step_tool_names.append(tool_name)
             await _set_progress(f"Working... step {round_idx + 1}: using {tool_name}")
             result = await execute_tool(tool_name, tool_args, user_id, task_manager)
+            log_event("tool_result", label=tool_name, payload={"result": str(result)[:3000]})
             
             if isinstance(result, str) and "[REQUIRES_CONFIRMATION]" in result:
                 import json
@@ -1676,6 +1709,8 @@ Your purpose is to {BOT_PURPOSE}."""
         user_mem += f"\nImage URL: {uploaded_image_url}"
     memory.add_message(user_id, "user", user_mem)
     memory.add_message(user_id, "assistant", final_response)
+    _finish_trace(final_response=final_response)
+    clear_current_run()
     await send_with_code_files(update, final_response)
 
 
@@ -2144,6 +2179,20 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             parse_mode="Markdown"
         )
 
+
+async def handle_bot_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Best-effort trace finalization for uncaught Telegram handler failures."""
+    try:
+        finish_run(status="error", error=str(context.error))
+    except Exception:
+        pass
+    finally:
+        clear_current_run()
+    try:
+        print(f"Telegram handler error: {context.error}")
+    except Exception:
+        pass
+
 def create_bot(token):
     """Create and configure the Telegram bot"""
     
@@ -2181,6 +2230,7 @@ def create_bot(token):
     
     # Callback Handlers
     app.add_handler(CallbackQueryHandler(handle_callback_query))
+    app.add_error_handler(handle_bot_error)
 
     # Add message handler for chat
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -2191,6 +2241,8 @@ def create_bot(token):
     task_manager.telegram_app = app
 
     return app
+
+
 
 
 

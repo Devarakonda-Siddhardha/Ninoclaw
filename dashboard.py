@@ -6,6 +6,7 @@ import os, re, sys, json, sqlite3, subprocess, shutil, platform
 from functools import wraps
 from pathlib import Path
 from dotenv import load_dotenv, set_key, dotenv_values
+from run_traces import get_run, get_run_events, list_runs, summarize_runs
 
 # Lazy Flask import so the rest of the app doesn't depend on it
 try:
@@ -33,7 +34,9 @@ def save_env_key(key, value):
 def get_db():
     if not os.path.exists(DB_FILE):
         return None
-    return sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def require_login(f):
     @wraps(f)
@@ -190,6 +193,9 @@ BASE = """<!DOCTYPE html>
     </a>
     <a href="{{ url_for('chat_page') }}" class="nav-link {{ 'active' if active=='chat' }}">
       <i class="bi bi-chat-dots"></i> Chat History
+    </a>
+    <a href="{{ url_for('runs_page') }}" class="nav-link {{ 'active' if active=='runs' }}">
+      <i class="bi bi-activity"></i> Runs
     </a>
     <a href="{{ url_for('tasks_page') }}" class="nav-link {{ 'active' if active=='tasks' }}">
       <i class="bi bi-calendar-check"></i> Tasks & Crons
@@ -1050,8 +1056,200 @@ def chat_page():
 </div></div>
 {% endif %}
 
-"""
+    """
     return render_template_string(tmpl + FOOTER, active="chat", version=git_version(), users=users)
+
+
+@app.route("/runs")
+@require_login
+def runs_page():
+    status = (request.args.get("status") or "").strip()
+    channel = (request.args.get("channel") or "").strip()
+    user_id = (request.args.get("user_id") or "").strip()
+    runs = list_runs(limit=300, status=status or None, channel=channel or None, user_id=user_id or None)
+    summary = summarize_runs(limit=500)
+    channels = sorted({r.get("channel") for r in list_runs(limit=500) if r.get("channel")})
+
+    tmpl = BASE + """
+<div class="page-title">Runs</div>
+<div class="page-sub">Operator trace log for model calls, tool execution, and failures. Dashboard only.</div>
+
+<div class="row">
+  <div class="col"><div class="stat-card"><div class="stat-num">{{ summary.total }}</div><div class="stat-label">Runs</div></div></div>
+  <div class="col"><div class="stat-card"><div class="stat-num">{{ summary.completed }}</div><div class="stat-label">Completed</div></div></div>
+  <div class="col"><div class="stat-card"><div class="stat-num">{{ summary.error }}</div><div class="stat-label">Errors</div></div></div>
+  <div class="col"><div class="stat-card"><div class="stat-num">{{ summary.avg_ms }}</div><div class="stat-label">Avg ms</div></div></div>
+</div>
+
+<div class="card">
+  <div class="card-header"><i class="bi bi-funnel"></i> Filters</div>
+  <div class="card-body">
+    <form method="GET" action="/runs" class="row" style="margin-bottom:0">
+      <div class="col">
+        <label class="form-label">Status</label>
+        <select name="status" class="form-select">
+          <option value="">All</option>
+          {% for value in ['running', 'completed', 'error'] %}
+          <option value="{{ value }}" {{ 'selected' if status==value }}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col">
+        <label class="form-label">Channel</label>
+        <select name="channel" class="form-select">
+          <option value="">All</option>
+          {% for value in channels %}
+          <option value="{{ value }}" {{ 'selected' if channel==value }}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col">
+        <label class="form-label">User ID</label>
+        <input type="text" name="user_id" value="{{ user_id }}" class="form-control" placeholder="Telegram or web user id">
+      </div>
+      <div class="col" style="display:flex;align-items:flex-end;gap:8px">
+        <button type="submit" class="btn btn-primary">Apply</button>
+        <a href="{{ url_for('runs_page') }}" class="btn btn-outline">Reset</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><i class="bi bi-list-ul"></i> Recent Runs</div>
+  <div class="card-body" style="padding:0">
+    {% if runs %}
+    <div class="table-wrap"><table class="table table-hover mb-0">
+      <thead><tr><th>Started</th><th>Status</th><th>Channel</th><th>User</th><th>Models</th><th>Tools</th><th>Latency</th><th>Message</th><th></th></tr></thead>
+      <tbody>
+      {% for run in runs %}
+      <tr>
+        <td style="color:var(--muted);font-size:0.82rem">{{ run.started_at }}</td>
+        <td>
+          {% if run.status == 'completed' %}
+          <span class="badge-on">completed</span>
+          {% elif run.status == 'error' %}
+          <span class="badge-off" style="background:rgba(248,81,73,0.15);color:var(--red)">error</span>
+          {% else %}
+          <span class="badge-off">{{ run.status }}</span>
+          {% endif %}
+        </td>
+        <td><code>{{ run.channel }}</code></td>
+        <td><code>{{ run.user_id }}</code></td>
+        <td>{{ run.model_calls }}</td>
+        <td>{{ run.tool_calls }}</td>
+        <td>{{ run.total_ms or '—' }}</td>
+        <td style="max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ run.user_message }}</td>
+        <td><a href="{{ url_for('run_view', run_id=run.id) }}" class="btn btn-primary" style="padding:5px 14px;font-size:0.82rem">Open</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}
+    <div style="padding:28px;color:var(--muted);text-align:center">No runs found for the current filters.</div>
+    {% endif %}
+  </div>
+</div>
+"""
+    return render_template_string(
+        tmpl + FOOTER,
+        active="runs",
+        version=git_version(),
+        runs=runs,
+        summary=summary,
+        channels=channels,
+        status=status,
+        channel=channel,
+        user_id=user_id,
+    )
+
+
+@app.route("/runs/<run_id>")
+@require_login
+def run_view(run_id):
+    run = get_run(run_id)
+    if not run:
+        flash("Run not found.", "error")
+        return redirect(url_for("runs_page"))
+    events = get_run_events(run_id)
+    tmpl = BASE + """
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+  <div>
+    <div class="page-title" style="margin-bottom:2px">
+      <a href="{{ url_for('runs_page') }}" style="color:var(--muted);text-decoration:none;font-size:1rem;margin-right:8px">
+        <i class="bi bi-arrow-left"></i>
+      </a>
+      Run <code style="font-size:1rem;color:var(--accent)">{{ run.id }}</code>
+    </div>
+    <div class="page-sub" style="margin-bottom:0">{{ run.channel }} · {{ run.user_id }} · {{ run.started_at }}</div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col"><div class="stat-card"><div class="stat-num">{{ run.model_calls }}</div><div class="stat-label">Model calls</div></div></div>
+  <div class="col"><div class="stat-card"><div class="stat-num">{{ run.tool_calls }}</div><div class="stat-label">Tool calls</div></div></div>
+  <div class="col"><div class="stat-card"><div class="stat-num">{{ run.total_ms or 0 }}</div><div class="stat-label">Latency ms</div></div></div>
+</div>
+
+<div class="card">
+  <div class="card-header"><i class="bi bi-info-circle"></i> Summary</div>
+  <div class="card-body">
+    <div class="row">
+      <div class="col">
+        <div class="form-label">Status</div>
+        <div><code>{{ run.status }}</code></div>
+      </div>
+      <div class="col">
+        <div class="form-label">Finished</div>
+        <div>{{ run.finished_at or '—' }}</div>
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      <div class="form-label">User Message</div>
+      <pre style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;margin:0">{{ run.user_message }}</pre>
+    </div>
+    {% if run.final_response %}
+    <div style="margin-top:16px">
+      <div class="form-label">Final Response</div>
+      <pre style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;margin:0">{{ run.final_response }}</pre>
+    </div>
+    {% endif %}
+    {% if run.error %}
+    <div style="margin-top:16px">
+      <div class="form-label">Error</div>
+      <pre style="white-space:pre-wrap;background:rgba(248,81,73,0.08);border:1px solid rgba(248,81,73,0.3);border-radius:6px;padding:12px;margin:0;color:var(--red)">{{ run.error }}</pre>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><i class="bi bi-activity"></i> Event Timeline</div>
+  <div class="card-body">
+    {% if events %}
+    <div style="display:flex;flex-direction:column;gap:14px">
+      {% for event in events %}
+      <div style="border-left:2px solid var(--border);padding-left:14px">
+        <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start">
+          <div>
+            <strong>{{ event.event_type }}</strong>
+            {% if event.label %}<span style="color:var(--accent)">· {{ event.label }}</span>{% endif %}
+          </div>
+          <div style="color:var(--muted);font-size:0.78rem">{{ event.ts }}</div>
+        </div>
+        {% if event.payload %}
+        <pre style="white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;margin:8px 0 0 0;font-size:0.82rem">{{ event.payload }}</pre>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div style="color:var(--muted)">No events recorded for this run.</div>
+    {% endif %}
+  </div>
+</div>
+"""
+    return render_template_string(tmpl + FOOTER, active="runs", version=git_version(), run=run, events=events)
 
 
 @app.route("/api/chat/<user_id>/send", methods=["POST"])
