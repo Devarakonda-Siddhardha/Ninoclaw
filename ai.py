@@ -5,6 +5,7 @@ import requests
 import json
 import time
 from config import get_runtime_ai_config
+from run_traces import increment_run_counter, log_event
 
 
 # Keywords that signal a complex/expensive request
@@ -212,6 +213,11 @@ def chat_vision(message, image_b64, system_prompt=None, history=None):
     if not candidates:
         return "No multimodal model is configured for image analysis."
 
+    log_event(
+        "vision_route",
+        payload={"candidate_models": [cfg.get("model", "") for cfg in candidates]},
+    )
+
     last_error = "No multimodal models available."
     for model_cfg in candidates:
         result, error = _try_openai(
@@ -335,6 +341,17 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64, ol
         payload["tool_choice"] = "auto"
 
     try:
+        increment_run_counter("model_calls")
+        log_event(
+            "model_attempt",
+            label=model_cfg.get("model", ""),
+            payload={
+                "api_url": model_cfg.get("api_url", ""),
+                "has_image": bool(image_b64),
+                "tool_schema_count": len(tools or []),
+            },
+        )
+        started = time.time()
         max_retries = 5
         for attempt in range(max_retries):
             _timeout = 180 if (headers.get("Authorization", "") == "Bearer ollama" or "localhost:11434" in url) else 60
@@ -354,15 +371,44 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64, ol
 
         data = resp.json()
         msg = data["choices"][0]["message"]
+        duration_ms = int((time.time() - started) * 1000)
 
         if "tool_calls" in msg:
+            log_event(
+                "model_success",
+                label=model_cfg.get("model", ""),
+                payload={
+                    "has_image": bool(image_b64),
+                    "duration_ms": duration_ms,
+                    "returned_tool_calls": len(msg.get("tool_calls") or []),
+                },
+            )
             return {"content": msg.get("content") or "", "tool_calls": msg["tool_calls"]}, None
 
+        log_event(
+            "model_success",
+            label=model_cfg.get("model", ""),
+            payload={
+                "has_image": bool(image_b64),
+                "duration_ms": duration_ms,
+                "returned_tool_calls": 0,
+            },
+        )
         return (msg.get("content") or "").strip(), None
 
     except requests.RequestException as e:
+        log_event(
+            "model_failure",
+            label=model_cfg.get("model", ""),
+            payload={"has_image": bool(image_b64), "error": str(e)},
+        )
         return None, str(e)
     except (KeyError, IndexError) as e:
+        log_event(
+            "model_failure",
+            label=model_cfg.get("model", ""),
+            payload={"has_image": bool(image_b64), "error": f"Parse error: {e}"},
+        )
         return None, f"Parse error: {e}"
 
 
