@@ -5,6 +5,7 @@ Functions the AI can call to perform actions
 import requests as _requests
 from typing import Dict, Any
 from dotenv import load_dotenv
+from run_traces import increment_run_counter, log_event
 
 # Load skills and merge their tools
 try:
@@ -500,10 +501,14 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
     Returns:
         Result message string
     """
+    increment_run_counter("tool_calls")
+    log_event("tool_call", label=tool_name, payload={"arguments": arguments, "user_id": str(user_id)})
     # ── Route to external MCP Server if applicable ─────────────────────────
     if tool_name.startswith("mcp__"):
         import mcp_manager
-        return await mcp_manager.execute_tool(tool_name, arguments)
+        result = await mcp_manager.execute_tool(tool_name, arguments)
+        log_event("tool_result", label=tool_name, payload={"result": str(result)[:3000]})
+        return result
 
     from memory import Memory
     from config import SERPER_API_KEY
@@ -512,12 +517,14 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
     arguments = _sanitize_tool_arguments(arguments)
     supported, unsupported_reason = _tool_supported(tool_name)
     if not supported:
+        log_event("tool_blocked", label=tool_name, payload={"reason": unsupported_reason})
         return f"Blocked: {unsupported_reason}"
 
     # ── Enforce owner-only access at execution time ───────────────────────
     if _tool_requires_owner(tool_name):
         err = require_owner(user_id)
         if err:
+            log_event("tool_blocked", label=tool_name, payload={"reason": err})
             return err
 
     # ── Enforce Human-in-the-Loop Confirmation ────────────────────────────
@@ -532,6 +539,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         if not bypass_hitl:
             import json
             # Pack the pending call into a special JSON signal
+            log_event("tool_confirmation_required", label=tool_name, payload={"arguments": arguments})
             return f"[REQUIRES_CONFIRMATION] {json.dumps({'name': tool_name, 'arguments': arguments})}"
 
 
@@ -541,6 +549,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
     if tool_name == "reload_runtime":
         err = require_owner(user_id)
         if err:
+            log_event("tool_blocked", label=tool_name, payload={"reason": err})
             return err
         try:
             state = reload_runtime_state()
@@ -567,6 +576,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         import asyncio
         err = require_owner(user_id)
         if err:
+            log_event("tool_blocked", label=tool_name, payload={"reason": err})
             return err
         has_updates, commits = check_for_updates()
         if not has_updates:
@@ -957,4 +967,6 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         return f"❌ Skill error ({tool_name}): {e}\n\nTraceback:\n{tb}"
 
     return f"Unknown tool: {tool_name}"
+
+
 
