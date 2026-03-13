@@ -494,18 +494,30 @@ async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if isinstance(models_config, dict):
             for provider, model_list in models_config.items():
                 if isinstance(model_list, dict):
-                    for model_name, model_list.values():
-                        # Extract actual model name string from provider dict
-                        actual_model = model_name.get("model", model_name)
+                    for model_entry in model_list.values():
+                        if isinstance(model_entry, dict):
+                            actual_model = model_entry.get("model", "")
+                        else:
+                            actual_model = str(model_entry).strip()
                         if actual_model:
                             model_mapping[actual_model.lower()] = actual_model
                 elif isinstance(model_list, list):
-                    for model_name in model_list:
-                        model_mapping[model_name.lower()] = model_name
+                    for model_entry in model_list:
+                        if isinstance(model_entry, dict):
+                            actual_model = model_entry.get("model", "")
+                        else:
+                            actual_model = str(model_entry).strip()
+                        if actual_model:
+                            model_mapping[actual_model.lower()] = actual_model
         elif isinstance(models_config, list):
             # If models is a simple list (not from config), use it directly
-            for model_name in models_config:
-                model_mapping[model_name.lower()] = model_name
+            for model_entry in models_config:
+                if isinstance(model_entry, dict):
+                    actual_model = model_entry.get("model", "")
+                else:
+                    actual_model = str(model_entry).strip()
+                if actual_model:
+                    model_mapping[actual_model.lower()] = actual_model
 
         # Find matching model (case-insensitive)
         matched_model = model_mapping.get(model_name.lower())
