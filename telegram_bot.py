@@ -18,12 +18,15 @@ from summarizer import extract_urls, is_youtube, get_youtube_transcript, get_url
 
 memory = Memory()
 
+# Media Group Collection (for Albums)
+MEDIA_GROUPS = {}  # {media_group_id: [photo_bytes, ...]}
+MEDIA_GROUP_LOCKS = {} # {media_group_id: asyncio.Lock}
+MEDIA_GROUP_CAPTIONS = {} # {media_group_id: caption}
+
 WEB_ROOT = Path(__file__).resolve().parent / "websites"
 WEB_ASSETS_DIR = WEB_ROOT / "assets"
 DEFAULT_TOOL_ROUNDS = 3
 DEEP_TOOL_ROUNDS = 6
-
-
 def _public_base_url():
     port = os.getenv("DASHBOARD_PORT", "8080")
     import socket
@@ -1388,6 +1391,7 @@ async def handle_onboarding(update: Update, user_id, message, user_data):
             timezone = None
         else:
             # Try to use the provided timezone
+
             timezone = message.strip()
 
         memory.set_timezone(user_id, timezone)
@@ -1428,16 +1432,58 @@ Commands:
 /status - Check system status"""
         )
 
-async def handle_onboarding(update, user_id, message, user_data):
-    pass  # Onboarding moved to CLI wizard — this stub kept for safety
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle photo messages with multimodal + tool-call support."""
+    """Handle photo messages with media group support and multimodal analysis."""
     import asyncio
     import json
     user_id = update.effective_user.id
-    caption = update.message.caption or "Describe this image in detail."
-    run_id = start_run(user_id, "telegram_photo", caption)
+    media_group_id = update.message.media_group_id
+    caption = update.message.caption or ""
+    
+    if not _feature_enabled("ENABLE_VISION", True):
+        await update.message.reply_text("❌ Image vision is disabled in Plugins & Skills.")
+        return
+
+    # Download the highest-res photo
+    photo = update.message.photo[-1]
+    file = await context.bot.get_file(photo.file_id)
+    photo_bytes = await file.download_as_bytearray()
+    
+    # If part of a media group, collect it
+    if media_group_id:
+        if media_group_id not in MEDIA_GROUP_LOCKS:
+            MEDIA_GROUP_LOCKS[media_group_id] = asyncio.Lock()
+            MEDIA_GROUPS[media_group_id] = []
+            MEDIA_GROUP_CAPTIONS[media_group_id] = ""
+
+        async with MEDIA_GROUP_LOCKS[media_group_id]:
+            MEDIA_GROUPS[media_group_id].append(photo_bytes)
+            if caption:
+                MEDIA_GROUP_CAPTIONS[media_group_id] = caption
+        
+        # Debounce: wait to see if more photos arrive
+        await asyncio.sleep(0.8)
+        
+        # Only the "leader" (the one that pops the list) should proceed
+        async with MEDIA_GROUP_LOCKS[media_group_id]:
+            if media_group_id not in MEDIA_GROUPS:
+                return # Already processed by another task
+            
+            photos_to_process = MEDIA_GROUPS.pop(media_group_id)
+            final_caption = MEDIA_GROUP_CAPTIONS.pop(media_group_id)
+            # Leave the lock for a moment to let others finish their wait, then clean up
+            async def _cleanup():
+                await asyncio.sleep(2)
+                MEDIA_GROUP_LOCKS.pop(media_group_id, None)
+            asyncio.create_task(_cleanup())
+    else:
+        # Single photo
+        photos_to_process = [photo_bytes]
+        final_caption = caption or "Describe this image in detail."
+
+    # Start the actual run
+    run_id = start_run(user_id, "telegram_photo", final_caption)
     run_finished = False
 
     def _finish_trace(status="completed", final_response=None, error=None):
@@ -1447,55 +1493,55 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finish_run(final_response=final_response, status=status, error=error, run_id=run_id)
         run_finished = True
 
-    if not _feature_enabled("ENABLE_VISION", True):
-        _finish_trace(status="error", error="Image vision is disabled")
-        clear_current_run()
-        await update.message.reply_text("❌ Image vision is disabled in Plugins & Skills.")
-        return
-
-    # Download the highest-res photo
-    photo = update.message.photo[-1]
-    file = await context.bot.get_file(photo.file_id)
-    photo_bytes = await file.download_as_bytearray()
-    image_b64 = base64.b64encode(photo_bytes).decode("utf-8")
-    try:
-        uploaded_image_url = _save_image_asset(photo_bytes, prefix=f"tg_{user_id}", suffix=".jpg")
-    except Exception:
-        uploaded_image_url = ""
+    await update.message.chat.send_action(action="typing")
+    
+    # Prepare all images
+    images_b64 = []
+    uploaded_image_urls = []
+    for p_bytes in photos_to_process:
+        images_b64.append(base64.b64encode(p_bytes).decode("utf-8"))
+        try:
+            url = _save_image_asset(p_bytes, prefix=f"tg_{user_id}", suffix=".jpg")
+            if url:
+                uploaded_image_urls.append(url)
+        except Exception:
+            pass
 
     personalized_prompt = f"""{SYSTEM_PROMPT}
 
 Your name is {AGENT_NAME}. You are talking to {USER_NAME}.
 Your purpose is to {BOT_PURPOSE}."""
 
-    await update.message.chat.send_action(action="typing")
-
     conv_history = memory.get_conversation_context(user_id)
     vision_prompt = (
-        "Analyze this image carefully. Describe the visible content, any text in the image, "
+        f"Analyze these {len(photos_to_process)} images carefully. Describe the visible content, any text in the images, "
         "important objects, people, scene details, and anything relevant to the user's request.\n\n"
-        f"User request: {caption}"
+        f"User request: {final_caption}"
     )
     vision_system_prompt = (
-        "You are a vision analysis assistant. Describe only what is visible in the image. "
-        "If something is unclear, say that it is unclear. Do not invent unseen details."
+        "You are a vision analysis assistant. Describe only what is visible in the images. "
+        "If something is unclear, say that it is unclear. Provide a unified description."
     )
+    
+    # Support for multi-image vision in ai.py
     vision_summary = chat_vision(
         message=vision_prompt,
-        image_b64=image_b64,
+        image_b64=images_b64,
         system_prompt=vision_system_prompt,
         history=None,
     )
 
-    if uploaded_image_url:
+    all_urls_text = "\n".join([f"- {u}" for u in uploaded_image_urls])
+    if uploaded_image_urls:
         user_message = (
-            f"{caption}\n\n"
-            f"Image analysis:\n{vision_summary}\n\n"
-            f"Uploaded image URL (use this directly in websites if relevant): {uploaded_image_url}"
+            f"{final_caption}\n\n"
+            f"Image analysis ({len(photos_to_process)} images):\n{vision_summary}\n\n"
+            f"Uploaded image URLs (use these directly in websites/tools):\n{all_urls_text}"
         )
     else:
-        user_message = f"{caption}\n\nImage analysis:\n{vision_summary}"
-    tools = _filter_tools_for_request(caption, get_tool_definitions(user_id))
+        user_message = f"{final_caption}\n\nImage analysis:\n{vision_summary}"
+        
+    tools = _filter_tools_for_request(final_caption, get_tool_definitions(user_id))
 
     def _extract_tool_calls(resp_obj):
         final_text = resp_obj if isinstance(resp_obj, str) else (resp_obj.get("content") or "")
@@ -1532,38 +1578,6 @@ Your purpose is to {BOT_PURPOSE}."""
                         final_text = _re2.sub(r'(?s)<tool_call>.*?</tool_call>', '', final_text).strip()
                 except Exception:
                     pass
-        # Parse GLM-style <tool_call>name>\n<parameter=key>value</parameter>\n</name>
-        if not tcalls and final_text:
-            import re as _re2
-            tc_match = _re2.search(r'<tool_call>(\w+)>\s*(.*?)\s*</\1>', final_text, _re2.DOTALL)
-            if tc_match:
-                try:
-                    tool_name = tc_match.group(1)
-                    params_text = tc_match.group(2).strip()
-                    params = {}
-                    for pm in _re2.finditer(r'<parameter=(\w+)>\s*(.*?)\s*</parameter>', params_text, _re2.DOTALL):
-                        params[pm.group(1)] = pm.group(2).strip()
-                    if tool_name:
-                        tcalls = [{"function": {"name": tool_name, "arguments": params}}]
-                        final_text = _re2.sub(r'(?s)<tool_call>\w+>.*?</\w+>', '', final_text).strip()
-                except Exception:
-                    pass
-
-        # Parse GLM JSON-style <tool_call>name){"key": "value"}
-        if not tcalls and final_text:
-            import re as _re2, json as _json2
-            tc_match = _re2.search(r'<tool_call>(\w+)\)\s*(\{.*)', final_text, _re2.DOTALL)
-            if tc_match:
-                try:
-                    tool_name = tc_match.group(1)
-                    raw_json = tc_match.group(2).strip()
-                    tool_args = _json2.loads(raw_json)
-                    if tool_name:
-                        tcalls = [{"function": {"name": tool_name, "arguments": tool_args}}]
-                        final_text = final_text[:tc_match.start()].strip()
-                except Exception:
-                    pass
-
         return final_text, tcalls
 
     response = chat(
@@ -1576,9 +1590,10 @@ Your purpose is to {BOT_PURPOSE}."""
     final_response, tool_calls = _extract_tool_calls(response)
 
     all_tool_results = []
-    available_image_urls = [uploaded_image_url] if uploaded_image_url else []
+    # Make all uploaded images available to tools
+    available_image_urls = list(uploaded_image_urls)
     tool_history = list(conv_history)
-    max_tool_rounds = _tool_round_limit(caption)
+    max_tool_rounds = _tool_round_limit(final_caption)
     last_step_fp = ""
     no_progress_rounds = 0
     skip_final_summarization = False
@@ -1587,20 +1602,17 @@ Your purpose is to {BOT_PURPOSE}."""
 
     async def _set_progress(text):
         nonlocal progress_msg, last_progress
-        if text == last_progress:
-            return
+        if text == last_progress: return
         last_progress = text
         try:
             if progress_msg is None:
                 progress_msg = await update.message.reply_text(text)
             else:
                 await progress_msg.edit_text(text)
-        except Exception:
-            pass
+        except Exception: pass
 
     for round_idx in range(max_tool_rounds):
-        if not tool_calls:
-            break
+        if not tool_calls: break
         await _set_progress(f"Working... step {round_idx + 1}/{max_tool_rounds}")
         step_results = []
         seen_call_keys = set()
@@ -1609,62 +1621,36 @@ Your purpose is to {BOT_PURPOSE}."""
             tool_name = tool_call.get("function", {}).get("name")
             raw_args = tool_call.get("function", {}).get("arguments", "{}")
             if isinstance(raw_args, str):
-                try:
-                    tool_args = json.loads(raw_args)
-                except Exception:
-                    tool_args = {}
-            else:
-                tool_args = raw_args
-            if not tool_name:
-                continue
+                try: tool_args = json.loads(raw_args)
+                except Exception: tool_args = {}
+            else: tool_args = raw_args
+            if not tool_name: continue
             ckey = _tool_call_key(tool_name, tool_args)
-            if ckey in seen_call_keys:
-                continue
+            if ckey in seen_call_keys: continue
             seen_call_keys.add(ckey)
             step_tool_names.append(tool_name)
             await _set_progress(f"Working... step {round_idx + 1}: using {tool_name}")
             result = await execute_tool(tool_name, tool_args, user_id, task_manager)
-            log_event("tool_result", label=tool_name, payload={"result": str(result)[:3000]})
             
             if isinstance(result, str) and "[REQUIRES_CONFIRMATION]" in result:
-                import json
                 try:
                     idx = result.find("[REQUIRES_CONFIRMATION]")
-                    payload_str = result[idx + len("[REQUIRES_CONFIRMATION]"):].strip()
-                    payload = json.loads(payload_str)
-                    
-                    # Store pending action
+                    payload = json.loads(result[idx + len("[REQUIRES_CONFIRMATION]"):].strip())
                     memory.set_user_data(user_id, "pending_tool", payload)
-                    
-                    keyboard = [
-                        [
-                            InlineKeyboardButton("Approve ✅", callback_data="hitl_approve"),
-                            InlineKeyboardButton("Reject ❌", callback_data="hitl_reject"),
-                        ]
-                    ]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    
+                    keyboard = [[InlineKeyboardButton("Approve ✅", callback_data="hitl_approve"), InlineKeyboardButton("Reject ❌", callback_data="hitl_reject")]]
                     cmd_info = payload.get('arguments', {}).get('command', '')
-                    warning_msg = f"⚠️ *Action Required!*\\n\\nI need permission to run `{payload.get('name')}`."
-                    if cmd_info:
-                        warning_msg += f"\\n\\nCommand: `{cmd_info}`"
-                    
-                    await update.message.reply_text(warning_msg, reply_markup=reply_markup, parse_mode="Markdown")
-                    
+                    warning_msg = f"⚠️ *Action Required!*\n\nI need permission to run `{payload.get('name')}`."
+                    if cmd_info: warning_msg += f"\n\nCommand: `{cmd_info}`"
+                    await update.message.reply_text(warning_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
                     skip_final_summarization = True
-                    step_results.append(f"Paused execution waiting for user permission to run {payload.get('name')}.")
+                    step_results.append(f"Paused waiting for user permission for {payload.get('name')}.")
                     break
-                except Exception as e:
-                    result = f"❌ Failed to parse confirmation request: {e}"
-            
+                except Exception: pass
             step_results.append(result)
 
-        if not step_results:
-            break
-
+        if not step_results: break
         step_fp = _step_fingerprint(step_results)
-        if step_fp and step_fp == last_step_fp:
-            no_progress_rounds += 1
+        if step_fp and step_fp == last_step_fp: no_progress_rounds += 1
         else:
             no_progress_rounds = 0
             last_step_fp = step_fp
@@ -1672,53 +1658,36 @@ Your purpose is to {BOT_PURPOSE}."""
         all_tool_results.extend(step_results)
         for result in step_results:
             for img_url in _extract_image_urls(result):
-                if img_url not in available_image_urls:
-                    available_image_urls.append(img_url)
+                if img_url not in available_image_urls: available_image_urls.append(img_url)
 
-        if _should_stop_after_step(user_message, step_tool_names, step_results):
+        if _should_stop_after_step(final_caption, step_tool_names, step_results):
             final_response = "\n\n".join(_dedupe_preserve([_strip_image_markers(r) for r in step_results if r]))
-            skip_final_summarization = _should_skip_final_summarization(caption, step_tool_names)
+            skip_final_summarization = _should_skip_final_summarization(final_caption, step_tool_names)
             break
 
-        tool_history.append({
-            "role": "user",
-            "content": _build_tool_feedback(step_results, available_image_urls)
-        })
-        response = chat(
-            message="Continue.",
-            system_prompt=personalized_prompt,
-            history=tool_history,
-            tools=tools,
-            force_smart=True
-        )
+        tool_history.append({"role": "user", "content": _build_tool_feedback(step_results, available_image_urls)})
+        response = chat(message="Continue.", system_prompt=personalized_prompt, history=tool_history, tools=tools, force_smart=True)
         final_response, tool_calls = _extract_tool_calls(response)
-        if no_progress_rounds >= 1:
-            break
+        if no_progress_rounds >= 1: break
 
     if progress_msg:
-        try:
-            await progress_msg.delete()
-        except Exception:
-            pass
+        try: await progress_msg.delete()
+        except Exception: pass
 
     if all_tool_results and not skip_final_summarization:
         final_response = _finalize_after_tools(
-            personalized_prompt=personalized_prompt,
-            tool_history=tool_history,
-            all_tool_results=all_tool_results,
-            fallback=final_response,
+            personalized_prompt=personalized_prompt, tool_history=tool_history,
+            all_tool_results=all_tool_results, fallback=final_response
         )
         await _send_images_from_tool_results(update, all_tool_results)
 
     final_response = _strip_image_markers(final_response)
-    if not final_response and uploaded_image_url:
-        final_response = f"I saved your image for website use: {uploaded_image_url}"
-    elif not final_response:
-        final_response = "Image received."
+    if not final_response:
+        final_response = f"I saved your {len(photos_to_process)} images for use." if uploaded_image_urls else "Images received."
 
-    user_mem = f"[Image] {caption}"
-    if uploaded_image_url:
-        user_mem += f"\nImage URL: {uploaded_image_url}"
+    user_mem = f"[Album] {final_caption}\nImages: {len(photos_to_process)}"
+    if uploaded_image_urls: user_mem += f"\nURLs:\n" + "\n".join(uploaded_image_urls)
+    
     memory.add_message(user_id, "user", user_mem)
     memory.add_message(user_id, "assistant", final_response)
     _finish_trace(final_response=final_response)

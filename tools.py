@@ -4,6 +4,9 @@ Functions the AI can call to perform actions
 """
 import requests as _requests
 from typing import Dict, Any
+import asyncio
+import os
+import subprocess
 from dotenv import load_dotenv
 from run_traces import increment_run_counter, log_event
 
@@ -325,6 +328,31 @@ _BUILTIN_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "claude_code",
+            "description": (
+                "Invoke Claude Code CLI for advanced programming, project-wide refactoring, "
+                "or deep analysis. ONLY use this when the user explicitly asks for 'Claude Code'. "
+                "For regular coding or single file tasks, use write_file or run_agent coder instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "Specific programming or analysis task for Claude Code"
+                    },
+                    "visible": {
+                        "type": "boolean",
+                        "description": "Set to true to launch in a new visible terminal window on the host PC so you can watch Claude Code work."
+                    }
+                },
+                "required": ["task"]
+            }
+        }
+    },
 ]
 
 _BUILTIN_TOOL_MAP = {tool["function"]["name"]: tool for tool in _BUILTIN_TOOLS}
@@ -338,12 +366,11 @@ _FLAGGED_BUILTINS = {
     "toggle_cron_job": "ENABLE_CRON",
 }
 
-# ── Owner-only tools (blocked for non-owner users) ────────────────────────────
 _OWNER_ONLY_TOOLS = {
     "self_update", "reload_runtime",
     "run_command", "read_file", "write_file", "list_dir",
     "create_skill", "delete_skill", "install_skill",
-    "run_agent",
+    "run_agent", "claude_code",
 }
 
 # Dangerous content/system-control tools that should be owner-only
@@ -363,7 +390,7 @@ def _tool_requires_owner(tool_name: str) -> bool:
 
 # ── Tools requiring Human-in-the-Loop Confirmation ────────────────────────────
 _CONFIRMATION_REQUIRED_TOOLS = {
-    "run_command", "expo_delete_app", "web_delete", "delete_skill", "create_integration"
+    "run_command", "expo_delete_app", "web_delete", "delete_skill", "create_integration", "claude_code"
 }
 
 def _tool_requires_confirmation(tool_name: str) -> bool:
@@ -783,8 +810,6 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         if err: return err
 
     if tool_name == "run_command":
-        import subprocess
-        import os
         command = arguments.get("command", "").strip()
         timeout = int(arguments.get("timeout", 30))
         visible = str(arguments.get("visible", "")).lower() == "true"
@@ -827,12 +852,22 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
 
         # Invisible Execution
         try:
-            result = subprocess.run(
-                command, shell=True, capture_output=True, text=True,
-                timeout=timeout, env={**__import__('os').environ, "HOME": __import__('os').path.expanduser("~")}
+            # Use async execution to avoid blocking the event loop
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**__import__('os').environ, "HOME": __import__('os').path.expanduser("~")}
             )
-            out = result.stdout.strip()
-            err_out = result.stderr.strip()
+            
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+                out = stdout.decode().strip()
+                err_out = stderr.decode().strip()
+            except asyncio.TimeoutExpired:
+                process.kill()
+                return f"❌ Command timed out after {timeout}s"
+
             parts = [f"$ {command}"]
             if out:
                 parts.append(f"```\n{out[:3000]}\n```")
@@ -840,16 +875,67 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
                 parts.append(f"⚠️ stderr:\n```\n{err_out[:500]}\n```")
             if not out and not err_out:
                 parts.append("_(no output)_")
-            if result.returncode != 0:
-                parts.append(f"↩️ Exit: {result.returncode}")
+            if process.returncode != 0:
+                parts.append(f"↩️ Exit: {process.returncode}")
             return "\n".join(parts)
-        except subprocess.TimeoutExpired:
-            return f"❌ Command timed out after {timeout}s"
         except Exception as e:
             return f"❌ {e}"
 
+    if tool_name == "claude_code":
+        task_desc = arguments.get("task", "").strip()
+        visible = str(arguments.get("visible", "")).lower() == "true"
+        
+        if not task_desc:
+            return "❌ No task provided for Claude Code."
+            
+        if visible:
+            try:
+                if os.name == 'nt':
+                    # Windows: Launch in a new window and stay open
+                    # Popen is non-blocking, so this is fine
+                    subprocess.Popen(f'start "Claude Code Expert" cmd /k "claude \"{task_desc}\""', shell=True)
+                    return "✅ Claude Code launched in a new visible terminal window. You can watch it work there!"
+                elif os.uname().sysname == 'Darwin':
+                    subprocess.Popen(['osascript', '-e', f'tell application "Terminal" to do script "claude {task_desc}"'])
+                    return "✅ Claude Code launched in a new visible terminal window."
+                else:
+                    from shutil import which
+                    if which('x-terminal-emulator'):
+                        subprocess.Popen(f'x-terminal-emulator -e "claude \\"{task_desc}\\""', shell=True)
+                        return "✅ Claude Code launched in a new visible terminal window."
+            except Exception as e:
+                return f"⚠️ Failed to launch visible terminal: {e}. Executing invisibly instead..."
+
+        try:
+            # Non-blocking async execution
+            process = await asyncio.create_subprocess_exec(
+                "claude", task_desc,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**__import__('os').environ, "HOME": __import__('os').path.expanduser("~")}
+            )
+            
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=180)
+                out = stdout.decode().strip()
+                err_out = stderr.decode().strip()
+            except asyncio.TimeoutExpired:
+                process.kill()
+                return "❌ Claude Code timed out after 180s"
+
+            summary = [f"🤖 **Claude Code Result for:** {task_desc}"]
+            if out:
+                summary.append(f"```\n{out[:4000]}\n```")
+            if err_out:
+                summary.append(f"⚠️ stderr:\n```\n{err_out[:500]}\n```")
+            if not out and not err_out:
+                summary.append("_(no output)_")
+                
+            return "\n".join(summary)
+        except Exception as e:
+            return f"❌ Claude Code execution failed: {e}"
+
     if tool_name == "read_file":
-        import os
         path = arguments.get("path", "")
         tail = arguments.get("tail")
         err = safe_path(path)
