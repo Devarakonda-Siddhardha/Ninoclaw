@@ -72,9 +72,9 @@ BASE = """<!DOCTYPE html>
   * { box-sizing: border-box; }
   body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; }
   .sidebar {
-    width: 220px; min-height: 100vh; background: var(--surface);
+    width: 220px; height: 100vh; background: var(--surface);
     border-right: 1px solid var(--border); position: fixed; top: 0; left: 0;
-    display: flex; flex-direction: column; padding: 0;
+    display: flex; flex-direction: column; padding: 0; overflow-y: auto;
   }
   .sidebar-brand {
     padding: 20px 16px 16px; border-bottom: 1px solid var(--border);
