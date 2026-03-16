@@ -52,9 +52,19 @@ async def start_mcp_servers():
         return
     
     try:
-        servers = json.loads(mcp_servers_env)
+        servers = json.loads(mcp_servers_env) if mcp_servers_env else {}
     except json.JSONDecodeError as e:
         print(f"[MCP] Failed to parse MCP_SERVERS JSON: {e}")
+        servers = {}
+
+    # Dynamically inject Chrome DevTools MCP if enabled in Dashboard
+    if os.getenv("ENABLE_CHROME_MCP", "false").lower() == "true":
+        servers["chrome_devtools"] = {
+            "command": "npx",
+            "args": ["-y", "chrome-devtools-mcp@latest", "--autoConnect"]
+        }
+        
+    if not servers:
         return
 
     # print(f"[MCP] Initializing {len(servers)} server(s)...")
