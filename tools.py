@@ -485,7 +485,7 @@ def get_tool_definitions(user_id=None) -> list:
         if _tool_requires_owner(name):
             continue
         safe.append(tool)
-    return safe
+    return safe + mcp_tools
 
 
 async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, task_manager) -> str:
