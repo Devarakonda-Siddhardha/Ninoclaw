@@ -108,7 +108,8 @@ def _try_gemini_tools(message, system_prompt, history, tools):
     if not gemini_key:
         return None, "No GEMINI_API_KEY"
 
-    model = "gemini-3-flash-preview"
+    # Use 2.0 Flash as it's the latest stable high-perf model
+    model = "gemini-2.0-flash" 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     headers_g = {"x-goog-api-key": gemini_key, "Content-Type": "application/json"}
 
@@ -199,11 +200,11 @@ def chat(message, system_prompt=None, history=None, tools=None, image_b64=None, 
 
     return f"⚠️ All models failed. Last error: {last_error}"
 
-
 def chat_vision(message, image_b64, system_prompt=None, history=None):
     """
     Run image understanding on a multimodal-capable model only.
     Do not silently retry text-only, because that would fake vision.
+    image_b64 can be a string or a list of strings.
     """
     if not image_b64:
         return "No image provided."
@@ -308,6 +309,7 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64, ol
     """
     Single attempt against one model config.
     Returns (result, None) on success, (None, error_str) on failure.
+    image_b64 can be a string or a list of strings for multi-image vision.
     """
     url = f"{model_cfg['api_url']}/chat/completions"
     headers = {
@@ -323,12 +325,17 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64, ol
         messages.extend(history)
 
     if image_b64:
+        content = [{"type": "text", "text": message or "What's in this image?"}]
+        if isinstance(image_b64, list):
+            for img in image_b64:
+                if img:
+                    content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}})
+        else:
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}})
+            
         messages.append({
             "role": "user",
-            "content": [
-                {"type": "text", "text": message or "What's in this image?"},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
-            ]
+            "content": content
         })
     else:
         messages.append({"role": "user", "content": message})
@@ -354,7 +361,7 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64, ol
         started = time.time()
         max_retries = 5
         for attempt in range(max_retries):
-            _timeout = 180 if (headers.get("Authorization", "") == "Bearer ollama" or "localhost:11434" in url) else 60
+            _timeout = 180
             resp = requests.post(url, json=payload, headers=headers, timeout=_timeout)
             if resp.status_code == 429:
                 # Rate limited - wait longer with exponential backoff
@@ -469,5 +476,3 @@ def test_connection():
         except Exception:
             pass
         return False
-
-
