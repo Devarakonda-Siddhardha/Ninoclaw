@@ -631,6 +631,7 @@ def plugins_page():
             "ENABLE_REMINDERS":  request.form.get("ENABLE_REMINDERS", "false"),
             "ENABLE_CRON":       request.form.get("ENABLE_CRON", "false"),
             "ENABLE_SELF_UPDATE":request.form.get("ENABLE_SELF_UPDATE", "false"),
+            "ENABLE_CHROME_MCP": request.form.get("ENABLE_CHROME_MCP", "false"),
         }
         for k, v in plugins.items():
             save_env_key(k, v)
@@ -750,6 +751,16 @@ def plugins_page():
       </div>
     </div>
 
+    <div class="toggle-wrap">
+      <div class="toggle-info">
+        <strong><i class="bi bi-browser-chrome me-2" style="color:#4285F4"></i>Live Chrome Automation (MCP)</strong>
+        <small>Allows agents to control a live Chrome session securely. (Requires <code>chrome://inspect/#remote-debugging</code> enabled in Chrome)</small>
+      </div>
+      <div class="form-check form-switch ms-3">
+        <input class="form-check-input" type="checkbox" name="ENABLE_CHROME_MCP" value="true" {{ 'checked' if chrome_mcp }}>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -794,7 +805,8 @@ def plugins_page():
         summarizer=is_on("ENABLE_SUMMARIZER"),
         reminders=is_on("ENABLE_REMINDERS"),
         cron=is_on("ENABLE_CRON"),
-        self_update=is_on("ENABLE_SELF_UPDATE"))
+        self_update=is_on("ENABLE_SELF_UPDATE"),
+        chrome_mcp=is_on("ENABLE_CHROME_MCP"))
 
 
 @app.route("/models", methods=["GET", "POST"])
