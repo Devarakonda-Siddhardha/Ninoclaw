@@ -48,9 +48,6 @@ async def start_mcp_servers():
         _stack = AsyncExitStack()
 
     mcp_servers_env = os.getenv("MCP_SERVERS")
-    if not mcp_servers_env:
-        return
-    
     try:
         servers = json.loads(mcp_servers_env) if mcp_servers_env else {}
     except json.JSONDecodeError as e:
