@@ -25,8 +25,8 @@ MEDIA_GROUP_CAPTIONS = {} # {media_group_id: caption}
 
 WEB_ROOT = Path(__file__).resolve().parent / "websites"
 WEB_ASSETS_DIR = WEB_ROOT / "assets"
-DEFAULT_TOOL_ROUNDS = 3
-DEEP_TOOL_ROUNDS = 6
+DEFAULT_TOOL_ROUNDS = 6
+DEEP_TOOL_ROUNDS = 10
 def _public_base_url():
     port = os.getenv("DASHBOARD_PORT", "8080")
     import socket
