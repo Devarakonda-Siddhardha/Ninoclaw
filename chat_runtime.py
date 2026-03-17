@@ -203,6 +203,28 @@ def _finalize_after_tools(personalized_prompt, tool_history, all_tool_results, f
     return fallback_text or "Done."
 
 
+def _build_autonomous_follow_up_prompt(user_message, round_idx, max_tool_rounds):
+    return (
+        f"Original user request:\n{user_message}\n\n"
+        "Review the latest tool results in the conversation history.\n"
+        "If the task is fully complete, give the final user-facing answer now.\n"
+        "If the task is not complete and tools can help, call the next needed tool immediately.\n"
+        "If the task is not complete but no tool is needed, provide the missing answer directly.\n"
+        f"You are in autonomous tool round {round_idx + 1} of {max_tool_rounds}. "
+        "Do not stop at partial progress."
+    )
+
+
+def _build_autonomous_retry_prompt(user_message):
+    return (
+        f"Original user request:\n{user_message}\n\n"
+        "Double-check whether the task is actually complete.\n"
+        "If it is complete, provide the final user-facing answer now.\n"
+        "If it is not complete and another tool can help, call the next tool immediately.\n"
+        "Do not stop just because the previous response had no tool call."
+    )
+
+
 def _extract_tool_calls(resp_obj, text_for_direct_map=None, allow_direct_map=False):
     final_text = resp_obj if isinstance(resp_obj, str) else (resp_obj.get("content") or "")
     tcalls = resp_obj.get("tool_calls") if isinstance(resp_obj, dict) else None
@@ -429,13 +451,24 @@ async def generate_reply(user_id, user_message, memory=None):
             })
 
             response = chat(
-                message="Continue.",
+                message=_build_autonomous_follow_up_prompt(user_message, _, max_tool_rounds),
                 system_prompt=personalized_prompt,
                 history=tool_history,
                 tools=tools,
                 force_smart=True,
             )
             final_response, tool_calls = _extract_tool_calls(response, allow_direct_map=False)
+            if not tool_calls and _ + 1 < max_tool_rounds and no_progress_rounds == 0:
+                retry_response = chat(
+                    message=_build_autonomous_retry_prompt(user_message),
+                    system_prompt=personalized_prompt,
+                    history=tool_history,
+                    tools=tools,
+                    force_smart=True,
+                )
+                retry_final_response, retry_tool_calls = _extract_tool_calls(retry_response, allow_direct_map=False)
+                if retry_tool_calls or retry_final_response:
+                    final_response, tool_calls = retry_final_response, retry_tool_calls
             if no_progress_rounds >= 1:
                 break
 
