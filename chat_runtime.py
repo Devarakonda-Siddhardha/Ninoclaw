@@ -13,8 +13,8 @@ from run_traces import clear_current_run, finish_run, log_event, start_run
 from tasks import task_manager
 from tools import get_tool_definitions, execute_tool
 
-DEFAULT_TOOL_ROUNDS = 3
-DEEP_TOOL_ROUNDS = 6
+DEFAULT_TOOL_ROUNDS = 6
+DEEP_TOOL_ROUNDS = 10
 
 
 def _extract_image_urls(text):
