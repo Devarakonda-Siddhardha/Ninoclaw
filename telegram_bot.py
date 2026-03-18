@@ -2284,7 +2284,13 @@ def create_bot(token):
         except Exception as e:
             print(f"⚠️ Failed to bind background notify loop: {e}")
 
-    app = Application.builder().token(token).post_init(post_init).build()
+    app = (
+        Application.builder()
+        .token(token)
+        .concurrent_updates(True)
+        .post_init(post_init)
+        .build()
+    )
 
     # Add command handlers
     app.add_handler(CommandHandler("start", start))
