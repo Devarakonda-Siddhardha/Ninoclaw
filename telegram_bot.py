@@ -2278,7 +2278,12 @@ def create_bot(token):
             await mcp_manager.start_mcp_servers()
         except Exception as e:
             print(f"❌ Failed to start MCP managers in post_init: {e}")
-            
+        try:
+            from bg_agent import bg_runner
+            bg_runner.notify_loop = asyncio.get_running_loop()
+        except Exception as e:
+            print(f"⚠️ Failed to bind background notify loop: {e}")
+
     app = Application.builder().token(token).post_init(post_init).build()
 
     # Add command handlers
