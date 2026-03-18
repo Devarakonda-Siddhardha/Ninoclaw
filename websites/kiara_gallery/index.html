@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kiara Advani Fan Gallery - My Admiration ❤️</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Floating Hearts Animation */
+        .hearts-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+            overflow: hidden;
+        }
+
+        .heart {
+            position: absolute;
+            color: rgba(255, 105, 180, 0.6);
+            animation: floatUp 8s infinite linear;
+            font-size: 20px;
+        }
+
+        @keyframes floatUp {
+            0% {
+                transform: translateY(100vh) rotate(0deg);
+                opacity: 0;
+            }
+            10% {
+                opacity: 1;
+            }
+            90% {
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(-100vh) rotate(720deg);
+                opacity: 0;
+            }
+        }
+
+        /* Main Content */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Header with Profile */
+        header {
+            text-align: center;
+            padding: 40px 20px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            margin-bottom: 30px;
+            animation: pulse 2s infinite alternate;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 20px rgba(255, 105, 180, 0.3); }
+            100% { transform: scale(1.02); box-shadow: 0 0 40px rgba(255, 105, 180, 0.6); }
+        }
+
+        .profile-pic {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            border: 5px solid #ff69b4;
+            object-fit: cover;
+            margin-bottom: 20px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            cursor: pointer;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .profile-pic:hover {
+            transform: scale(1.1) rotate(5deg);
+            box-shadow: 0 15px 40px rgba(255, 105, 180, 0.6);
+        }
+
+        h1 {
+            color: white;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            color: #ffd1dc;
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+        }
+
+        /* Interactive Buttons */
+        .button-container {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+
+        .love-btn {
+            background: linear-gradient(45deg, #ff6b6b, #ff8e8e);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1rem;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+            font-weight: bold;
+        }
+
+        .love-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(255, 107, 107, 0.6);
+            background: linear-gradient(45deg, #ff8e8e, #ff6b6b);
+        }
+
+        .love-btn:active {
+            transform: translateY(0);
+        }
+
+        /* Gallery Section */
+        .gallery-section {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .section-title {
+            color: white;
+            font-size: 2rem;
+            text-align: center;
+            margin-bottom: 25px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            padding: 10px;
+        }
+
+        .gallery-item {
+            position: relative;
+            border-radius: 15px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            background: rgba(255,255,255,0.05);
+        }
+
+        .gallery-item:hover {
+            transform: translateY(-10px) scale(1.02);
+            box-shadow: 0 20px 40px rgba(255, 105, 180, 0.5);
+        }
+
+        .gallery-item img {
+            width: 100%;
+            height: 300px;
+            object-fit: cover;
+            display: block;
+            transition: opacity 0.3s ease;
+        }
+
+        .gallery-item:hover img {
+            opacity: 0.9;
+        }
+
+        .gallery-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(transparent, rgba(0,0,0,0.8));
+            padding: 20px;
+            color: white;
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+        }
+
+        .gallery-item:hover .gallery-overlay {
+            transform: translateY(0);
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-content {
+            max-width: 90%;
+            max-height: 90%;
+            border-radius: 10px;
+            box-shadow: 0 0 50px rgba(255, 105, 180, 0.5);
+            animation: zoomIn 0.3s ease;
+        }
+
+        @keyframes zoomIn {
+            from { transform: scale(0.8); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+        .close-modal {
+            position: absolute;
+            top: 30px;
+            right: 40px;
+            color: white;
+            font-size: 40px;
+            cursor: pointer;
+            transition: color 0.3s ease;
+        }
+
+        .close-modal:hover {
+            color: #ff69b4;
+        }
+
+        /* Message Display */
+        .message-display {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px 50px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            z-index: 500;
+            display: none;
+            text-align: center;
+            animation: popIn 0.5s ease;
+        }
+
+        @keyframes popIn {
+            0% { transform: translate(-50%, -50%) scale(0); }
+            70% { transform: translate(-50%, -50%) scale(1.1); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+        }
+
+        .message-text {
+            font-size: 1.5rem;
+            color: #764ba2;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+
+        .close-msg {
+            background: #764ba2;
+            color: white;
+            border: none;
+            padding: 10px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            color: rgba(255,255,255,0.7);
+            padding: 20px;
+            font-size: 0.9rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            h1 { font-size: 1.8rem; }
+            .profile-pic { width: 120px; height: 120px; }
+            .gallery { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Floating Hearts -->
+    <div class="hearts-container" id="hearts"></div>
+
+    <div class="container">
+        <!-- Header with Profile -->
+        <header>
+            <img src="http://localhost:8080/builds-assets/tg_1840615179_fd0f6d23f61b.jpg" 
+                 alt="Kiara Advani" 
+                 class="profile-pic" 
+                 id="profilePic"
+                 onclick="openModal(this.src)">
+            <h1>❤️ Kiara Advani Fan Gallery ❤️</h1>
+            <p class="subtitle">My endless admiration for the most beautiful actress</p>
+            <div class="button-container">
+                <button class="love-btn" onclick="showLoveMessage()">💖 Send Love</button>
+                <button class="love-btn" onclick="createHeartsExplosion()">🎆 Hearts Explosion</button>
+                <button class="love-btn" onclick="toggleAutoHearts()">💓 Toggle Auto Hearts</button>
+            </div>
+        </header>
+
+        <!-- Gallery Section -->
+        <section class="gallery-section">
+            <h2 class="section-title">✨ My Collection ✨</h2>
+            <div class="gallery" id="gallery">
+                <!-- Gallery items will be added dynamically -->
+            </div>
+        </section>
+
+        <footer>
+            <p>Made with ❤️ by a true fan | All images are for admiration purposes</p>
+        </footer>
+    </div>
+
+    <!-- Modal for larger image view -->
+    <div class="modal" id="imageModal" onclick="closeModal()">
+        <span class="close-modal">&times;</span>
+        <img class="modal-content" id="modalImg">
+    </div>
+
+    <!-- Love Message Display -->
+    <div class="message-display" id="messageDisplay">
+        <div class="message-text" id="messageText"></div>
+        <button class="close-msg" onclick="closeMessage()">Close</button>
+    </div>
+
+    <script>
+        // All images to include in gallery
+        const images = [
+            {
+                url: 'http://localhost:8080/builds-assets/tg_1840615179_fd0f6d23f61b.jpg',
+                caption: 'Beautiful Kiara 💕'
+            },
+            {
+                url: 'http://localhost:8080/builds-assets/tg_1840615179_3e0c27eb831a.jpg',
+                caption: 'Stunning as always ✨'
+            },
+            {
+                url: 'http://localhost:8080/builds-assets/tg_1840615179_c665908b6ed6.jpg',
+                caption: 'My queen 👑'
+            },
+            {
+                url: 'http://localhost:8080/builds-assets/tg_1840615179_5d63b7c5ac5a.jpg',
+                caption: 'Perfect smile 😍'
+            },
+            {
+                url: 'http://localhost:8080/builds-assets/tg_1840615179_1dc3ecc90c08.jpg',
+                caption: 'Elegance personified 💐'
+            },
+            {
+                url: 'http://localhost:8080/builds-assets/tg_1840615179_035602cf0934.jpg',
+                caption: 'Incredible Kiara 🌟'
+            }
+        ];
+
+        // Populate gallery
+        function populateGallery() {
+            const gallery = document.getElementById('gallery');
+            images.forEach((img, index) => {
+                const item = document.createElement('div');
+                item.className = 'gallery-item';
+                item.innerHTML = `
+                    <img src="${img.url}" alt="Kiara Advani ${index + 1}" onclick="openModal('${img.url}')">
+                    <div class="gallery-overlay">
+                        <p>${img.caption}</p>
+                    </div>
+                `;
+                gallery.appendChild(item);
+            });
+        }
+
+        // Modal functions
+        function openModal(src) {
+            const modal = document.getElementById('imageModal');
+            const modalImg = document.getElementById('modalImg');
+            modal.style.display = 'flex';
+            modalImg.src = src;
+        }
+
+        function closeModal() {
+            document.getElementById('imageModal').style.display = 'none';
+        }
+
+        // Love messages
+        const loveMessages = [
+            "Kiara, you are my sunshine! ☀️",
+            "Every time I see you, my heart skips a beat! 💓",
+            "You are the most beautiful actress in the world! 👑",
+            "Your smile lights up my entire day! 😊",
+            "I admire you more than words can express! 💖",
+            "You are perfection personified! ✨",
+            "Forever your biggest fan! 🙌",
+            "Your talent and beauty are unmatched! 🌟",
+            "You inspire me every single day! 💪",
+            "Kiara Advani, you are a goddess! 👰‍♀️"
+        ];
+
+        function showLoveMessage() {
+            const msgDisplay = document.getElementById('messageDisplay');
+            const msgText = document.getElementById('messageText');
+            const randomMsg = loveMessages[Math.floor(Math.random() * loveMessages.length)];
+            msgText.textContent = randomMsg;
+            msgDisplay.style.display = 'block';
+            createHeartsExplosion();
+        }
+
+        function closeMessage() {
+            document.getElementById('messageDisplay').style.display = 'none';
+        }
+
+        // Hearts animation
+        let autoHeartsInterval;
+        let autoHeartsActive = false;
+
+        function createHearts() {
+            const container = document.getElementById('hearts');
+            const heart = document.createElement('div');
+            heart.className = 'heart';
+            heart.innerHTML = '❤';
+            heart.style.left = Math.random() * 100 + 'vw';
+            heart.style.animationDuration = (Math.random() * 3 + 5) + 's';
+            heart.style.fontSize = (Math.random() * 20 + 15) + 'px';
+            container.appendChild(heart);
+            setTimeout(() => heart.remove(), 8000);
+        }
+
+        function createHeartsExplosion() {
+            for (let i = 0; i < 50; i++) {
+                setTimeout(() => createHearts(), i * 30);
+            }
+        }
+
+        function toggleAutoHearts() {
+            autoHeartsActive = !autoHeartsActive;
+            if (autoHeartsActive) {
+                autoHeartsInterval = setInterval(createHearts, 300);
+                createHeartsExplosion();
+            } else {
+                clearInterval(autoHeartsInterval);
+            }
+        }
+
+        // Initialize
+        populateGallery();
+
+        // Create some initial hearts
+        for (let i = 0; i < 15; i++) {
+            setTimeout(() => createHearts(), i * 200);
+        }
+    </script>
+</body>
+</html>
