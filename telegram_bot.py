@@ -173,11 +173,24 @@ def _is_fun_support_request(user_message):
     return any(hint in text for hint in _FUN_SUPPORT_KEYWORDS)
 
 
+def _is_simple_rename_request(user_message):
+    text = (user_message or "").lower().strip()
+    rename_verbs = ("rename ", "rename the ", "rename my ")
+    return any(text.startswith(prefix) for prefix in rename_verbs) and " to " in text
+
+
 def _filter_tools_for_request(user_message, tools):
     if _is_fun_support_request(user_message):
         filtered = [
             tool for tool in tools
             if tool.get("function", {}).get("name", "") in _FUN_SUPPORT_TOOL_ALLOWLIST
+        ]
+        if filtered:
+            return filtered
+    if _is_simple_rename_request(user_message):
+        filtered = [
+            tool for tool in tools
+            if tool.get("function", {}).get("name", "") == "rename_path"
         ]
         if filtered:
             return filtered
@@ -900,6 +913,8 @@ def _is_background_request(msg: str) -> bool:
 
 
 def _is_complex_request(msg: str) -> bool:
+    if _is_simple_rename_request(msg):
+        return False
     low = msg.lower()
     return any(kw in low for kw in _COMPLEX_KEYWORDS)
 
