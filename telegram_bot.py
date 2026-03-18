@@ -1789,7 +1789,7 @@ Your purpose is to {BOT_PURPOSE}."""
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle document uploads — PDF, DOCX, TXT, CSV, code files"""
-    import os, io, tempfile
+    import io, tempfile
     user_id = update.effective_user.id
 
     if not _feature_enabled("ENABLE_SUMMARIZER", True):
