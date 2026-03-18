@@ -4,6 +4,7 @@ Telegram bot for Ninoclaw
 import asyncio
 import os
 import re
+import traceback
 import uuid
 import base64
 from pathlib import Path
@@ -2272,6 +2273,8 @@ async def handle_bot_error(update: object, context: ContextTypes.DEFAULT_TYPE):
         clear_current_run()
     try:
         print(f"Telegram handler error: {context.error}")
+        if getattr(context, "error", None) is not None:
+            print("".join(traceback.format_exception(type(context.error), context.error, context.error.__traceback__)))
     except Exception:
         pass
 
