@@ -1059,7 +1059,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         if result is not None:
             return result
     except Exception as e:
-        import traceback, os, re
+        import traceback, re
         from ai import chat
         tb = traceback.format_exc()
         
