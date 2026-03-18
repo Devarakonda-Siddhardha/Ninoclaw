@@ -164,21 +164,6 @@ def _tool_round_limit(user_message):
     return DEEP_TOOL_ROUNDS if _should_use_deep_mode(user_message) else DEFAULT_TOOL_ROUNDS
 
 
-def _parse_simple_rename_request(user_message):
-    text = (user_message or "").strip()
-    if not text or " to " not in text.lower():
-        return None
-    match = re.search(r"rename\s+(.+?)\s+to\s+(.+)$", text, re.IGNORECASE)
-    if not match:
-        return None
-    src_name = match.group(1).strip().strip("'\"")
-    new_name = match.group(2).strip().strip("'\"")
-    if not src_name or not new_name:
-        return None
-    desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", src_name)
-    return {"path": desktop_path, "new_name": new_name}
-
-
 def _finalize_after_tools(personalized_prompt, tool_history, all_tool_results, fallback=""):
     clean_results = _dedupe_preserve([_strip_image_markers(r) for r in all_tool_results])
     expo_with_preview = [r for r in clean_results if "preview link:" in r.lower()]
@@ -337,13 +322,6 @@ def _extract_tool_calls(resp_obj, text_for_direct_map=None, allow_direct_map=Fal
             query = text_for_direct_map[5:].strip()
             query = re.sub(r"\s*(on spotify|using spotify|spotify)\s*$", "", query, flags=re.IGNORECASE).strip()
             direct = ("spotify_search_play", {"query": query, "type": "track"})
-        elif any(w in msg_l for w in ["rename", "rename folder", "rename file"]) and (" to " in msg_l):
-            match = re.search(r"rename\s+(.+?)\s+to\s+(.+)$", text_for_direct_map or "", re.IGNORECASE)
-            if match:
-                src_name = match.group(1).strip().strip("'\"")
-                new_name = match.group(2).strip().strip("'\"")
-                desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", src_name)
-                direct = ("rename_path", {"path": desktop_path, "new_name": new_name})
         if direct:
             tcalls = [{"function": {"name": direct[0], "arguments": direct[1]}}]
             final_text = ""
@@ -360,7 +338,8 @@ Your purpose is to {BOT_PURPOSE}.
 {facts_ctx}
 Remember these details and use them in your responses.
 
-You have access to tools to schedule and manage recurring tasks. When the user wants to schedule something (like "remind me every day at 9am"), use the schedule_cron tool."""
+You have access to tools to schedule and manage recurring tasks. When the user wants to schedule something (like "remind me every day at 9am"), use the schedule_cron tool.
+For simple file or folder rename requests on the host system, prefer rename_path over run_command."""
 
 
 def _should_stop_after_step(user_message, step_tool_names, step_results):
@@ -399,19 +378,6 @@ async def generate_reply(user_id, user_message, memory=None):
     memory = memory or Memory()
     run_id = start_run(user_id, "dashboard", user_message)
     try:
-        rename_args = _parse_simple_rename_request(user_message)
-        if rename_args:
-            result = await execute_tool("rename_path", rename_args, user_id, task_manager)
-            log_event("tool_result", label="rename_path", payload={"result": str(result)[:3000]}, run_id=run_id)
-            final_response = _strip_image_markers(str(result).strip()) or "Done."
-            threading.Thread(
-                target=extract_and_store_facts,
-                args=(user_id, user_message, final_response),
-                daemon=True,
-            ).start()
-            finish_run(final_response=final_response, run_id=run_id)
-            return final_response
-
         conv_history = memory.get_conversation_context(user_id)
         if conv_history and conv_history[-1].get("role") == "user" and conv_history[-1].get("content") == user_message:
             conv_history = conv_history[:-1]
