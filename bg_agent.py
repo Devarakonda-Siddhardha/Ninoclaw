@@ -73,7 +73,7 @@ class BackgroundAgentRunner:
             current_loop = asyncio.get_running_loop()
             if target_loop and target_loop is not current_loop:
                 fut = asyncio.run_coroutine_threadsafe(self.notify_fn(user_id, msg), target_loop)
-                await asyncio.wrap_future(fut)
+                await asyncio.to_thread(fut.result, 30)
             else:
                 await self.notify_fn(user_id, msg)
         except Exception as e:
