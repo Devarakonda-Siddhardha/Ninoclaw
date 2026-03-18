@@ -238,6 +238,50 @@ def _format_command_preview(command, limit=280):
     return text[: limit - 3].rstrip() + "..."
 
 
+def _parse_simple_rename_request(user_message):
+    text = (user_message or "").strip()
+    if not text or " to " not in text.lower():
+        return None
+    match = re.search(r"rename\s+(.+?)\s+to\s+(.+)$", text, re.IGNORECASE)
+    if not match:
+        return None
+    src_name = match.group(1).strip().strip("'\"")
+    new_name = match.group(2).strip().strip("'\"")
+    if not src_name or not new_name:
+        return None
+    desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", src_name)
+    return {"path": desktop_path, "new_name": new_name}
+
+
+async def _handle_direct_tool_request(update, user_id, user_message, tool_name, tool_args, run_id, finish_trace_fn):
+    result = await execute_tool(tool_name, tool_args, user_id, task_manager)
+    log_event("tool_result", label=tool_name, payload={"result": str(result)[:3000]})
+    if isinstance(result, str) and result.startswith("[REQUIRES_CONFIRMATION]"):
+        import json
+        payload = _build_pending_tool_payload(json.loads(result.replace("[REQUIRES_CONFIRMATION]", "").strip()))
+        memory.set_user_data(user_id, "pending_tool", payload)
+        cmd_info = _format_command_preview(payload.get("arguments", {}).get("command", ""))
+        warning_msg = f"⚠️ *Action Required!*\n\nI need permission to run `{payload.get('name')}`."
+        if cmd_info:
+            warning_msg += f"\n\nCommand: `{cmd_info}`"
+        await update.message.reply_text(
+            warning_msg,
+            reply_markup=_build_confirmation_keyboard(payload["approval_id"]),
+            parse_mode="Markdown",
+        )
+        finish_trace_fn(final_response=f"Paused awaiting approval for {payload.get('name')}.")
+        clear_current_run()
+        return True
+
+    final_response = _strip_image_markers(str(result).strip()) or "Done."
+    memory.add_message(user_id, "assistant", final_response)
+    asyncio.create_task(asyncio.to_thread(extract_and_store_facts, user_id, user_message, final_response))
+    finish_trace_fn(final_response=final_response)
+    clear_current_run()
+    await send_with_code_files(update, final_response)
+    return True
+
+
 def _should_stop_after_step(user_message, step_tool_names, step_results):
     expo_actions = {"expo_create_app", "expo_start_app", "expo_edit_app", "expo_stop_app", "expo_delete_app"}
     spotify_actions = {"spotify_play_pause", "spotify_next", "spotify_previous", "spotify_volume", "spotify_current", "spotify_search_play", "spotify_play_my_playlist", "spotify_my_playlists"}
@@ -959,6 +1003,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clear_current_run()
         await update.message.reply_text(f"⚙️ Got it! Working on it in the background...\n\n🆔 Job ID: `{job_id}`\nUse /jobs to check status.")
         return
+
+    rename_args = _parse_simple_rename_request(user_message)
+    if rename_args:
+        await update.message.chat.send_action(action="typing")
+        handled = await _handle_direct_tool_request(
+            update, user_id, user_message, "rename_path", rename_args, run_id, _finish_trace
+        )
+        if handled:
+            return
 
     # Get conversation history for context
     conv_history = memory.get_conversation_context(user_id)
