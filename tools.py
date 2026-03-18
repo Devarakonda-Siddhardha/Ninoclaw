@@ -600,7 +600,6 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
 
     if tool_name == "self_update":
         from updater import check_for_updates, do_update, get_current_version, restart
-        import asyncio
         err = require_owner(user_id)
         if err:
             log_event("tool_blocked", label=tool_name, payload={"reason": err})

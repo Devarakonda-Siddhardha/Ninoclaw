@@ -1,6 +1,7 @@
 """
 Telegram bot for Ninoclaw
 """
+import asyncio
 import os
 import re
 import uuid
@@ -212,6 +213,30 @@ def _should_use_deep_mode(user_message):
 
 def _tool_round_limit(user_message):
     return DEEP_TOOL_ROUNDS if _should_use_deep_mode(user_message) else DEFAULT_TOOL_ROUNDS
+
+def _build_pending_tool_payload(payload):
+    data = dict(payload or {})
+    data["approval_id"] = data.get("approval_id") or uuid.uuid4().hex[:12]
+    return data
+
+
+def _build_confirmation_keyboard(approval_id):
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("Approve ✅", callback_data=f"hitl_approve:{approval_id}"),
+            InlineKeyboardButton("Reject ❌", callback_data=f"hitl_reject:{approval_id}"),
+        ]]
+    )
+
+
+def _format_command_preview(command, limit=280):
+    text = (command or "").strip()
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
 
 def _should_stop_after_step(user_message, step_tool_names, step_results):
     expo_actions = {"expo_create_app", "expo_start_app", "expo_edit_app", "expo_stop_app", "expo_delete_app"}
@@ -875,7 +900,6 @@ def _is_complex_request(msg: str) -> bool:
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle regular chat messages"""
-    import asyncio
     from ai import chat_stream
     user_id = update.effective_user.id
     user_message = update.message.text
@@ -1224,20 +1248,14 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                     import json
                     try:
                         payload_str = result.replace("[REQUIRES_CONFIRMATION]", "").strip()
-                        payload = json.loads(payload_str)
+                        payload = _build_pending_tool_payload(json.loads(payload_str))
                         
                         # Store pending action
                         memory.set_user_data(user_id, "pending_tool", payload)
-                        
-                        keyboard = [
-                            [
-                                InlineKeyboardButton("Approve ✅", callback_data="hitl_approve"),
-                                InlineKeyboardButton("Reject ❌", callback_data="hitl_reject"),
-                            ]
-                        ]
-                        reply_markup = InlineKeyboardMarkup(keyboard)
-                        
-                        cmd_info = payload.get('arguments', {}).get('command', '')
+
+                        reply_markup = _build_confirmation_keyboard(payload["approval_id"])
+
+                        cmd_info = _format_command_preview(payload.get('arguments', {}).get('command', ''))
                         warning_msg = f"⚠️ *Action Required!*\\n\\nI need permission to run `{payload.get('name')}`."
                         if cmd_info:
                             warning_msg += f"\\n\\nCommand: `{cmd_info}`"
@@ -1468,7 +1486,6 @@ Commands:
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle photo messages with media group support and multimodal analysis."""
-    import asyncio
     import json
     user_id = update.effective_user.id
     media_group_id = update.message.media_group_id
@@ -1668,13 +1685,12 @@ Your purpose is to {BOT_PURPOSE}."""
             if isinstance(result, str) and "[REQUIRES_CONFIRMATION]" in result:
                 try:
                     idx = result.find("[REQUIRES_CONFIRMATION]")
-                    payload = json.loads(result[idx + len("[REQUIRES_CONFIRMATION]"):].strip())
+                    payload = _build_pending_tool_payload(json.loads(result[idx + len("[REQUIRES_CONFIRMATION]"):].strip()))
                     memory.set_user_data(user_id, "pending_tool", payload)
-                    keyboard = [[InlineKeyboardButton("Approve ✅", callback_data="hitl_approve"), InlineKeyboardButton("Reject ❌", callback_data="hitl_reject")]]
-                    cmd_info = payload.get('arguments', {}).get('command', '')
+                    cmd_info = _format_command_preview(payload.get('arguments', {}).get('command', ''))
                     warning_msg = f"⚠️ *Action Required!*\n\nI need permission to run `{payload.get('name')}`."
                     if cmd_info: warning_msg += f"\n\nCommand: `{cmd_info}`"
-                    await update.message.reply_text(warning_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+                    await update.message.reply_text(warning_msg, reply_markup=_build_confirmation_keyboard(payload["approval_id"]), parse_mode="Markdown")
                     skip_final_summarization = True
                     step_results.append(f"Paused waiting for user permission for {payload.get('name')}.")
                     break
@@ -2105,7 +2121,6 @@ async def update_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Pull latest code from GitHub and restart — owner only"""
     from updater import check_for_updates, do_update, get_current_version, restart
     from config import OWNER_ID
-    import asyncio
 
     if OWNER_ID and update.effective_user.id != OWNER_ID:
         await update.message.reply_text("⛔ Only the bot owner can trigger updates.")
@@ -2152,16 +2167,20 @@ async def allow_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except Exception:
+        pass
     
     user_id = update.effective_user.id
-    
-    if query.data == "hitl_approve":
+    action, _, approval_id = (query.data or "").partition(":")
+
+    if action == "hitl_approve":
         user_data = memory.get_user_data(user_id)
         pending = user_data.get("pending_tool")
-        if not pending:
+        if not pending or (approval_id and pending.get("approval_id") != approval_id):
             try:
-                await query.edit_message_text(text="⚠️ Approval expired or not found.")
+                await query.edit_message_text(text="⚠️ Approval expired, superseded, or not found.")
             except Exception:
                 pass
             return
@@ -2176,13 +2195,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         # Bypass confirmation requirement
         tool_args["_confirmed"] = True
+        memory.set_user_data(user_id, "pending_tool", None)
         
         try:
             result = await execute_tool(tool_name, tool_args, user_id, task_manager)
             
             # Inject result into memory
             memory.add_message(user_id, "user", f"[System] User approved execution of {tool_name}. Result:\n{str(result)[:2000]}\n\nPlease continue.")
-            memory.set_user_data(user_id, "pending_tool", None)
             
             await context.bot.send_message(
                 chat_id=update.effective_chat.id, 
@@ -2192,9 +2211,15 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception as e:
             await context.bot.send_message(chat_id=update.effective_chat.id, text=f"❌ Execution failed: {e}")
             
-    elif query.data == "hitl_reject":
+    elif action == "hitl_reject":
         user_data = memory.get_user_data(user_id)
         pending = user_data.get("pending_tool")
+        if approval_id and pending and pending.get("approval_id") != approval_id:
+            try:
+                await query.edit_message_text(text="⚠️ Approval expired, superseded, or not found.")
+            except Exception:
+                pass
+            return
         tool_name = pending.get("name") if pending else "unknown tool"
         
         try:
@@ -2258,6 +2283,7 @@ def create_bot(token):
     app.add_handler(CommandHandler("platform", show_platform_info))
     app.add_handler(CommandHandler("jobsearch_interval", set_jobsearch_interval))
     app.add_handler(CommandHandler("allow_all", allow_all_command))
+    app.add_handler(CommandHandler("run_all", allow_all_command))
     
     # Callback Handlers
     app.add_handler(CallbackQueryHandler(handle_callback_query))
