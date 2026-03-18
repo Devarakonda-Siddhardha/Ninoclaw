@@ -25,8 +25,8 @@ MEDIA_GROUP_CAPTIONS = {} # {media_group_id: caption}
 
 WEB_ROOT = Path(__file__).resolve().parent / "websites"
 WEB_ASSETS_DIR = WEB_ROOT / "assets"
-DEFAULT_TOOL_ROUNDS = 3
-DEEP_TOOL_ROUNDS = 6
+DEFAULT_TOOL_ROUNDS = 6
+DEEP_TOOL_ROUNDS = 10
 def _public_base_url():
     port = os.getenv("DASHBOARD_PORT", "8080")
     import socket
@@ -255,6 +255,28 @@ def _should_skip_final_summarization(user_message, step_tool_names):
         _is_fun_support_request(user_message)
         and bool(step_tool_names)
         and all(name in _FUN_SUPPORT_TOOL_ALLOWLIST for name in step_tool_names)
+    )
+
+
+def _build_autonomous_follow_up_prompt(user_message, round_idx, max_tool_rounds):
+    return (
+        f"Original user request:\n{user_message}\n\n"
+        "Review the latest tool results in the conversation history.\n"
+        "If the task is fully complete, give the final user-facing answer now.\n"
+        "If the task is not complete and tools can help, call the next needed tool immediately.\n"
+        "If the task is not complete but no tool is needed, provide the missing answer directly.\n"
+        f"You are in autonomous tool round {round_idx + 1} of {max_tool_rounds}. "
+        "Do not stop at partial progress."
+    )
+
+
+def _build_autonomous_retry_prompt(user_message):
+    return (
+        f"Original user request:\n{user_message}\n\n"
+        "Double-check whether the task is actually complete.\n"
+        "If it is complete, provide the final user-facing answer now.\n"
+        "If it is not complete and another tool can help, call the next tool immediately.\n"
+        "Do not stop just because the previous response had no tool call."
     )
 
 
@@ -1258,13 +1280,24 @@ You have access to tools to schedule and manage recurring tasks. When the user w
         })
 
         response = chat(
-            message="Continue.",
+            message=_build_autonomous_follow_up_prompt(user_message, round_idx, max_tool_rounds),
             system_prompt=personalized_prompt,
             history=tool_history,
             tools=tools,
             force_smart=True
         )
         final_response, tool_calls = _extract_tool_calls(response, allow_direct_map=False)
+        if not tool_calls and round_idx + 1 < max_tool_rounds and no_progress_rounds == 0:
+            retry_response = chat(
+                message=_build_autonomous_retry_prompt(user_message),
+                system_prompt=personalized_prompt,
+                history=tool_history,
+                tools=tools,
+                force_smart=True,
+            )
+            retry_final_response, retry_tool_calls = _extract_tool_calls(retry_response, allow_direct_map=False)
+            if retry_tool_calls or retry_final_response:
+                final_response, tool_calls = retry_final_response, retry_tool_calls
         if no_progress_rounds >= 1:
             break
 
@@ -1666,8 +1699,25 @@ Your purpose is to {BOT_PURPOSE}."""
             break
 
         tool_history.append({"role": "user", "content": _build_tool_feedback(step_results, available_image_urls)})
-        response = chat(message="Continue.", system_prompt=personalized_prompt, history=tool_history, tools=tools, force_smart=True)
+        response = chat(
+            message=_build_autonomous_follow_up_prompt(final_caption, round_idx, max_tool_rounds),
+            system_prompt=personalized_prompt,
+            history=tool_history,
+            tools=tools,
+            force_smart=True,
+        )
         final_response, tool_calls = _extract_tool_calls(response)
+        if not tool_calls and round_idx + 1 < max_tool_rounds and no_progress_rounds == 0:
+            retry_response = chat(
+                message=_build_autonomous_retry_prompt(final_caption),
+                system_prompt=personalized_prompt,
+                history=tool_history,
+                tools=tools,
+                force_smart=True,
+            )
+            retry_final_response, retry_tool_calls = _extract_tool_calls(retry_response)
+            if retry_tool_calls or retry_final_response:
+                final_response, tool_calls = retry_final_response, retry_tool_calls
         if no_progress_rounds >= 1: break
 
     if progress_msg:
