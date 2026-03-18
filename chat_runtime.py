@@ -164,6 +164,21 @@ def _tool_round_limit(user_message):
     return DEEP_TOOL_ROUNDS if _should_use_deep_mode(user_message) else DEFAULT_TOOL_ROUNDS
 
 
+def _parse_simple_rename_request(user_message):
+    text = (user_message or "").strip()
+    if not text or " to " not in text.lower():
+        return None
+    match = re.search(r"rename\s+(.+?)\s+to\s+(.+)$", text, re.IGNORECASE)
+    if not match:
+        return None
+    src_name = match.group(1).strip().strip("'\"")
+    new_name = match.group(2).strip().strip("'\"")
+    if not src_name or not new_name:
+        return None
+    desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", src_name)
+    return {"path": desktop_path, "new_name": new_name}
+
+
 def _finalize_after_tools(personalized_prompt, tool_history, all_tool_results, fallback=""):
     clean_results = _dedupe_preserve([_strip_image_markers(r) for r in all_tool_results])
     expo_with_preview = [r for r in clean_results if "preview link:" in r.lower()]
@@ -384,6 +399,19 @@ async def generate_reply(user_id, user_message, memory=None):
     memory = memory or Memory()
     run_id = start_run(user_id, "dashboard", user_message)
     try:
+        rename_args = _parse_simple_rename_request(user_message)
+        if rename_args:
+            result = await execute_tool("rename_path", rename_args, user_id, task_manager)
+            log_event("tool_result", label="rename_path", payload={"result": str(result)[:3000]}, run_id=run_id)
+            final_response = _strip_image_markers(str(result).strip()) or "Done."
+            threading.Thread(
+                target=extract_and_store_facts,
+                args=(user_id, user_message, final_response),
+                daemon=True,
+            ).start()
+            finish_run(final_response=final_response, run_id=run_id)
+            return final_response
+
         conv_history = memory.get_conversation_context(user_id)
         if conv_history and conv_history[-1].get("role") == "user" and conv_history[-1].get("content") == user_message:
             conv_history = conv_history[:-1]
