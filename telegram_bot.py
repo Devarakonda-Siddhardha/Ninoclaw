@@ -1197,6 +1197,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
     last_step_fp = ""
     no_progress_rounds = 0
     skip_final_summarization = False
+    awaiting_confirmation = False
     progress_msg = None
     last_progress = ""
 
@@ -1263,6 +1264,7 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                         await update.message.reply_text(warning_msg, reply_markup=reply_markup, parse_mode="Markdown")
                         
                         skip_final_summarization = True
+                        awaiting_confirmation = True
                         step_results.append(f"Paused execution waiting for user permission to run {payload.get('name')}.")
                         break
                     except Exception as e:
@@ -1271,6 +1273,9 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                 step_results.append(result)
 
         if not step_results:
+            break
+
+        if awaiting_confirmation:
             break
 
         step_fp = _step_fingerprint(step_results)
@@ -1325,6 +1330,12 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                 await progress_msg.delete()
             except Exception:
                 pass
+
+        if awaiting_confirmation:
+            paused_msg = all_tool_results[-1] if all_tool_results else "Paused awaiting approval."
+            _finish_trace(final_response=paused_msg)
+            clear_current_run()
+            return
 
         if not skip_final_summarization:
             final_response = _finalize_after_tools(
@@ -1647,6 +1658,7 @@ Your purpose is to {BOT_PURPOSE}."""
     last_step_fp = ""
     no_progress_rounds = 0
     skip_final_summarization = False
+    awaiting_confirmation = False
     progress_msg = None
     last_progress = ""
 
@@ -1692,12 +1704,14 @@ Your purpose is to {BOT_PURPOSE}."""
                     if cmd_info: warning_msg += f"\n\nCommand: `{cmd_info}`"
                     await update.message.reply_text(warning_msg, reply_markup=_build_confirmation_keyboard(payload["approval_id"]), parse_mode="Markdown")
                     skip_final_summarization = True
+                    awaiting_confirmation = True
                     step_results.append(f"Paused waiting for user permission for {payload.get('name')}.")
                     break
                 except Exception: pass
             step_results.append(result)
 
         if not step_results: break
+        if awaiting_confirmation: break
         step_fp = _step_fingerprint(step_results)
         if step_fp and step_fp == last_step_fp: no_progress_rounds += 1
         else:
@@ -1739,6 +1753,12 @@ Your purpose is to {BOT_PURPOSE}."""
     if progress_msg:
         try: await progress_msg.delete()
         except Exception: pass
+
+    if awaiting_confirmation:
+        paused_msg = all_tool_results[-1] if all_tool_results else "Paused awaiting approval."
+        _finish_trace(final_response=paused_msg)
+        clear_current_run()
+        return
 
     if all_tool_results and not skip_final_summarization:
         final_response = _finalize_after_tools(
