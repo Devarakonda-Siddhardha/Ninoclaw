@@ -1020,7 +1020,6 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return f"❌ {e}"
 
     if tool_name == "write_file":
-        import os
         path = arguments.get("path", "")
         content = arguments.get("content", "")
         err = safe_path(path)
@@ -1037,7 +1036,6 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return f"❌ {e}"
 
     if tool_name == "list_dir":
-        import os
         path = os.path.expanduser(arguments.get("path", "."))
         if not os.path.exists(path):
             return f"❌ Path not found: {path}"
