@@ -38,6 +38,7 @@ _init_db()
 class BackgroundAgentRunner:
     def __init__(self):
         self.notify_fn = None  # set to async callable(user_id, msg) after bot starts
+        self.notify_loop = None
         self.task_manager = None
         self._loop = None
         self._thread = None
@@ -64,6 +65,20 @@ class BackgroundAgentRunner:
             else:
                 await asyncio.sleep(5)
 
+    async def _notify(self, user_id, msg):
+        if not self.notify_fn:
+            return
+        try:
+            target_loop = self.notify_loop
+            current_loop = asyncio.get_running_loop()
+            if target_loop and target_loop is not current_loop:
+                fut = asyncio.run_coroutine_threadsafe(self.notify_fn(user_id, msg), target_loop)
+                await asyncio.wrap_future(fut)
+            else:
+                await self.notify_fn(user_id, msg)
+        except Exception as e:
+            print(f"[BG Agent] Notify error: {e}")
+
     async def _run_job(self, job):
         conn = _get_conn()
         conn.execute(
@@ -77,11 +92,7 @@ class BackgroundAgentRunner:
         goal = job["goal"]
 
         async def progress(msg):
-            if self.notify_fn:
-                try:
-                    await self.notify_fn(user_id, f"⚙️ [{goal[:30]}...]\n{msg}")
-                except Exception:
-                    pass
+            await self._notify(user_id, f"⚙️ [{goal[:30]}...]\n{msg}")
 
         try:
             from agent import run_agent
@@ -100,12 +111,8 @@ class BackgroundAgentRunner:
         conn.close()
 
         # Notify user
-        if self.notify_fn:
-            try:
-                msg = f"✅ Background task done!\n\n**Goal:** {goal}\n\n{result}"
-                await self.notify_fn(user_id, msg)
-            except Exception as e:
-                print(f"[BG Agent] Failed to notify: {e}")
+        msg = f"✅ Background task done!\n\n**Goal:** {goal}\n\n{result}"
+        await self._notify(user_id, msg)
 
     def queue_job(self, user_id: str, goal: str) -> str:
         job_id = str(uuid.uuid4())[:8]
