@@ -243,6 +243,7 @@ def _should_stop_after_step(user_message, step_tool_names, step_results):
     spotify_actions = {"spotify_play_pause", "spotify_next", "spotify_previous", "spotify_volume", "spotify_current", "spotify_search_play", "spotify_play_my_playlist", "spotify_my_playlists"}
     personal_interests_actions = {"set_interests", "get_interests", "search_personalized_news", "add_interest"}
     job_search_actions = {"set_job_preferences", "search_jobs", "get_job_preferences", "enable_auto_job_search"}
+    file_actions = {"rename_path"}
     if not any(name in expo_actions for name in step_tool_names):
         if _is_fun_support_request(user_message):
             if step_tool_names and all(name in _FUN_SUPPORT_TOOL_ALLOWLIST for name in step_tool_names):
@@ -263,6 +264,10 @@ def _should_stop_after_step(user_message, step_tool_names, step_results):
                 return True
     # Job search tools should stop after execution - they are one-shot commands
     if any(name in job_search_actions for name in step_tool_names):
+        for result in step_results:
+            if not _tool_result_failed(result):
+                return True
+    if any(name in file_actions for name in step_tool_names):
         for result in step_results:
             if not _tool_result_failed(result):
                 return True
@@ -1171,6 +1176,13 @@ You have access to tools to schedule and manage recurring tasks. When the user w
                 _direct = ("search_jobs", {"query": query, "location": location, "remote": remote})
             elif any(w in msg_l for w in ["my job preferences", "job preferences", "what jobs am i looking for", "my job search settings"]):
                 _direct = ("get_job_preferences", {})
+            elif any(w in msg_l for w in ["rename", "rename folder", "rename file"]) and (" to " in msg_l):
+                match = __import__("re").search(r"rename\s+(.+?)\s+to\s+(.+)$", text_for_direct_map or "", __import__("re").IGNORECASE)
+                if match:
+                    src_name = match.group(1).strip().strip("'\"")
+                    new_name = match.group(2).strip().strip("'\"")
+                    desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", src_name)
+                    _direct = ("rename_path", {"path": desktop_path, "new_name": new_name})
             elif "enable auto job search" in msg_l or "disable auto job search" in msg_l:
                 enabled = "enable" in msg_l
                 _direct = ("enable_auto_job_search", {"enabled": enabled, "frequency_hours": 24})

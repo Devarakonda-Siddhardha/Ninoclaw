@@ -331,6 +331,21 @@ _BUILTIN_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "rename_path",
+            "description": "Rename a file or folder on the host system. Owner-only. Use when user asks to rename a folder/file from one name to another.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Existing file or folder path"},
+                    "new_name": {"type": "string", "description": "New file or folder name only, not a full path"}
+                },
+                "required": ["path", "new_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "claude_code",
             "description": (
                 "Invoke Claude Code CLI for advanced programming, project-wide refactoring, "
@@ -368,7 +383,7 @@ _FLAGGED_BUILTINS = {
 
 _OWNER_ONLY_TOOLS = {
     "self_update", "reload_runtime",
-    "run_command", "read_file", "write_file", "list_dir",
+    "run_command", "read_file", "write_file", "list_dir", "rename_path",
     "create_skill", "delete_skill", "install_skill",
     "run_agent", "claude_code",
 }
@@ -390,7 +405,7 @@ def _tool_requires_owner(tool_name: str) -> bool:
 
 # ── Tools requiring Human-in-the-Loop Confirmation ────────────────────────────
 _CONFIRMATION_REQUIRED_TOOLS = {
-    "run_command", "expo_delete_app", "web_delete", "delete_skill", "create_integration", "claude_code"
+    "run_command", "rename_path", "expo_delete_app", "web_delete", "delete_skill", "create_integration", "claude_code"
 }
 
 def _tool_requires_confirmation(tool_name: str) -> bool:
@@ -711,7 +726,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         err = require_owner(user_id)
         if err: return err
         skill_name = arguments.get("skill_name", "").strip().lower().replace(" ", "_")
-        import os, re
+        import re
         if not re.match(r'^[a-z][a-z0-9_]*$', skill_name):
             return "❌ Invalid skill name."
         skill_path = os.path.join(os.path.dirname(__file__), "skills", f"{skill_name}.py")
@@ -727,7 +742,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
     if tool_name == "install_skill":
         err = require_owner(user_id)
         if err: return err
-        import os, re
+        import re
         url = arguments.get("url", "").strip()
         if not url:
             return "❌ URL is required."
@@ -767,7 +782,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
     if tool_name == "create_skill":
         err = require_owner(user_id)
         if err: return err
-        import os, re
+        import re
         skill_name = arguments.get("skill_name", "").strip().lower().replace(" ", "_").replace("-", "_")
         code = arguments.get("code", "").strip()
         if not skill_name or not code:
@@ -803,7 +818,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         except Exception as e:
             return f"❌ Sub-agent failed: {e}"
 
-    _SYS_TOOLS = {"run_command", "read_file", "write_file", "list_dir"}
+    _SYS_TOOLS = {"run_command", "read_file", "write_file", "list_dir", "rename_path"}
     if tool_name in _SYS_TOOLS:
         err = require_owner(user_id)
         if err: return err
@@ -879,6 +894,54 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return "\n".join(parts)
         except Exception as e:
             return f"❌ {e}"
+
+    if tool_name == "rename_path":
+        path = arguments.get("path", "").strip()
+        new_name = arguments.get("new_name", "").strip()
+        if not path or not new_name:
+            return "❌ Both path and new_name are required."
+        path_err = safe_path(path)
+        if path_err:
+            return path_err
+        if any(sep in new_name for sep in ("/", "\\")) or new_name in {".", ".."}:
+            return "❌ new_name must be a simple file or folder name, not a path."
+        src = os.path.abspath(os.path.expanduser(path))
+        if not os.path.exists(src):
+            parent = os.path.dirname(src) or os.getcwd()
+            requested = os.path.basename(src)
+
+            def _norm(name):
+                import re as _re
+                cleaned = name.lower()
+                cleaned = cleaned.replace("_", " ").replace("-", " ")
+                cleaned = _re.sub(r"\bfolder\b", "", cleaned)
+                cleaned = _re.sub(r"^\d+\s*", "", cleaned)
+                cleaned = _re.sub(r"[^a-z0-9]+", " ", cleaned)
+                return " ".join(cleaned.split())
+
+            try:
+                wanted = _norm(requested)
+                for candidate in os.listdir(parent):
+                    if _norm(candidate) == wanted:
+                        src = os.path.join(parent, candidate)
+                        break
+            except Exception:
+                pass
+
+        if not os.path.exists(src):
+            return f"❌ Path not found: `{path}`"
+        dst = os.path.join(os.path.dirname(src), new_name)
+        dst_err = safe_path(dst)
+        if dst_err:
+            return dst_err
+        if os.path.exists(dst):
+            return f"❌ Target already exists: `{dst}`"
+        try:
+            os.rename(src, dst)
+            kind = "folder" if os.path.isdir(dst) else "file"
+            return f"✅ Renamed {kind}:\n`{src}`\n→ `{dst}`"
+        except Exception as e:
+            return f"❌ Rename failed: {e}"
 
     if tool_name == "claude_code":
         task_desc = arguments.get("task", "").strip()

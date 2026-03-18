@@ -322,6 +322,13 @@ def _extract_tool_calls(resp_obj, text_for_direct_map=None, allow_direct_map=Fal
             query = text_for_direct_map[5:].strip()
             query = re.sub(r"\s*(on spotify|using spotify|spotify)\s*$", "", query, flags=re.IGNORECASE).strip()
             direct = ("spotify_search_play", {"query": query, "type": "track"})
+        elif any(w in msg_l for w in ["rename", "rename folder", "rename file"]) and (" to " in msg_l):
+            match = re.search(r"rename\s+(.+?)\s+to\s+(.+)$", text_for_direct_map or "", re.IGNORECASE)
+            if match:
+                src_name = match.group(1).strip().strip("'\"")
+                new_name = match.group(2).strip().strip("'\"")
+                desktop_path = os.path.join(os.path.expanduser("~"), "Desktop", src_name)
+                direct = ("rename_path", {"path": desktop_path, "new_name": new_name})
         if direct:
             tcalls = [{"function": {"name": direct[0], "arguments": direct[1]}}]
             final_text = ""
@@ -343,12 +350,17 @@ You have access to tools to schedule and manage recurring tasks. When the user w
 
 def _should_stop_after_step(user_message, step_tool_names, step_results):
     expo_actions = {"expo_create_app", "expo_start_app", "expo_edit_app", "expo_stop_app", "expo_delete_app"}
+    file_actions = {"rename_path"}
     if not any(name in expo_actions for name in step_tool_names):
         if _is_fun_support_request(user_message):
             if step_tool_names and all(name in _FUN_SUPPORT_TOOL_ALLOWLIST for name in step_tool_names):
                 for result in step_results:
                     if _tool_result_failed(result):
                         continue
+                    return True
+        if any(name in file_actions for name in step_tool_names):
+            for result in step_results:
+                if not _tool_result_failed(result):
                     return True
         return False
     for result in step_results:
