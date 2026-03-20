@@ -446,7 +446,8 @@ def run_wizard():
 
     # ── 3. Fallback providers ─────────────────────────────────────────────────
     section("Step 3 - Fallback Providers (optional)")
-    info("Pick up to 2 fallback providers. Space = toggle | Enter = confirm | arrows = move")
+    info("Pick as many fallback providers as you want. Space = toggle | Enter = confirm")
+    info("Tip: highlight 'Continue without fallbacks' and press Enter to skip this step")
 
     fallback_specs = [
         {
@@ -523,6 +524,7 @@ def run_wizard():
 
     fallback_specs = [s for s in fallback_specs if s["id"] != provider]
     fallback_options = [(s["label"], s["id"]) for s in fallback_specs]
+    fallback_options.append(("Continue without fallbacks", "__skip__"))
 
     preselected_fallbacks = []
     for spec in fallback_specs:
@@ -537,12 +539,9 @@ def run_wizard():
         if pick and spec["id"] not in preselected_fallbacks:
             preselected_fallbacks.append(spec["id"])
 
-    selected_fallbacks = set(preselected_fallbacks[:2])
-    if len(preselected_fallbacks) > 2:
-        info("Only 2 existing fallbacks were preselected. You can adjust selection now.")
+    selected_fallbacks = set(preselected_fallbacks)
     idx = 0
     n_fallbacks = len(fallback_options)
-    max_limit_hit = False
 
     def _render_fallbacks():
         for _ in range(n_fallbacks):
@@ -567,13 +566,17 @@ def run_wizard():
                 idx = (idx + 1) % n_fallbacks
             elif k == ' ':
                 val = fallback_options[idx][1]
-                if val in selected_fallbacks:
+                if val == "__skip__":
+                    pass
+                elif val in selected_fallbacks:
                     selected_fallbacks.discard(val)
-                elif len(selected_fallbacks) < 2:
-                    selected_fallbacks.add(val)
                 else:
-                    max_limit_hit = True
+                    selected_fallbacks.add(val)
             elif k in ('\r', '\n'):
+                if fallback_options[idx][1] == "__skip__":
+                    selected_fallbacks.clear()
+                elif not selected_fallbacks and fallback_options:
+                    selected_fallbacks.add(fallback_options[idx][1])
                 break
             elif k == '\x03':
                 sys.stdout.write(SHOW); sys.exit(0)
@@ -581,9 +584,7 @@ def run_wizard():
     finally:
         sys.stdout.write(SHOW); sys.stdout.flush()
 
-    fallback_order = [val for _, val in fallback_options if val in selected_fallbacks]
-    if max_limit_hit:
-        info("Maximum 2 fallbacks allowed; extra selections were ignored.")
+    fallback_order = [val for _, val in fallback_options if val != "__skip__" and val in selected_fallbacks]
     if fallback_order:
         ok(f"Fallbacks selected: {', '.join(fallback_order)}")
     else:
