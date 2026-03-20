@@ -19,17 +19,17 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_interests",
-            "description": "Set or update user's personal interests. Use this when user says things like 'I love cricket', 'I'm a fan of Virat Kohli', 'I like Kiara Advani', 'My favorite actress is Shraddha Kapoor', etc. Save their preferences for future personalization.",
+            "description": "Set or update user's personal interests. Use this when user says things like 'I love cricket', 'I'm a fan of Virat Kohli', 'I like sci-fi movies', 'My favorite actor is Tom Hanks', etc. Save their preferences for future personalization.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "interests": {
                         "type": "string",
-                        "description": "Comma-separated list of interests, e.g., 'cricket, Virat Kohli, Kiara Advani, Shraddha Kapoor, Karan Johar, Bollywood'"
+                        "description": "Comma-separated list of interests, e.g., 'cricket, Virat Kohli, sci-fi movies, Tom Hanks, AI tools, Bollywood'"
                     },
                     "categories": {
                         "type": "string",
-                        "description": "Optional categories as JSON object, e.g., '{\"sports\": [\"cricket\"], \"players\": [\"Virat Kohli\"], \"actresses\": [\"Kiara Advani\", \"Shraddha Kapoor\"], \"directors\": [\"Karan Johar\"]}'"
+                        "description": "Optional categories as JSON object, e.g., '{\"sports\": [\"cricket\"], \"players\": [\"Virat Kohli\"], \"movies\": [\"sci-fi\"], \"actors\": [\"Tom Hanks\"], \"topics\": [\"AI\"]}'"
                     }
                 },
                 "required": ["interests"]
@@ -69,13 +69,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "add_interest",
-            "description": "Add a single interest to user's preferences. Use this when user mentions something they like, e.g., 'I love cricket', 'I'm a fan of Virat Kohli', 'I like Shraddha Kapoor movies'.",
+            "description": "Add a single interest to user's preferences. Use this when user mentions something they like, e.g., 'I love cricket', 'I'm a fan of Virat Kohli', 'I like sci-fi movies'.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "interest": {
                         "type": "string",
-                        "description": "The interest to add, e.g., 'cricket', 'Virat Kohli', 'Kiara Advani', 'Bollywood movies'"
+                        "description": "The interest to add, e.g., 'cricket', 'Virat Kohli', 'sci-fi movies', 'Bollywood movies'"
                     }
                 },
                 "required": ["interest"]
