@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Bot, Code, Smartphone, Zap, Server, BrainCircuit, Activity } from 'lucide-react';
-import mascotImg from '../assets/ninoclaw_mascot.png';
+import mascotImg from '../assets/mascot.png';
 import omnichannelImg from '../assets/omnichannel.png';
 import './Home.css';
 

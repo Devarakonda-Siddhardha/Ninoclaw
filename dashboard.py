@@ -46,6 +46,208 @@ def require_login(f):
         return f(*args, **kwargs)
     return decorated
 
+
+def _api_password_ok():
+    env = get_env()
+    expected = (env.get("DASHBOARD_PASSWORD") or "admin").strip()
+    provided = (
+        request.headers.get("X-Dashboard-Password")
+        or request.args.get("password")
+        or ((request.get_json(silent=True) or {}).get("password") if request.is_json else None)
+        or request.form.get("password")
+        or ""
+    ).strip()
+    return bool(expected) and provided == expected
+
+
+def require_mobile_api(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if session.get("logged_in") or _api_password_ok():
+            return f(*args, **kwargs)
+        return jsonify({"error": "unauthorized"}), 401
+    return decorated
+
+
+def _overview_payload():
+    from runtime_capabilities import summarized_capability_report
+
+    db = get_db()
+    total_messages = 0
+    total_users = 0
+    active_crons = 0
+    pending_tasks = 0
+    recent = []
+    if db:
+        try:
+            total_messages = db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+            total_users = db.execute("SELECT COUNT(DISTINCT user_id) FROM conversations").fetchone()[0]
+            active_crons = db.execute("SELECT COUNT(*) FROM cron_jobs WHERE is_active=1").fetchone()[0]
+            pending_tasks = db.execute("SELECT COUNT(*) FROM tasks WHERE completed=0").fetchone()[0]
+            rows = db.execute(
+                "SELECT user_id, role, content, ts FROM conversations ORDER BY id DESC LIMIT 8"
+            ).fetchall()
+            for r in rows:
+                recent.append(
+                    {
+                        "user_id": r[0],
+                        "role": r[1],
+                        "content": (r[2] or "")[:120],
+                        "ts": (r[3] or "")[:16],
+                    }
+                )
+        except Exception:
+            pass
+        db.close()
+
+    websites_dir = Path(__file__).parent / "websites"
+    total_builds = 0
+    if websites_dir.exists():
+        total_builds = sum(1 for d in websites_dir.iterdir() if d.is_dir() and (d / "index.html").exists())
+
+    try:
+        from expo_manager import list_apps
+        apps = list_apps()
+    except Exception:
+        apps = []
+
+    disk = shutil.disk_usage(os.path.dirname(__file__))
+    capability = summarized_capability_report()
+    return {
+        "stats": {
+            "total_messages": total_messages,
+            "total_users": total_users,
+            "active_crons": active_crons,
+            "pending_tasks": pending_tasks,
+            "total_builds": total_builds,
+            "expo_apps": len(apps),
+            "running_expo_apps": sum(1 for app in apps if app.get("is_running")),
+        },
+        "system": {
+            "os": f"{platform.system()} {platform.release()}",
+            "python": platform.python_version(),
+            "disk_free_gb": round(disk.free / (1024**3), 1),
+            "disk_total_gb": round(disk.total / (1024**3), 1),
+            "disk_pct": round(disk.used / disk.total * 100),
+            "git": git_version(),
+            "profile": capability["profile"],
+            "device": capability["device"],
+            "ram_gb": capability["ram_gb"],
+        },
+        "recent": recent,
+    }
+
+
+def _tasks_payload():
+    conn = get_db()
+    tasks, crons = [], []
+    if conn:
+        try:
+            task_rows = conn.execute(
+                "SELECT id, user_id, name, scheduled_time, completed FROM tasks ORDER BY scheduled_time ASC"
+            ).fetchall()
+            cron_rows = conn.execute(
+                "SELECT id, user_id, name, cron_expression, is_active FROM cron_jobs ORDER BY id DESC"
+            ).fetchall()
+            tasks = [
+                {
+                    "id": row[0],
+                    "user_id": row[1],
+                    "name": row[2],
+                    "scheduled_time": row[3],
+                    "completed": bool(row[4]),
+                }
+                for row in task_rows
+            ]
+            crons = [
+                {
+                    "id": row[0],
+                    "user_id": row[1],
+                    "name": row[2],
+                    "cron_expression": row[3],
+                    "is_active": bool(row[4]),
+                }
+                for row in cron_rows
+            ]
+        except Exception:
+            pass
+        conn.close()
+    return {"tasks": tasks, "crons": crons}
+
+
+def _builds_payload():
+    websites_dir = Path(__file__).parent / "websites"
+    projects = []
+    if websites_dir.exists():
+        for d in sorted(websites_dir.iterdir()):
+            if d.is_dir() and re.fullmatch(r"[a-z0-9_-]{1,50}", d.name) and (d / "index.html").exists():
+                size = (d / "index.html").stat().st_size
+                import datetime
+                mtime = datetime.datetime.fromtimestamp((d / "index.html").stat().st_mtime)
+                projects.append(
+                    {
+                        "name": d.name,
+                        "size_bytes": size,
+                        "size_label": f"{size:,} B" if size < 1024 else f"{size/1024:.1f} KB",
+                        "modified": mtime.strftime("%b %d, %H:%M"),
+                        "preview_url": f"/builds/{d.name}/",
+                    }
+                )
+    return {"projects": projects}
+
+
+def _mobile_apps_payload():
+    try:
+        from expo_manager import list_apps
+        apps = list_apps()
+    except Exception as e:
+        return {"apps": [], "error": str(e)}
+    return {"apps": apps}
+
+
+def _settings_payload():
+    env = get_env()
+    plugin_keys = [
+        "ENABLE_WEB_SEARCH",
+        "ENABLE_VISION",
+        "ENABLE_SUMMARIZER",
+        "ENABLE_REMINDERS",
+        "ENABLE_CRON",
+        "ENABLE_SELF_UPDATE",
+    ]
+    plugins = {key: env.get(key, "true") != "false" for key in plugin_keys}
+    return {
+        "agent": {
+            "name": env.get("AGENT_NAME", "Ninoclaw"),
+            "user_name": env.get("USER_NAME", "friend"),
+            "purpose": env.get("BOT_PURPOSE", "be your personal AI assistant"),
+            "timezone": env.get("TIMEZONE", "UTC"),
+        },
+        "models": {
+            "primary": env.get("OPENAI_MODEL", ""),
+            "fast": env.get("FAST_MODEL", ""),
+            "smart": env.get("SMART_MODEL", ""),
+            "api_url": env.get("OPENAI_API_URL", ""),
+        },
+        "plugins": plugins,
+    }
+
+
+def _chat_messages_payload(user_id):
+    conn = get_db()
+    messages = []
+    if conn:
+        try:
+            rows = conn.execute(
+                "SELECT role, content, ts FROM conversations WHERE user_id=? ORDER BY id ASC",
+                (user_id,),
+            ).fetchall()
+            messages = [{"role": r[0], "content": r[1], "ts": r[2]} for r in rows]
+        except Exception:
+            pass
+        conn.close()
+    return {"messages": messages}
+
 def git_version():
     try:
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"],
@@ -309,41 +511,22 @@ def index():
 @app.route("/overview")
 @require_login
 def overview_page():
-    import datetime as _dt
-    from runtime_capabilities import summarized_capability_report
-    db = get_db()
-    total_messages = 0
-    total_users = 0
-    active_crons = 0
-    pending_tasks = 0
-    recent = []
-    if db:
-        try:
-            total_messages = db.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
-            total_users = db.execute("SELECT COUNT(DISTINCT user_id) FROM conversations").fetchone()[0]
-            active_crons = db.execute("SELECT COUNT(*) FROM cron_jobs WHERE is_active=1").fetchone()[0]
-            pending_tasks = db.execute("SELECT COUNT(*) FROM tasks WHERE completed=0").fetchone()[0]
-            rows = db.execute("SELECT user_id, role, content, ts FROM conversations ORDER BY id DESC LIMIT 8").fetchall()
-            for r in rows:
-                recent.append({"user_id": r[0], "role": r[1], "content": (r[2] or "")[:120], "ts": (r[3] or "")[:16]})
-        except Exception:
-            pass
-        db.close()
-
-    websites_dir = Path(__file__).parent / "websites"
-    total_builds = 0
-    if websites_dir.exists():
-        total_builds = sum(1 for d in websites_dir.iterdir() if d.is_dir() and (d / "index.html").exists())
-
-    disk = shutil.disk_usage(os.path.dirname(__file__))
+    payload = _overview_payload()
+    total_messages = payload["stats"]["total_messages"]
+    total_users = payload["stats"]["total_users"]
+    active_crons = payload["stats"]["active_crons"]
+    pending_tasks = payload["stats"]["pending_tasks"]
+    total_builds = payload["stats"]["total_builds"]
+    recent = payload["recent"]
     sys_info = {
-        "os": f"{platform.system()} {platform.release()}",
-        "python": platform.python_version(),
-        "disk_free": f"{disk.free / (1024**3):.1f} GB",
-        "disk_total": f"{disk.total / (1024**3):.1f} GB",
-        "disk_pct": round(disk.used / disk.total * 100),
-        "git": git_version(),
+        "os": payload["system"]["os"],
+        "python": payload["system"]["python"],
+        "disk_free": f"{payload['system']['disk_free_gb']:.1f} GB",
+        "disk_total": f"{payload['system']['disk_total_gb']:.1f} GB",
+        "disk_pct": payload["system"]["disk_pct"],
+        "git": payload["system"]["git"],
     }
+    from runtime_capabilities import summarized_capability_report
     capability = summarized_capability_report()
     capability_disabled_preview = capability["disabled_tools"][:8]
 
@@ -453,6 +636,12 @@ def overview_page():
                                   active_crons=active_crons, pending_tasks=pending_tasks,
                                   total_builds=total_builds, sys=sys_info, capability=capability,
                                   capability_disabled_preview=capability_disabled_preview, recent=recent)
+
+
+@app.route("/api/mobile/overview")
+@require_mobile_api
+def api_mobile_overview():
+    return jsonify(_overview_payload())
 
 
 @app.route("/config", methods=["GET", "POST"])
@@ -807,6 +996,12 @@ def plugins_page():
         cron=is_on("ENABLE_CRON"),
         self_update=is_on("ENABLE_SELF_UPDATE"),
         chrome_mcp=is_on("ENABLE_CHROME_MCP"))
+
+
+@app.route("/api/mobile/settings")
+@require_mobile_api
+def api_mobile_settings():
+    return jsonify(_settings_payload())
 
 
 @app.route("/models", methods=["GET", "POST"])
@@ -1265,7 +1460,7 @@ def run_view(run_id):
 
 
 @app.route("/api/chat/<user_id>/send", methods=["POST"])
-@require_login
+@require_mobile_api
 def chat_send(user_id):
     """Send a message as the user and get AI response"""
     data = request.get_json()
@@ -1282,6 +1477,12 @@ def chat_send(user_id):
         return jsonify({"reply": reply})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mobile/chat/<user_id>")
+@require_mobile_api
+def api_mobile_chat(user_id):
+    return jsonify(_chat_messages_payload(user_id))
 
 
 @app.route("/chat/<user_id>")
@@ -1543,21 +1744,27 @@ document.getElementById('msg-input').focus();
 @app.route("/tasks")
 @require_login
 def tasks_page():
-    conn = get_db()
-    tasks, crons = [], []
-    if conn:
-        try:
-            tasks = conn.execute(
-                "SELECT id, user_id, name, scheduled_time, completed "
-                "FROM tasks ORDER BY scheduled_time ASC"
-            ).fetchall()
-            crons = conn.execute(
-                "SELECT id, user_id, name, cron_expression, is_active "
-                "FROM cron_jobs ORDER BY id DESC"
-            ).fetchall()
-        except Exception:
-            pass
-        conn.close()
+    payload = _tasks_payload()
+    tasks = [
+        (
+            item["id"],
+            item["user_id"],
+            item["name"],
+            item["scheduled_time"],
+            item["completed"],
+        )
+        for item in payload["tasks"]
+    ]
+    crons = [
+        (
+            item["id"],
+            item["user_id"],
+            item["name"],
+            item["cron_expression"],
+            item["is_active"],
+        )
+        for item in payload["crons"]
+    ]
 
     tmpl = BASE + """
 
@@ -1615,24 +1822,26 @@ def tasks_page():
                                   tasks=tasks, crons=crons)
 
 
+@app.route("/api/mobile/tasks")
+@require_mobile_api
+def api_mobile_tasks():
+    return jsonify(_tasks_payload())
+
+
 # ─── builds page ────────────────────────────────────────────────────────────
 
 @app.route("/builds")
 @require_login
 def builds_page():
-    websites_dir = Path(__file__).parent / "websites"
-    projects = []
-    if websites_dir.exists():
-        for d in sorted(websites_dir.iterdir()):
-            if d.is_dir() and re.fullmatch(r"[a-z0-9_-]{1,50}", d.name) and (d / "index.html").exists():
-                size = (d / "index.html").stat().st_size
-                import datetime
-                mtime = datetime.datetime.fromtimestamp((d / "index.html").stat().st_mtime)
-                projects.append({
-                    "name": d.name,
-                    "size": f"{size:,} B" if size < 1024 else f"{size/1024:.1f} KB",
-                    "modified": mtime.strftime("%b %d, %H:%M"),
-                })
+    payload = _builds_payload()
+    projects = [
+        {
+            "name": item["name"],
+            "size": item["size_label"],
+            "modified": item["modified"],
+        }
+        for item in payload["projects"]
+    ]
     tmpl = BASE + """
 <h1 class="page-title">🏗️ Builds</h1>
 <p class="page-sub">Websites generated by the AI — ask on Telegram: "build me a portfolio site"</p>
@@ -1678,7 +1887,13 @@ def builds_page():
 {% endif %}
 """
     return render_template_string(tmpl + FOOTER, active="builds", version=git_version(),
-                                  projects=projects)
+                                   projects=projects)
+
+
+@app.route("/api/mobile/builds")
+@require_mobile_api
+def api_mobile_builds():
+    return jsonify(_builds_payload())
 
 
 @app.route("/builds/<name>/delete", methods=["POST"])
@@ -1699,12 +1914,10 @@ def builds_delete(name):
 @app.route("/mobile-apps")
 @require_login
 def mobile_apps_page():
-    try:
-        from expo_manager import list_apps
-        apps = list_apps()
-    except Exception as e:
-        apps = []
-        flash(f"Failed to load Expo apps: {e}", "error")
+    payload = _mobile_apps_payload()
+    apps = payload.get("apps", [])
+    if payload.get("error"):
+        flash(f"Failed to load Expo apps: {payload['error']}", "error")
 
     tmpl = BASE + """
 <h1 class="page-title">Mobile Apps</h1>
@@ -1804,6 +2017,34 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 """
     return render_template_string(tmpl + FOOTER, active="mobile", version=git_version(), apps=apps)
+
+
+@app.route("/api/mobile/mobile-apps")
+@require_mobile_api
+def api_mobile_apps():
+    return jsonify(_mobile_apps_payload())
+
+
+@app.route("/api/mobile/mobile-apps/<name>/start", methods=["POST"])
+@require_mobile_api
+def api_mobile_apps_start(name):
+    try:
+        from expo_manager import start_app
+        app = start_app(name)
+        return jsonify({"app": app})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mobile/mobile-apps/<name>/stop", methods=["POST"])
+@require_mobile_api
+def api_mobile_apps_stop(name):
+    try:
+        from expo_manager import stop_app
+        app = stop_app(name)
+        return jsonify({"app": app})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/mobile-apps/<name>/start", methods=["POST"])
