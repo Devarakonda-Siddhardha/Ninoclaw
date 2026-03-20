@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
+  Alert,
   Image,
+  NativeModules,
   RefreshControl,
   SafeAreaView,
   ScrollView,
@@ -75,6 +77,15 @@ function absoluteUrl(baseUrl, path) {
   return `${normalizeBaseUrl(baseUrl)}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
+function inferDashboardUrl() {
+  const scriptUrl = NativeModules?.SourceCode?.scriptURL || '';
+  const match = scriptUrl.match(/^https?:\/\/([^/:]+)(?::\d+)?/i);
+  if (!match) {
+    return '';
+  }
+  return `http://${match[1]}:8080`;
+}
+
 function MetricCard({ label, value, tone }) {
   const toneStyle =
     tone === 'cyan'
@@ -112,7 +123,7 @@ function EmptyState({ title, body }) {
   );
 }
 
-function ConnectionGate({ baseUrl, password, userId, onChange, onReload, loading, error }) {
+function ConnectionGate({ baseUrl, password, userId, onChange, onReload, loading, error, detectedUrl, lastSyncedAt }) {
   return (
     <View style={styles.panel}>
       <View style={styles.connectionHero}>
@@ -122,6 +133,12 @@ function ConnectionGate({ baseUrl, password, userId, onChange, onReload, loading
           <Text style={styles.panelBody}>
             Enter your Ninoclaw dashboard LAN URL, dashboard password, and a mobile chat user id.
           </Text>
+          {!!detectedUrl && !baseUrl && (
+            <Text style={styles.helperText}>Suggested from this device: {detectedUrl}</Text>
+          )}
+          {!!lastSyncedAt && (
+            <Text style={styles.helperText}>Last sync: {formatTimestamp(lastSyncedAt)}</Text>
+          )}
         </View>
       </View>
 
@@ -232,7 +249,32 @@ function ChatTab({ overview, chatMessages, draft, setDraft, onSend, sending, use
   );
 }
 
-function TasksTab({ taskData }) {
+function TasksTab({
+  taskData,
+  reminderName,
+  setReminderName,
+  reminderWhen,
+  setReminderWhen,
+  cronName,
+  setCronName,
+  cronExpression,
+  setCronExpression,
+  cronCommand,
+  setCronCommand,
+  onCreateReminder,
+  onCreateCron,
+  onCompleteTask,
+  onDeleteTask,
+  onToggleCron,
+  onDeleteCron,
+  onEditTask,
+  onEditCron,
+  editingTaskId,
+  editingCronId,
+  onCancelTaskEdit,
+  onCancelCronEdit,
+  actionBusy,
+}) {
   const tasks = taskData?.tasks || [];
   const crons = taskData?.crons || [];
 
@@ -245,6 +287,80 @@ function TasksTab({ taskData }) {
       />
 
       <View style={styles.panel}>
+        <Text style={styles.panelTitle}>{editingTaskId ? 'Edit reminder' : 'Create reminder'}</Text>
+        <Text style={styles.helperText}>Examples: `in 20 minutes`, `in 2 hours`, `in 1 day`</Text>
+        <TextInput
+          value={reminderName}
+          onChangeText={setReminderName}
+          placeholder="Call mom"
+          placeholderTextColor={COLORS.muted}
+          style={styles.input}
+        />
+        <TextInput
+          value={reminderWhen}
+          onChangeText={setReminderWhen}
+          placeholder="in 20 minutes"
+          placeholderTextColor={COLORS.muted}
+          style={styles.input}
+        />
+        <TouchableOpacity
+          style={[styles.primaryButton, actionBusy === 'create-reminder' && styles.buttonDisabled]}
+          onPress={onCreateReminder}
+          disabled={!!actionBusy}
+        >
+          <Text style={styles.primaryButtonText}>
+            {actionBusy === 'create-reminder' ? 'Saving...' : editingTaskId ? 'Save reminder' : 'Create reminder'}
+          </Text>
+        </TouchableOpacity>
+        {!!editingTaskId && (
+          <TouchableOpacity style={styles.ghostButton} onPress={onCancelTaskEdit} disabled={!!actionBusy}>
+            <Text style={styles.ghostButtonText}>Cancel edit</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>{editingCronId ? 'Edit recurring task' : 'Create recurring task'}</Text>
+        <Text style={styles.helperText}>Examples: `every day at 8am`, `every 2 hours`, `weekdays at 9am`</Text>
+        <TextInput
+          value={cronName}
+          onChangeText={setCronName}
+          placeholder="Morning summary"
+          placeholderTextColor={COLORS.muted}
+          style={styles.input}
+        />
+        <TextInput
+          value={cronExpression}
+          onChangeText={setCronExpression}
+          placeholder="every day at 8am"
+          placeholderTextColor={COLORS.muted}
+          style={styles.input}
+        />
+        <TextInput
+          value={cronCommand}
+          onChangeText={setCronCommand}
+          placeholder="Send me my agenda and top priorities"
+          placeholderTextColor={COLORS.muted}
+          style={styles.input}
+          multiline
+        />
+        <TouchableOpacity
+          style={[styles.primaryButton, actionBusy === 'create-cron' && styles.buttonDisabled]}
+          onPress={onCreateCron}
+          disabled={!!actionBusy}
+        >
+          <Text style={styles.primaryButtonText}>
+            {actionBusy === 'create-cron' ? 'Saving...' : editingCronId ? 'Save recurring task' : 'Create recurring task'}
+          </Text>
+        </TouchableOpacity>
+        {!!editingCronId && (
+          <TouchableOpacity style={styles.ghostButton} onPress={onCancelCronEdit} disabled={!!actionBusy}>
+            <Text style={styles.ghostButtonText}>Cancel edit</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <View style={styles.panel}>
         <Text style={styles.panelTitle}>Pending reminders</Text>
         {tasks.length ? (
           tasks.map((task) => (
@@ -255,8 +371,35 @@ function TasksTab({ taskData }) {
                   {task.user_id} · {formatScheduledTime(task.scheduled_time)}
                 </Text>
               </View>
-              <View style={[styles.badge, task.completed ? styles.badgeMuted : null]}>
-                <Text style={styles.badgeText}>{task.completed ? 'Done' : 'Pending'}</Text>
+              <View style={styles.rowActions}>
+                <View style={[styles.badge, task.completed ? styles.badgeMuted : null]}>
+                  <Text style={styles.badgeText}>{task.completed ? 'Done' : 'Pending'}</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.secondaryButton, actionBusy === `done-task:${task.id}` && styles.buttonDisabled]}
+                  onPress={() => onCompleteTask(task.id)}
+                  disabled={!!actionBusy || task.completed}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    {actionBusy === `done-task:${task.id}` ? 'Saving...' : 'Done'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.secondaryButton}
+                  onPress={() => onEditTask(task)}
+                  disabled={!!actionBusy}
+                >
+                  <Text style={styles.secondaryButtonText}>Edit</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.secondaryButton, actionBusy === `delete-task:${task.id}` && styles.buttonDisabled]}
+                  onPress={() => onDeleteTask(task.id)}
+                  disabled={!!actionBusy}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    {actionBusy === `delete-task:${task.id}` ? 'Deleting...' : 'Delete'}
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
           ))
@@ -276,8 +419,35 @@ function TasksTab({ taskData }) {
                   {job.user_id} · {job.cron_expression}
                 </Text>
               </View>
-              <View style={[styles.badge, !job.is_active ? styles.badgeMuted : null]}>
-                <Text style={styles.badgeText}>{job.is_active ? 'Active' : 'Paused'}</Text>
+              <View style={styles.rowActions}>
+                <View style={[styles.badge, !job.is_active ? styles.badgeMuted : null]}>
+                  <Text style={styles.badgeText}>{job.is_active ? 'Active' : 'Paused'}</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.secondaryButton, actionBusy === `toggle-cron:${job.id}` && styles.buttonDisabled]}
+                  onPress={() => onToggleCron(job.id, job.user_id)}
+                  disabled={!!actionBusy}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    {actionBusy === `toggle-cron:${job.id}` ? 'Saving...' : job.is_active ? 'Pause' : 'Resume'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.secondaryButton}
+                  onPress={() => onEditCron(job)}
+                  disabled={!!actionBusy}
+                >
+                  <Text style={styles.secondaryButtonText}>Edit</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.secondaryButton, actionBusy === `delete-cron:${job.id}` && styles.buttonDisabled]}
+                  onPress={() => onDeleteCron(job.id, job.user_id)}
+                  disabled={!!actionBusy}
+                >
+                  <Text style={styles.secondaryButtonText}>
+                    {actionBusy === `delete-cron:${job.id}` ? 'Deleting...' : 'Delete'}
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
           ))
@@ -370,8 +540,22 @@ function SettingsTab({
   onReload,
   loading,
   settingsData,
+  runtimeHealth,
   overview,
   error,
+  detectedUrl,
+  lastSyncedAt,
+  modelPrimary,
+  setModelPrimary,
+  modelFast,
+  setModelFast,
+  modelSmart,
+  setModelSmart,
+  onSaveModels,
+  onTogglePlugin,
+  onReloadRuntime,
+  onFixEnv,
+  actionBusy,
 }) {
   const pluginEntries = Object.entries(settingsData?.plugins || {});
 
@@ -391,6 +575,8 @@ function SettingsTab({
         onReload={onReload}
         loading={loading}
         error={error}
+        detectedUrl={detectedUrl}
+        lastSyncedAt={lastSyncedAt}
       />
 
       <View style={styles.panel}>
@@ -411,18 +597,36 @@ function SettingsTab({
 
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>Model routing</Text>
-        <View style={styles.settingRow}>
-          <Text style={styles.settingTitle}>Primary</Text>
-          <Text style={styles.settingValue}>{settingsData?.models?.primary || 'Unavailable'}</Text>
-        </View>
-        <View style={styles.settingRow}>
-          <Text style={styles.settingTitle}>Fast</Text>
-          <Text style={styles.settingValue}>{settingsData?.models?.fast || 'Off'}</Text>
-        </View>
-        <View style={styles.settingRow}>
-          <Text style={styles.settingTitle}>Smart</Text>
-          <Text style={styles.settingValue}>{settingsData?.models?.smart || 'Unavailable'}</Text>
-        </View>
+        <TextInput
+          value={modelPrimary}
+          onChangeText={setModelPrimary}
+          placeholder="Primary model"
+          placeholderTextColor={COLORS.muted}
+          style={styles.input}
+        />
+        <TextInput
+          value={modelFast}
+          onChangeText={setModelFast}
+          placeholder="Fast model (optional)"
+          placeholderTextColor={COLORS.muted}
+          style={styles.input}
+        />
+        <TextInput
+          value={modelSmart}
+          onChangeText={setModelSmart}
+          placeholder="Smart model (optional)"
+          placeholderTextColor={COLORS.muted}
+          style={styles.input}
+        />
+        <TouchableOpacity
+          style={[styles.primaryButton, actionBusy === 'save-models' && styles.buttonDisabled]}
+          onPress={onSaveModels}
+          disabled={!!actionBusy}
+        >
+          <Text style={styles.primaryButtonText}>
+            {actionBusy === 'save-models' ? 'Saving...' : 'Save model settings'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.panel}>
@@ -431,11 +635,55 @@ function SettingsTab({
           pluginEntries.map(([key, enabled]) => (
             <View key={key} style={styles.settingRow}>
               <Text style={styles.settingTitle}>{key.replace('ENABLE_', '').replaceAll('_', ' ')}</Text>
-              <Text style={styles.settingValue}>{enabled ? 'On' : 'Off'}</Text>
+              <TouchableOpacity
+                style={[styles.secondaryButton, actionBusy === `plugin:${key}` && styles.buttonDisabled]}
+                onPress={() => onTogglePlugin(key, !enabled)}
+                disabled={!!actionBusy}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {actionBusy === `plugin:${key}` ? 'Saving...' : enabled ? 'On' : 'Off'}
+                </Text>
+              </TouchableOpacity>
             </View>
           ))
         ) : (
           <EmptyState title="No settings yet" body="Load live data to see your actual runtime toggles." />
+        )}
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Runtime actions</Text>
+        <TouchableOpacity
+          style={[styles.primaryButton, actionBusy === 'reload-runtime' && styles.buttonDisabled]}
+          onPress={onReloadRuntime}
+          disabled={!!actionBusy}
+        >
+          <Text style={styles.primaryButtonText}>
+            {actionBusy === 'reload-runtime' ? 'Reloading...' : 'Reload runtime'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.secondaryButton, actionBusy === 'fixenv' && styles.buttonDisabled, { marginTop: 10 }]}
+          onPress={onFixEnv}
+          disabled={!!actionBusy}
+        >
+          <Text style={styles.secondaryButtonText}>
+            {actionBusy === 'fixenv' ? 'Repairing...' : 'Fix environment'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Environment health</Text>
+        {runtimeHealth ? (
+          Object.entries(runtimeHealth).map(([key, item]) => (
+            <View key={key} style={styles.settingRow}>
+              <Text style={styles.settingTitle}>{key.replaceAll('_', ' ')}</Text>
+              <Text style={styles.settingValue}>{item?.ok ? 'OK' : item?.detail || 'Missing'}</Text>
+            </View>
+          ))
+        ) : (
+          <EmptyState title="No health data yet" body="Reload live data to inspect Python, Node, Expo, and Ollama." />
         )}
       </View>
 
@@ -458,18 +706,31 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [userId, setUserId] = useState('mobile');
   const [draft, setDraft] = useState('');
+  const [reminderName, setReminderName] = useState('');
+  const [reminderWhen, setReminderWhen] = useState('');
+  const [cronName, setCronName] = useState('');
+  const [cronExpression, setCronExpression] = useState('');
+  const [cronCommand, setCronCommand] = useState('');
+  const [editingTaskId, setEditingTaskId] = useState('');
+  const [editingCronId, setEditingCronId] = useState('');
   const [overview, setOverview] = useState(null);
   const [taskData, setTaskData] = useState(null);
   const [buildsData, setBuildsData] = useState(null);
   const [mobileAppsData, setMobileAppsData] = useState(null);
   const [settingsData, setSettingsData] = useState(null);
+  const [runtimeHealth, setRuntimeHealth] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState(false);
   const [actionBusy, setActionBusy] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [bootstrapped, setBootstrapped] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState('');
+  const [modelPrimary, setModelPrimary] = useState('');
+  const [modelFast, setModelFast] = useState('');
+  const [modelSmart, setModelSmart] = useState('');
 
   const headers = useMemo(
     () => ({
@@ -504,6 +765,13 @@ export default function App() {
     return data;
   }
 
+  function showSuccess(message) {
+    setSuccess(message);
+    setTimeout(() => {
+      setSuccess((current) => (current === message ? '' : current));
+    }, 2500);
+  }
+
   async function loadAll(showSpinner = true) {
     if (!normalizeBaseUrl(baseUrl) || !password.trim() || !userId.trim()) {
       setError('Base URL, password, and user id are required.');
@@ -514,20 +782,26 @@ export default function App() {
     }
     setError('');
     try {
-      const [overviewRes, taskRes, buildsRes, appsRes, settingsRes, chatRes] = await Promise.all([
+      const [overviewRes, taskRes, buildsRes, appsRes, settingsRes, chatRes, healthRes] = await Promise.all([
         apiGet('/api/mobile/overview'),
         apiGet('/api/mobile/tasks'),
         apiGet('/api/mobile/builds'),
         apiGet('/api/mobile/mobile-apps'),
         apiGet('/api/mobile/settings'),
         apiGet(`/api/mobile/chat/${encodeURIComponent(userId.trim())}`),
+        apiGet('/api/mobile/runtime/health'),
       ]);
       setOverview(overviewRes);
       setTaskData(taskRes);
       setBuildsData(buildsRes);
       setMobileAppsData(appsRes);
       setSettingsData(settingsRes);
+      setRuntimeHealth(healthRes);
       setChatMessages(chatRes.messages || []);
+      setModelPrimary(settingsRes?.models?.primary || '');
+      setModelFast(settingsRes?.models?.fast || '');
+      setModelSmart(settingsRes?.models?.smart || '');
+      setLastSyncedAt(new Date().toISOString());
     } catch (fetchError) {
       setError(fetchError.message || 'Failed to load live data.');
     } finally {
@@ -589,6 +863,242 @@ export default function App() {
     }
   }
 
+  async function handleCreateReminder() {
+    if (!reminderName.trim() || !reminderWhen.trim()) {
+      setError('Reminder name and schedule are required.');
+      return;
+    }
+    setActionBusy('create-reminder');
+    setError('');
+    setSuccess('');
+    try {
+      const result = editingTaskId
+        ? await apiPost(`/api/mobile/tasks/reminders/${encodeURIComponent(editingTaskId)}`, {
+            name: reminderName.trim(),
+            when: reminderWhen.trim(),
+          })
+        : await apiPost('/api/mobile/tasks/reminders', {
+            user_id: userId.trim(),
+            name: reminderName.trim(),
+            when: reminderWhen.trim(),
+          });
+      setTaskData(result.tasks || null);
+      setReminderName('');
+      setReminderWhen('');
+      setEditingTaskId('');
+      showSuccess(editingTaskId ? 'Reminder updated.' : 'Reminder created.');
+      await loadAll(false);
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to create reminder.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
+  async function handleCreateCron() {
+    if (!cronName.trim() || !cronExpression.trim() || !cronCommand.trim()) {
+      setError('Cron name, schedule, and command are required.');
+      return;
+    }
+    setActionBusy('create-cron');
+    setError('');
+    setSuccess('');
+    try {
+      const result = editingCronId
+        ? await apiPost(`/api/mobile/tasks/crons/${encodeURIComponent(editingCronId)}`, {
+            user_id: userId.trim(),
+            name: cronName.trim(),
+            expression: cronExpression.trim(),
+            command: cronCommand.trim(),
+          })
+        : await apiPost('/api/mobile/tasks/crons', {
+            user_id: userId.trim(),
+            name: cronName.trim(),
+            expression: cronExpression.trim(),
+            command: cronCommand.trim(),
+          });
+      setTaskData(result.tasks || null);
+      setCronName('');
+      setCronExpression('');
+      setCronCommand('');
+      setEditingCronId('');
+      showSuccess(editingCronId ? 'Recurring task updated.' : 'Recurring task created.');
+      await loadAll(false);
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to create recurring task.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
+  async function handleCompleteTask(taskId) {
+    setActionBusy(`done-task:${taskId}`);
+    setError('');
+    try {
+      const result = await apiPost(`/api/mobile/tasks/reminders/${encodeURIComponent(taskId)}/complete`);
+      setTaskData(result.tasks || null);
+      showSuccess('Reminder completed.');
+      await loadAll(false);
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to complete reminder.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
+  async function handleDeleteTask(taskId) {
+    setActionBusy(`delete-task:${taskId}`);
+    setError('');
+    try {
+      const result = await apiPost(`/api/mobile/tasks/reminders/${encodeURIComponent(taskId)}/delete`);
+      setTaskData(result.tasks || null);
+      if (editingTaskId === taskId) {
+        setEditingTaskId('');
+        setReminderName('');
+        setReminderWhen('');
+      }
+      showSuccess('Reminder deleted.');
+      await loadAll(false);
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to delete reminder.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
+  async function handleToggleCron(jobId, jobUserId) {
+    setActionBusy(`toggle-cron:${jobId}`);
+    setError('');
+    try {
+      const result = await apiPost(`/api/mobile/tasks/crons/${encodeURIComponent(jobId)}/toggle`, {
+        user_id: String(jobUserId),
+      });
+      setTaskData(result.tasks || null);
+      showSuccess('Recurring task updated.');
+      await loadAll(false);
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to update recurring task.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
+  async function handleDeleteCron(jobId, jobUserId) {
+    setActionBusy(`delete-cron:${jobId}`);
+    setError('');
+    try {
+      const result = await apiPost(`/api/mobile/tasks/crons/${encodeURIComponent(jobId)}/delete`, {
+        user_id: String(jobUserId),
+      });
+      setTaskData(result.tasks || null);
+      if (editingCronId === jobId) {
+        setEditingCronId('');
+        setCronName('');
+        setCronExpression('');
+        setCronCommand('');
+      }
+      showSuccess('Recurring task deleted.');
+      await loadAll(false);
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to delete recurring task.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
+  function beginEditTask(task) {
+    setEditingTaskId(task.id);
+    setReminderName(task.name || '');
+    setReminderWhen('in 20 minutes');
+    setSuccess('');
+    setError('');
+  }
+
+  function beginEditCron(job) {
+    setEditingCronId(job.id);
+    setCronName(job.name || '');
+    setCronExpression(job.original_expression || job.cron_expression || '');
+    setCronCommand(job.command || '');
+    setSuccess('');
+    setError('');
+  }
+
+  function confirmDeleteTask(taskId) {
+    Alert.alert('Delete reminder?', 'This reminder will be removed from Ninoclaw.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => handleDeleteTask(taskId) },
+    ]);
+  }
+
+  function confirmDeleteCron(jobId, jobUserId) {
+    Alert.alert('Delete recurring task?', 'This schedule will be removed from Ninoclaw.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => handleDeleteCron(jobId, jobUserId) },
+    ]);
+  }
+
+  async function handleSaveModels() {
+    setActionBusy('save-models');
+    setError('');
+    try {
+      const result = await apiPost('/api/mobile/runtime/models', {
+        primary: modelPrimary.trim(),
+        fast: modelFast.trim(),
+        smart: modelSmart.trim(),
+      });
+      setSettingsData(result.settings || null);
+      await loadAll(false);
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to save model settings.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
+  async function handleTogglePlugin(key, enabled) {
+    setActionBusy(`plugin:${key}`);
+    setError('');
+    try {
+      const result = await apiPost(`/api/mobile/runtime/plugins/${encodeURIComponent(key)}`, { enabled });
+      setSettingsData(result.settings || null);
+      await loadAll(false);
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to update plugin.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
+  async function handleReloadRuntime() {
+    setActionBusy('reload-runtime');
+    setError('');
+    try {
+      const result = await apiPost('/api/mobile/runtime/reload');
+      setSettingsData(result.settings || null);
+      await loadAll(false);
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to reload runtime.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
+  async function handleFixEnv() {
+    setActionBusy('fixenv');
+    setError('');
+    setSuccess('');
+    try {
+      const result = await apiPost('/api/mobile/runtime/fixenv');
+      setRuntimeHealth(result.health || null);
+      showSuccess(result.ok ? 'Environment repair finished.' : 'Environment repair completed with warnings.');
+      await loadAll(false);
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to run fix environment.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
   const content = (() => {
     if (!overview && !loading) {
       return (
@@ -608,9 +1118,45 @@ export default function App() {
       );
     }
 
-    switch (activeTab) {
+      switch (activeTab) {
       case 'tasks':
-        return <TasksTab taskData={taskData} />;
+        return (
+          <TasksTab
+            taskData={taskData}
+            reminderName={reminderName}
+            setReminderName={setReminderName}
+            reminderWhen={reminderWhen}
+            setReminderWhen={setReminderWhen}
+            cronName={cronName}
+            setCronName={setCronName}
+            cronExpression={cronExpression}
+            setCronExpression={setCronExpression}
+            cronCommand={cronCommand}
+            setCronCommand={setCronCommand}
+            onCreateReminder={handleCreateReminder}
+            onCreateCron={handleCreateCron}
+            onCompleteTask={handleCompleteTask}
+            onDeleteTask={confirmDeleteTask}
+            onToggleCron={handleToggleCron}
+            onDeleteCron={confirmDeleteCron}
+            onEditTask={beginEditTask}
+            onEditCron={beginEditCron}
+            editingTaskId={editingTaskId}
+            editingCronId={editingCronId}
+            onCancelTaskEdit={() => {
+              setEditingTaskId('');
+              setReminderName('');
+              setReminderWhen('');
+            }}
+            onCancelCronEdit={() => {
+              setEditingCronId('');
+              setCronName('');
+              setCronExpression('');
+              setCronCommand('');
+            }}
+            actionBusy={actionBusy}
+          />
+        );
       case 'builds':
         return (
           <BuildsTab
@@ -635,8 +1181,22 @@ export default function App() {
             onReload={() => loadAll(true)}
             loading={loading}
             settingsData={settingsData}
+            runtimeHealth={runtimeHealth}
             overview={overview}
             error={error}
+            detectedUrl={inferDashboardUrl()}
+            lastSyncedAt={lastSyncedAt}
+            modelPrimary={modelPrimary}
+            setModelPrimary={setModelPrimary}
+            modelFast={modelFast}
+            setModelFast={setModelFast}
+            modelSmart={modelSmart}
+            setModelSmart={setModelSmart}
+            onSaveModels={handleSaveModels}
+            onTogglePlugin={handleTogglePlugin}
+            onReloadRuntime={handleReloadRuntime}
+            onFixEnv={handleFixEnv}
+            actionBusy={actionBusy}
           />
         );
       case 'chat':
@@ -665,10 +1225,19 @@ export default function App() {
           if (saved.baseUrl) setBaseUrl(saved.baseUrl);
           if (saved.password) setPassword(saved.password);
           if (saved.userId) setUserId(saved.userId);
+          if (!saved.baseUrl) {
+            const inferred = inferDashboardUrl();
+            if (inferred) setBaseUrl(inferred);
+          }
           if (saved.baseUrl && saved.password && saved.userId) {
             setTimeout(() => {
               loadAll(true);
             }, 0);
+          }
+        } else {
+          const inferred = inferDashboardUrl();
+          if (inferred && mounted) {
+            setBaseUrl(inferred);
           }
         }
       } catch (_error) {
@@ -722,6 +1291,9 @@ export default function App() {
             </View>
             <View style={[styles.pulseDot, overview ? styles.pulseLive : styles.pulseIdle]} />
           </View>
+
+          {!!success && <Text style={styles.successText}>{success}</Text>}
+          {!!error && overview && activeTab !== 'settings' && <Text style={styles.errorText}>{error}</Text>}
 
           {loading && !overview ? (
             <View style={styles.loaderWrap}>
@@ -964,6 +1536,12 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginBottom: 12,
   },
+  helperText: {
+    color: COLORS.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 10,
+  },
   bubble: {
     borderRadius: 18,
     padding: 14,
@@ -1023,6 +1601,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
   },
+  ghostButton: {
+    marginTop: 10,
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  ghostButtonText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   rowCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1044,6 +1632,16 @@ const styles = StyleSheet.create({
   rowMeta: {
     color: COLORS.muted,
     fontSize: 13,
+  },
+  rowSubtle: {
+    color: COLORS.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  rowActions: {
+    alignItems: 'flex-end',
+    gap: 8,
   },
   badge: {
     backgroundColor: '#123528',
@@ -1208,6 +1806,12 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: COLORS.coral,
+    marginBottom: 12,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  successText: {
+    color: COLORS.green,
     marginBottom: 12,
     fontSize: 13,
     lineHeight: 18,

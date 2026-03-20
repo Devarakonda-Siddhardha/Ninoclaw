@@ -144,10 +144,10 @@ def _tasks_payload():
     if conn:
         try:
             task_rows = conn.execute(
-                "SELECT id, user_id, name, scheduled_time, completed FROM tasks ORDER BY scheduled_time ASC"
+                "SELECT id, user_id, name, scheduled_time, completed, created_at FROM tasks ORDER BY scheduled_time ASC"
             ).fetchall()
             cron_rows = conn.execute(
-                "SELECT id, user_id, name, cron_expression, is_active FROM cron_jobs ORDER BY id DESC"
+                "SELECT id, user_id, name, cron_expression, original_expression, command, is_active, next_run FROM cron_jobs ORDER BY id DESC"
             ).fetchall()
             tasks = [
                 {
@@ -156,6 +156,7 @@ def _tasks_payload():
                     "name": row[2],
                     "scheduled_time": row[3],
                     "completed": bool(row[4]),
+                    "created_at": row[5],
                 }
                 for row in task_rows
             ]
@@ -165,7 +166,10 @@ def _tasks_payload():
                     "user_id": row[1],
                     "name": row[2],
                     "cron_expression": row[3],
-                    "is_active": bool(row[4]),
+                    "original_expression": row[4],
+                    "command": row[5],
+                    "is_active": bool(row[6]),
+                    "next_run": row[7],
                 }
                 for row in cron_rows
             ]
@@ -230,6 +234,42 @@ def _settings_payload():
             "api_url": env.get("OPENAI_API_URL", ""),
         },
         "plugins": plugins,
+    }
+
+
+def _runtime_health_payload():
+    def tool_info(command, args=None):
+        path = shutil.which(command)
+        if not path:
+            return {"ok": False, "detail": "not found"}
+        try:
+            result = subprocess.run(
+                [command, *(args or ["--version"])],
+                cwd=DIR,
+                capture_output=True,
+                text=True,
+                timeout=12,
+            )
+            text = (result.stdout or result.stderr or "").strip().splitlines()
+            return {"ok": result.returncode == 0, "detail": text[0] if text else path}
+        except Exception as exc:
+            return {"ok": False, "detail": str(exc)}
+
+    app_dir = Path(DIR) / "mobile_apps" / "ninoclaw-companion"
+    return {
+        "python": {"ok": True, "detail": sys.version.split()[0]},
+        "git": tool_info("git"),
+        "node": tool_info("node"),
+        "expo": tool_info("npx", ["expo", "--version"]),
+        "ollama": tool_info("ollama"),
+        "mobile_app": {
+            "ok": (app_dir / "package.json").exists(),
+            "detail": "mobile app present" if (app_dir / "package.json").exists() else "mobile app missing",
+        },
+        "mobile_deps": {
+            "ok": (app_dir / "node_modules").exists(),
+            "detail": "node_modules present" if (app_dir / "node_modules").exists() else "run ninoclaw fixenv",
+        },
     }
 
 
@@ -1002,6 +1042,85 @@ def plugins_page():
 @require_mobile_api
 def api_mobile_settings():
     return jsonify(_settings_payload())
+
+
+@app.route("/api/mobile/runtime/health")
+@require_mobile_api
+def api_mobile_runtime_health():
+    return jsonify(_runtime_health_payload())
+
+
+@app.route("/api/mobile/runtime/reload", methods=["POST"])
+@require_mobile_api
+def api_mobile_runtime_reload():
+    try:
+        from tools import reload_runtime_state
+        return jsonify({"ok": True, "state": reload_runtime_state(), "settings": _settings_payload()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mobile/runtime/fixenv", methods=["POST"])
+@require_mobile_api
+def api_mobile_runtime_fixenv():
+    try:
+        result = subprocess.run(
+            [sys.executable, os.path.join(DIR, "cli.py"), "fixenv"],
+            cwd=DIR,
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+        return jsonify(
+            {
+                "ok": result.returncode == 0,
+                "output": (result.stdout or result.stderr or "").strip(),
+                "health": _runtime_health_payload(),
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mobile/runtime/plugins/<key>", methods=["POST"])
+@require_mobile_api
+def api_mobile_runtime_plugin_update(key):
+    allowed = {
+        "ENABLE_WEB_SEARCH",
+        "ENABLE_VISION",
+        "ENABLE_SUMMARIZER",
+        "ENABLE_REMINDERS",
+        "ENABLE_CRON",
+        "ENABLE_SELF_UPDATE",
+    }
+    if key not in allowed:
+        return jsonify({"error": "invalid plugin key"}), 400
+
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled"))
+    save_env_key(key, "true" if enabled else "false")
+    try:
+        from tools import reload_runtime_state
+        state = reload_runtime_state()
+    except Exception:
+        state = None
+    return jsonify({"ok": True, "settings": _settings_payload(), "state": state})
+
+
+@app.route("/api/mobile/runtime/models", methods=["POST"])
+@require_mobile_api
+def api_mobile_runtime_models_update():
+    data = request.get_json(silent=True) or {}
+    primary = str(data.get("primary", "")).strip()
+    fast = str(data.get("fast", "")).strip()
+    smart = str(data.get("smart", "")).strip()
+
+    if primary:
+        save_env_key("OPENAI_MODEL", primary)
+    save_env_key("FAST_MODEL", fast)
+    save_env_key("SMART_MODEL", smart)
+
+    return jsonify({"ok": True, "settings": _settings_payload()})
 
 
 @app.route("/models", methods=["GET", "POST"])
@@ -1826,6 +1945,151 @@ def tasks_page():
 @require_mobile_api
 def api_mobile_tasks():
     return jsonify(_tasks_payload())
+
+
+@app.route("/api/mobile/tasks/reminders", methods=["POST"])
+@require_mobile_api
+def api_mobile_tasks_create_reminder():
+    from tasks import task_manager
+
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get("user_id", "")).strip()
+    name = str(data.get("name", "")).strip()
+    when = str(data.get("when", "")).strip()
+
+    if not user_id or not name or not when:
+        return jsonify({"error": "user_id, name, and when are required"}), 400
+
+    scheduled_time = task_manager.parse_time(when)
+    task_id = task_manager.add_task(user_id, name, scheduled_time)
+    return jsonify({"ok": True, "task_id": task_id, "tasks": _tasks_payload()})
+
+
+@app.route("/api/mobile/tasks/reminders/<task_id>/complete", methods=["POST"])
+@require_mobile_api
+def api_mobile_tasks_complete_reminder(task_id):
+    from tasks import task_manager
+
+    if not task_manager.complete_task(task_id):
+        return jsonify({"error": "task not found"}), 404
+    return jsonify({"ok": True, "tasks": _tasks_payload()})
+
+
+@app.route("/api/mobile/tasks/reminders/<task_id>/delete", methods=["POST"])
+@require_mobile_api
+def api_mobile_tasks_delete_reminder(task_id):
+    from tasks import task_manager
+
+    task_manager.delete_task(task_id)
+    return jsonify({"ok": True, "tasks": _tasks_payload()})
+
+
+@app.route("/api/mobile/tasks/reminders/<task_id>", methods=["POST"])
+@require_mobile_api
+def api_mobile_tasks_update_reminder(task_id):
+    from tasks import task_manager
+
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    when = str(data.get("when", "")).strip()
+    if not name or not when:
+        return jsonify({"error": "name and when are required"}), 400
+
+    scheduled_time = task_manager.parse_time(when)
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.execute(
+        "UPDATE tasks SET name=?, scheduled_time=? WHERE id=?",
+        (name, scheduled_time, task_id),
+    )
+    conn.commit()
+    conn.close()
+    if cur.rowcount <= 0:
+        return jsonify({"error": "task not found"}), 404
+    return jsonify({"ok": True, "tasks": _tasks_payload()})
+
+
+@app.route("/api/mobile/tasks/crons", methods=["POST"])
+@require_mobile_api
+def api_mobile_tasks_create_cron():
+    from tasks import task_manager
+
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get("user_id", "")).strip()
+    name = str(data.get("name", "")).strip()
+    expression = str(data.get("expression", "")).strip()
+    command = str(data.get("command", "")).strip()
+
+    if not user_id or not name or not expression or not command:
+        return jsonify({"error": "user_id, name, expression, and command are required"}), 400
+
+    job_id, error = task_manager.add_cron_job(user_id, name, expression, command)
+    if error:
+        return jsonify({"error": error}), 400
+    return jsonify({"ok": True, "job_id": job_id, "tasks": _tasks_payload()})
+
+
+@app.route("/api/mobile/tasks/crons/<job_id>/toggle", methods=["POST"])
+@require_mobile_api
+def api_mobile_tasks_toggle_cron(job_id):
+    from tasks import task_manager
+
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get("user_id", "")).strip()
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
+
+    state = task_manager.toggle_cron_job(job_id, user_id)
+    if state is None:
+        return jsonify({"error": "cron job not found"}), 404
+    return jsonify({"ok": True, "is_active": state, "tasks": _tasks_payload()})
+
+
+@app.route("/api/mobile/tasks/crons/<job_id>/delete", methods=["POST"])
+@require_mobile_api
+def api_mobile_tasks_delete_cron(job_id):
+    from tasks import task_manager
+
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get("user_id", "")).strip()
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
+
+    if not task_manager.remove_cron_job(job_id, user_id):
+        return jsonify({"error": "cron job not found"}), 404
+    return jsonify({"ok": True, "tasks": _tasks_payload()})
+
+
+@app.route("/api/mobile/tasks/crons/<job_id>", methods=["POST"])
+@require_mobile_api
+def api_mobile_tasks_update_cron(job_id):
+    from tasks import task_manager
+
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get("user_id", "")).strip()
+    name = str(data.get("name", "")).strip()
+    expression = str(data.get("expression", "")).strip()
+    command = str(data.get("command", "")).strip()
+    if not user_id or not name or not expression or not command:
+        return jsonify({"error": "user_id, name, expression, and command are required"}), 400
+
+    cron_expr, next_run = task_manager._parse_cron_expression(expression)
+    if not cron_expr:
+        return jsonify({"error": f"Invalid cron expression: '{expression}'"}), 400
+
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.execute(
+        """
+        UPDATE cron_jobs
+        SET name=?, cron_expression=?, original_expression=?, command=?, next_run=?
+        WHERE id=? AND user_id=?
+        """,
+        (name, cron_expr, expression, command, next_run, job_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+    if cur.rowcount <= 0:
+        return jsonify({"error": "cron job not found"}), 404
+    return jsonify({"ok": True, "tasks": _tasks_payload()})
 
 
 # ─── builds page ────────────────────────────────────────────────────────────
