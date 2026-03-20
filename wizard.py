@@ -657,7 +657,6 @@ def run_wizard():
     # ── 8. Image Generation ───────────────────────────────────────────────────
     section("Step 8 — Image Generation  (optional)")
     info("Free option: HuggingFace (FLUX.1-schnell) — get token at https://huggingface.co/settings/tokens")
-    info("Paid option: fal.ai (FLUX.1 Schnell) — get key at https://fal.ai")
     info("Fallback: Google Gemini Nano Banana — get key at https://aistudio.google.com/apikey")
     hf_token = ask("HuggingFace Token (free, recommended)", default=e.get("HF_TOKEN"), optional=True, secret=True)
     if hf_token:
@@ -665,12 +664,6 @@ def run_wizard():
         ok("HuggingFace FLUX.1-schnell enabled — say 'generate an image of...' in Telegram")
     else:
         ok("Skipped HuggingFace")
-    fal_key = ask("fal.ai API Key (optional)", default=e.get("FAL_KEY"), optional=True, secret=True)
-    if fal_key:
-        cfg["FAL_KEY"] = fal_key
-        ok("fal.ai FLUX enabled")
-    else:
-        ok("Skipped fal.ai")
     # Gemini fallback
     is_gemini = "generativelanguage.googleapis.com" in cfg.get("OPENAI_API_URL", e.get("OPENAI_API_URL", ""))
     if is_gemini:
