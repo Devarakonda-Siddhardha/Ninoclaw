@@ -3,6 +3,7 @@ Ninoclaw CLI — command line interface for managing the assistant
 """
 import os
 import sys
+import subprocess
 
 # Load .env before anything else
 from dotenv import load_dotenv
@@ -64,9 +65,59 @@ HELP = f"""
   {DIM}ninoclaw memory stats{RST}       Show how much is stored
 """
 
+REPO_DIR = os.path.dirname(__file__)
+REQUIREMENTS_FILE = os.path.join(REPO_DIR, "requirements.txt")
+REQUIREMENTS_STAMP = os.path.join(REPO_DIR, ".requirements.installed")
+
+
+def _requirements_stamp_value():
+    try:
+        return str(int(os.path.getmtime(REQUIREMENTS_FILE)))
+    except OSError:
+        return None
+
+
+def ensure_requirements_installed():
+    """Install Python dependencies when requirements.txt is new or changed."""
+    if not os.path.exists(REQUIREMENTS_FILE):
+        return True
+
+    expected = _requirements_stamp_value()
+    current = None
+    if os.path.exists(REQUIREMENTS_STAMP):
+        try:
+            with open(REQUIREMENTS_STAMP, "r", encoding="utf-8") as f:
+                current = f.read().strip()
+        except OSError:
+            current = None
+
+    if expected and current == expected:
+        return True
+
+    print(f"{C}Installing Python dependencies from requirements.txt...{RST}")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-r", REQUIREMENTS_FILE],
+        cwd=REPO_DIR,
+    )
+    if result.returncode != 0:
+        print(f"{R}Failed to install requirements.txt dependencies.{RST}")
+        return False
+
+    try:
+        with open(REQUIREMENTS_STAMP, "w", encoding="utf-8") as f:
+            f.write(expected or "installed")
+    except OSError:
+        pass
+
+    print(f"{G}Dependencies are ready.{RST}\n")
+    return True
+
 
 def cmd_start():
     """Start the Ninoclaw bot"""
+    if not ensure_requirements_installed():
+        sys.exit(1)
+
     from wizard import needs_setup, run_wizard
     if needs_setup():
         print(f"{Y}⚠  No config found — running setup wizard first...{RST}\n")
@@ -80,6 +131,9 @@ def cmd_start():
 
 def cmd_setup():
     """Run setup wizard"""
+    if not ensure_requirements_installed():
+        sys.exit(1)
+
     from wizard import run_wizard
     run_wizard()
     print(f"{G}✔  Setup complete. Run {W}ninoclaw start{G} to launch.{RST}\n")

@@ -118,7 +118,6 @@ Mobile companion app:
 ```powershell
 git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
 cd Ninoclaw
-pip install -r requirements.txt
 .\ninoclaw setup
 .\ninoclaw start
 ```
@@ -128,10 +127,11 @@ pip install -r requirements.txt
 ```bash
 git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
 cd Ninoclaw
-pip install -r requirements.txt
 ./ninoclaw setup
 ./ninoclaw start
 ```
+
+`setup` and `start` now auto-install Python dependencies from `requirements.txt` when needed. If you change `requirements.txt` later, the next `setup` or `start` run will refresh them automatically.
 
 You can also run the core process directly:
 
