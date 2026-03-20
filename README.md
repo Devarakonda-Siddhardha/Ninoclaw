@@ -2,6 +2,10 @@
 
 Personal AI assistant with Telegram chat, a local dashboard, memory/tasks, tool use, website generation, and React Native Expo app generation.
 
+<p align="center">
+  <img src="./assets/mascot.png" alt="Ninoclaw mascot" width="220" />
+</p>
+
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://python.org)
 [![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?logo=telegram)](https://telegram.org)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
