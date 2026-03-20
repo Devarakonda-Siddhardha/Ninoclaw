@@ -29,7 +29,7 @@ TOOLS = [
                     },
                     "categories": {
                         "type": "string",
-                        "description": "Optional categories as JSON object, e.g., '{\"sports\": [\"cricket\"], \"players\": [\"Virat Kohli\"], \"actresses\": [\"sci-fi movies\", \"Shraddha Kapoor\"], \"directors\": [\"Karan Johar\"]}'"
+                        "description": "Optional categories as JSON object, e.g., '{\"sports\": [\"cricket\"], \"players\": [\"Virat Kohli\"], \"movies\": [\"sci-fi\"], \"actors\": [\"Tom Hanks\"], \"topics\": [\"AI\"]}'"
                     }
                 },
                 "required": ["interests"]

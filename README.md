@@ -373,6 +373,9 @@ PRs are welcome. If you change runtime behavior, keep the README aligned with:
 - security behavior
 - builder workflows
 
+Please avoid committing personal, celebrity-themed, or one-off generated demo content to the main repo.
+Keep tracked examples generic and product-related unless a sample is intentionally part of the project.
+
 ## License
 
 MIT
