@@ -254,7 +254,15 @@ def cmd_reset():
 def cmd_status():
     """Show current config status"""
     from wizard import load_existing_env
+    from config import build_model_chain
     env = load_existing_env()
+    model_chain = build_model_chain(env)
+    fallback_models = [cfg.get("model", "") for cfg in model_chain[1:] if cfg.get("model")]
+    fallback_label = ", ".join(fallback_models[:3])
+    if len(fallback_models) > 3:
+        fallback_label += f" {DIM}(+{len(fallback_models) - 3} more){RST}"
+    elif not fallback_label:
+        fallback_label = f"{DIM}None{RST}"
 
     def masked(val):
         if not val or len(val) < 8:
@@ -271,7 +279,7 @@ def cmd_status():
   {W}Primary Model{RST}    {G}{env.get('OPENAI_MODEL', 'Not set')}{RST}
   {W}API Key{RST}          {masked(env.get('OPENAI_API_KEY'))}
   {W}API URL{RST}          {DIM}{env.get('OPENAI_API_URL', 'Not set')}{RST}
-  {W}Fallback Model{RST}   {env.get('FALLBACK_MODEL') or f'{DIM}None{RST}'}
+  {W}Fallback Chain{RST}   {fallback_label}
   {W}Web Search{RST}       {checkmark(env.get('SERPER_API_KEY'))}
   {W}Owner ID{RST}         {env.get('OWNER_ID') or f'{Y}Not set (open){RST}'}
 {DIM}{'─'*40}{RST}""")

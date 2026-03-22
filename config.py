@@ -95,6 +95,14 @@ def _provider(url, key_env, model_env, default_model=None, env=None):
     return {"api_url": url, "api_key": key, "model": _env_from(env, model_env, "") or default_model or ""}
 
 
+def _model_identity(model_cfg):
+    return (
+        (model_cfg or {}).get("api_url", ""),
+        (model_cfg or {}).get("api_key", ""),
+        (model_cfg or {}).get("model", ""),
+    )
+
+
 def _build_primary(env):
     return {
         "api_url": _env_from(env, "OPENAI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
@@ -134,7 +142,15 @@ def build_model_chain(env=None):
         except json.JSONDecodeError:
             pass
 
-    return [primary] + [p for p in provider_chain if p and p.get("model")]
+    chain = []
+    seen = set()
+    for cfg in [primary] + [p for p in provider_chain if p and p.get("model")]:
+        ident = _model_identity(cfg)
+        if not cfg or ident in seen:
+            continue
+        seen.add(ident)
+        chain.append(cfg)
+    return chain
 
 
 def get_runtime_ai_config():
