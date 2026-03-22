@@ -101,6 +101,7 @@ def _sync_primary_provider(cfg, provider):
     provider_map = {
         "openrouter": ("OPENROUTER_API_KEY", "OPENROUTER_MODEL"),
         "gemini": ("GEMINI_API_KEY", "GEMINI_MODEL"),
+        "nvidia": ("NVIDIA_API_KEY", "NVIDIA_MODEL"),
         "groq": ("GROQ_API_KEY", "GROQ_MODEL"),
         "mistral": ("MISTRAL_API_KEY", "MISTRAL_MODEL"),
         "xai": ("XAI_API_KEY", "XAI_MODEL"),
@@ -358,6 +359,7 @@ def run_wizard():
     provider = choose("Which AI provider?", [
         ("OpenRouter      (100+ models, free tier)",            "openrouter"),
         ("Google Gemini   (free tier)",                         "gemini"),
+        ("NVIDIA NIM      (trial, Kimi/Nemotron)",             "nvidia"),
         ("Groq            (fast, free)",                        "groq"),
         ("OpenAI          (GPT-4o / GPT-4o-mini)",              "openai"),
         ("Mistral         (mistral-small)",                     "mistral"),
@@ -418,6 +420,39 @@ def run_wizard():
                 ok(f"API key is valid ✅")
             else:
                 print(f"  {Y}⚠  {msg}{RST}")
+                print(f"  {Y}⚠  Continuing anyway, but the bot may not work.{RST}")
+
+    elif provider == "nvidia":
+        info("Get key: https://build.nvidia.com  (trial access, OpenAI-compatible)")
+        key_default = e.get("NVIDIA_API_KEY") or (
+            e.get("OPENAI_API_KEY") if _current_primary_uses(e, "integrate.api.nvidia.com") else ""
+        )
+        nvidia_api_key = ask("NVIDIA API Key", default=key_default, secret=True) or ""
+        cfg["OPENAI_API_URL"] = "https://integrate.api.nvidia.com/v1"
+        cfg["OPENAI_API_KEY"] = nvidia_api_key
+        nvidia_models = [
+            ("moonshotai/kimi-k2-thinking (recommended)", "moonshotai/kimi-k2-thinking"),
+            ("moonshotai/kimi-k2-instruct", "moonshotai/kimi-k2-instruct"),
+            ("moonshotai/kimi-k2.5", "moonshotai/kimi-k2.5"),
+            ("nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-super-120b-a12b"),
+        ]
+        default_nvidia_model = e.get("NVIDIA_MODEL") or (
+            e.get("OPENAI_MODEL") if _current_primary_uses(e, "integrate.api.nvidia.com") else ""
+        )
+        cfg["OPENAI_MODEL"] = choose(
+            "Select NVIDIA model",
+            nvidia_models,
+            default=_choice_default_index(nvidia_models, default_nvidia_model, fallback=0),
+        )
+        cfg["NVIDIA_API_KEY"] = nvidia_api_key
+        cfg["NVIDIA_MODEL"] = cfg["OPENAI_MODEL"]
+        if nvidia_api_key and nvidia_api_key != "your-api-key-here":
+            info("Testing API key...")
+            valid, msg = test_api_key(cfg["OPENAI_API_URL"], cfg["OPENAI_API_KEY"], cfg["OPENAI_MODEL"])
+            if valid:
+                ok("API key is valid ✅")
+            else:
+                print(f"  {Y}⚠  NVIDIA key test failed: {msg}{RST}")
                 print(f"  {Y}⚠  Continuing anyway, but the bot may not work.{RST}")
 
     elif provider == "groq":
@@ -529,6 +564,16 @@ def run_wizard():
             "key_prompt": "Gemini API Key",
             "model_prompt": "Gemini fallback model",
             "hint": "Get key: https://aistudio.google.com/app/apikey",
+        },
+        {
+            "id": "nvidia",
+            "label": "NVIDIA NIM (Kimi/Nemotron)",
+            "key_env": "NVIDIA_API_KEY",
+            "model_env": "NVIDIA_MODEL",
+            "default_model": "moonshotai/kimi-k2-thinking",
+            "key_prompt": "NVIDIA API Key",
+            "model_prompt": "NVIDIA fallback model",
+            "hint": "Get key: https://build.nvidia.com",
         },
         {
             "id": "groq",
