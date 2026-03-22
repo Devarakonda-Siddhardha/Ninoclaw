@@ -13,8 +13,7 @@ from telegram import BotCommand
 from telegram.ext import Application
 from telegram import __version__ as ptb_version
 from config import (
-    TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, AI_PROVIDER, OLLAMA_HOST, OLLAMA_MODEL,
-    OPENAI_MODEL, OPENAI_API_URL, OPENAI_API_KEY, AGENT_NAME, USER_NAME, BOT_PURPOSE, TIMEZONE,
+    TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, AGENT_NAME, USER_NAME, BOT_PURPOSE, TIMEZONE,
     OWNER_ID
 )
 import telegram_bot as telegram_module  # Import our local telegram module
@@ -37,6 +36,8 @@ def print_banner():
 
 def check_environment():
     """Check if environment is properly configured"""
+    from config import get_runtime_ai_config
+
     print("\n🔍 Checking environment...")
 
     # Check Telegram token
@@ -48,21 +49,27 @@ def check_environment():
     else:
         print(f"✅ Telegram token configured")
 
-    # Check AI connection — detect Ollama by API key or URL
-    _is_ollama = OPENAI_API_KEY == "ollama" or "localhost:11434" in OPENAI_API_URL
+    runtime_cfg = get_runtime_ai_config()
+    primary_cfg = runtime_cfg.get("primary", {})
+    api_url = primary_cfg.get("api_url", "")
+    api_key = primary_cfg.get("api_key", "")
+    model = primary_cfg.get("model", "")
+
+    # Check AI connection — detect Ollama from the live primary config
+    _is_ollama = api_key == "ollama" or "localhost:11434" in api_url or "127.0.0.1:11434" in api_url
     if _is_ollama:
-        print(f"🔗 Checking Ollama at {OPENAI_API_URL}...")
+        print(f"🔗 Checking Ollama at {api_url}...")
         if test_connection():
-            print(f"✅ Ollama connected (model: {OPENAI_MODEL})")
+            print(f"✅ Ollama connected (model: {model})")
         else:
             print("❌ Ollama not accessible!")
             print("   Make sure Ollama is running: ollama serve")
-            print(f"   And that model is pulled: ollama pull {OPENAI_MODEL}")
+            print(f"   And that model is pulled: ollama pull {model}")
             return False
     else:
-        print(f"🔗 Checking {OPENAI_API_URL}...")
+        print(f"🔗 Checking {api_url}...")
         if test_connection():
-            print(f"✅ API connected (model: {OPENAI_MODEL})")
+            print(f"✅ API connected (model: {model})")
         else:
             print("❌ API not accessible!")
             print("   Check your OPENAI_API_KEY and OPENAI_API_URL in .env")
