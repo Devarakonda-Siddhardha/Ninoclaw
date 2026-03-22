@@ -78,6 +78,24 @@ def _vision_model_list(runtime_cfg):
         _add(cfg)
     return candidates
 
+
+def _attempt_chain(runtime_cfg, routed_cfg=None):
+    """Try the routed model first, then continue through the full fallback chain."""
+    ordered = []
+    seen = set()
+
+    def _add(cfg):
+        key = _model_key(cfg)
+        if not cfg or key in seen:
+            return
+        seen.add(key)
+        ordered.append(cfg)
+
+    _add(routed_cfg)
+    for cfg in runtime_cfg.get("models", []):
+        _add(cfg)
+    return ordered
+
 def _pick_model_cfg(message: str, runtime_cfg: dict, force_smart: bool = False, force_fast: bool = False):
     """
     Route to fast or smart model based on request complexity.
@@ -178,7 +196,7 @@ def chat(message, system_prompt=None, history=None, tools=None, image_b64=None, 
     runtime_cfg = get_runtime_ai_config()
 
     routed = _pick_model_cfg(message, runtime_cfg, force_smart=force_smart, force_fast=force_fast)
-    model_list = [routed] if routed else runtime_cfg["models"]
+    model_list = _attempt_chain(runtime_cfg, routed)
     for model_cfg in model_list:
         result, error = _try_openai(
             model_cfg, message, system_prompt, history, tools, image_b64, runtime_cfg["ollama_think"]
@@ -251,7 +269,7 @@ async def chat_stream(message, system_prompt=None, history=None):
     runtime_cfg = get_runtime_ai_config()
 
     routed = _pick_model_cfg(message, runtime_cfg)
-    model_list = [routed] if routed else runtime_cfg["models"]
+    model_list = _attempt_chain(runtime_cfg, routed)
 
     for model_cfg in model_list:
         url = f"{model_cfg['api_url']}/chat/completions"

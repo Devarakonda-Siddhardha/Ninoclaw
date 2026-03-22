@@ -87,6 +87,48 @@ def _pick_existing_url(existing: str, fallback: str, must_contain=(), any_contai
     return fallback
 
 
+def _current_primary_uses(env, *fragments):
+    """Whether the current primary endpoint looks like the requested provider."""
+    api_url = (env.get("OPENAI_API_URL") or "").strip().lower()
+    return any(fragment.lower() in api_url for fragment in fragments)
+
+
+def _sync_primary_provider(cfg, provider):
+    """Mirror the chosen primary provider into provider-specific env keys."""
+    key = cfg.get("OPENAI_API_KEY", "")
+    model = cfg.get("OPENAI_MODEL", "")
+
+    provider_map = {
+        "openrouter": ("OPENROUTER_API_KEY", "OPENROUTER_MODEL"),
+        "gemini": ("GEMINI_API_KEY", "GEMINI_MODEL"),
+        "groq": ("GROQ_API_KEY", "GROQ_MODEL"),
+        "mistral": ("MISTRAL_API_KEY", "MISTRAL_MODEL"),
+        "xai": ("XAI_API_KEY", "XAI_MODEL"),
+        "glm": ("GLM_API_KEY", "GLM_MODEL"),
+        "glm_coding": ("GLM_CODING_API_KEY", "GLM_CODING_MODEL"),
+    }
+
+    if provider in provider_map:
+        key_env, model_env = provider_map[provider]
+        if key_env:
+            cfg[key_env] = key
+        if model_env:
+            cfg[model_env] = model
+
+    if provider == "ollama":
+        api_url = (cfg.get("OPENAI_API_URL") or "http://localhost:11434/v1").rstrip("/")
+        cfg["OLLAMA_HOST"] = api_url[:-3] if api_url.endswith("/v1") else api_url
+        cfg["OLLAMA_MODEL"] = model
+
+
+def _choice_default_index(options, current_value, fallback=0):
+    current_value = (current_value or "").strip().lower()
+    for idx, (_, value) in enumerate(options):
+        if str(value).strip().lower() == current_value:
+            return idx
+    return fallback
+
+
 def choose(prompt, options, default=0):
     """Arrow-key menu. options = list of (label, value)."""
     idx = default
@@ -339,7 +381,10 @@ def run_wizard():
 
     elif provider == "gemini":
         info("Get key: https://aistudio.google.com/app/apikey")
-        gemini_api_key = ask("Gemini API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        key_default = e.get("GEMINI_API_KEY") or (
+            e.get("OPENAI_API_KEY") if _current_primary_uses(e, "generativelanguage.googleapis.com") else ""
+        )
+        gemini_api_key = ask("Gemini API Key", default=key_default, secret=True) or ""
         cfg["OPENAI_API_URL"] = "https://generativelanguage.googleapis.com/v1beta/openai"
         cfg["OPENAI_API_KEY"] = gemini_api_key
 
@@ -354,7 +399,16 @@ def run_wizard():
             ("gemini-1.5-pro-preview-0514", "gemini-1.5-pro-preview-0514"),
             ("gemini-1.5-flash-preview-0514", "gemini-1.5-flash-preview-0514"),
         ]
-        cfg["OPENAI_MODEL"] = choose("Select Gemini model", gemini_models, default=0)
+        default_gemini_model = e.get("GEMINI_MODEL") or (
+            e.get("OPENAI_MODEL") if _current_primary_uses(e, "generativelanguage.googleapis.com") else ""
+        )
+        cfg["OPENAI_MODEL"] = choose(
+            "Select Gemini model",
+            gemini_models,
+            default=_choice_default_index(gemini_models, default_gemini_model, fallback=0),
+        )
+        cfg["GEMINI_API_KEY"] = gemini_api_key
+        cfg["GEMINI_MODEL"] = cfg["OPENAI_MODEL"]
 
         # Test the API key
         if gemini_api_key and gemini_api_key != "your-api-key-here":
@@ -423,7 +477,12 @@ def run_wizard():
         )
         info(f"Using endpoint: {cfg['OPENAI_API_URL']}  (preloaded)")
         cfg["OPENAI_API_KEY"] = "ollama"
-        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "llama3.2")) or ""
+        cfg["OPENAI_MODEL"] = ask(
+            "Model",
+            default=e.get("OPENAI_MODEL") or e.get("OLLAMA_MODEL") or "llama3.2"
+        ) or ""
+        cfg["OLLAMA_HOST"] = cfg["OPENAI_API_URL"].rsplit("/v1", 1)[0]
+        cfg["OLLAMA_MODEL"] = cfg["OPENAI_MODEL"]
 
     elif provider == "local":
         info("Make sure your local server is running (e.g. llama-server -hf ... --port 8000)")
@@ -442,6 +501,7 @@ def run_wizard():
         cfg["OPENAI_API_KEY"] = ask("API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
         cfg["OPENAI_MODEL"]   = ask("Model name", default=e.get("OPENAI_MODEL")) or ""
 
+    _sync_primary_provider(cfg, provider)
     ok(f"Provider: {provider}  |  Model: {cfg['OPENAI_MODEL']}")
 
     # ── 3. Fallback providers ─────────────────────────────────────────────────
@@ -459,6 +519,16 @@ def run_wizard():
             "key_prompt": "OpenRouter API Key",
             "model_prompt": "OpenRouter model",
             "hint": "Get key: https://openrouter.ai/keys",
+        },
+        {
+            "id": "gemini",
+            "label": "Google Gemini",
+            "key_env": "GEMINI_API_KEY",
+            "model_env": "GEMINI_MODEL",
+            "default_model": "gemini-3-flash-preview",
+            "key_prompt": "Gemini API Key",
+            "model_prompt": "Gemini fallback model",
+            "hint": "Get key: https://aistudio.google.com/app/apikey",
         },
         {
             "id": "groq",
@@ -519,6 +589,7 @@ def run_wizard():
             "key_prompt": "",
             "model_prompt": "Ollama fallback model",
             "hint": "Run local server first: ollama serve",
+            "extra_envs": ["OLLAMA_HOST"],
         },
     ]
 
@@ -598,6 +669,8 @@ def run_wizard():
             cfg.pop(spec["key_env"], None)
         if spec["model_env"]:
             cfg.pop(spec["model_env"], None)
+        for extra_env in spec.get("extra_envs", []):
+            cfg.pop(extra_env, None)
 
     # Ask credentials/models only for selected fallback providers.
     fallback_spec_by_id = {s["id"]: s for s in fallback_specs}
