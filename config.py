@@ -86,6 +86,7 @@ GOOGLE_CREDENTIALS_JSON = _env("GOOGLE_CREDENTIALS_JSON", "")
 GOOGLE_CALENDAR_ID = _env("GOOGLE_CALENDAR_ID", "primary")
 HF_TOKEN = _env("HF_TOKEN", "")  # HuggingFace - image generation (FLUX.1-schnell, free)
 GEMINI_API_KEY = _env("GEMINI_API_KEY", "")  # Google Gemini - image generation fallback
+NVIDIA_API_KEY = _env("NVIDIA_API_KEY", "")  # NVIDIA NIM / build.nvidia.com - trial API access
 
 
 def _provider(url, key_env, model_env, default_model=None, env=None):
@@ -98,7 +99,6 @@ def _provider(url, key_env, model_env, default_model=None, env=None):
 def _model_identity(model_cfg):
     return (
         (model_cfg or {}).get("api_url", ""),
-        (model_cfg or {}).get("api_key", ""),
         (model_cfg or {}).get("model", ""),
     )
 
@@ -123,6 +123,7 @@ def build_model_chain(env=None):
         _provider("https://api.z.ai/api/coding/paas/v4", "GLM_CODING_API_KEY", "GLM_CODING_MODEL", "glm-4.7", env=env),
         # Google Gemini — free tier, multimodal
         _provider("https://generativelanguage.googleapis.com/v1beta/openai", "GEMINI_API_KEY", "GEMINI_MODEL", "gemini-3-flash-preview", env=env),
+        _provider("https://integrate.api.nvidia.com/v1", "NVIDIA_API_KEY", "NVIDIA_MODEL", "moonshotai/kimi-k2-thinking", env=env),
         _provider("https://api.minimax.chat/v1", "MINIMAX_API_KEY", "MINIMAX_MODEL", "MiniMax-Text-01", env=env),
         _provider("https://api.together.xyz/v1", "TOGETHER_API_KEY", "TOGETHER_MODEL", "meta-llama/Llama-3-70b-chat-hf", env=env),
         _provider("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "openai/gpt-4o-mini", env=env),

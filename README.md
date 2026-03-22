@@ -52,6 +52,7 @@ Ninoclaw is no longer just a Telegram bot. The current project includes:
 ### AI routing
 
 - OpenAI-compatible providers
+- OpenAI-compatible providers, including Gemini, Groq, OpenRouter, NVIDIA NIM, and local-compatible endpoints
 - fallback model chain via `MODELS_JSON`
 - fast/smart model routing via `FAST_MODEL` and `SMART_MODEL`
 - optional local Ollama path
