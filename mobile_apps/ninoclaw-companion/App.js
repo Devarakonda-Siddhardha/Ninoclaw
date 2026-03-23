@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Network from 'expo-network';
 import {
   ActivityIndicator,
   Alert,
@@ -86,6 +87,43 @@ function inferDashboardUrl() {
   return `http://${match[1]}:8080`;
 }
 
+function extractIpv4Host(url) {
+  const match = normalizeBaseUrl(url).match(/^https?:\/\/(\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?$/i);
+  return match ? match[1] : '';
+}
+
+function subnetCandidates(host) {
+  if (!host || !/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
+    return [];
+  }
+  const parts = host.split('.');
+  const prefix = parts.slice(0, 3).join('.');
+  const preferred = Number(parts[3]);
+  const ips = [];
+  for (let i = 1; i <= 254; i += 1) {
+    if (i === preferred) {
+      continue;
+    }
+    ips.push(`${prefix}.${i}`);
+  }
+  return [`${prefix}.${preferred}`, ...ips];
+}
+
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 900) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || `Request failed: ${response.status}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function MetricCard({ label, value, tone }) {
   const toneStyle =
     tone === 'cyan'
@@ -123,7 +161,19 @@ function EmptyState({ title, body }) {
   );
 }
 
-function ConnectionGate({ baseUrl, password, userId, onChange, onReload, loading, error, detectedUrl, lastSyncedAt }) {
+function ConnectionGate({
+  baseUrl,
+  password,
+  userId,
+  onChange,
+  onReload,
+  onAutoDetect,
+  loading,
+  detecting,
+  error,
+  detectedUrl,
+  lastSyncedAt,
+}) {
   return (
     <View style={styles.panel}>
       <View style={styles.connectionHero}>
@@ -168,6 +218,16 @@ function ConnectionGate({ baseUrl, password, userId, onChange, onReload, loading
       />
 
       {!!error && <Text style={styles.errorText}>{error}</Text>}
+
+      <TouchableOpacity
+        style={[styles.secondaryButton, detecting && styles.buttonDisabled, { marginBottom: 10 }]}
+        onPress={onAutoDetect}
+        disabled={loading || detecting}
+      >
+        <Text style={styles.secondaryButtonText}>
+          {detecting ? 'Scanning local network...' : 'Auto-detect on LAN'}
+        </Text>
+      </TouchableOpacity>
 
       <TouchableOpacity style={styles.primaryButton} onPress={onReload} disabled={loading}>
         <Text style={styles.primaryButtonText}>{loading ? 'Connecting...' : 'Load live data'}</Text>
@@ -731,6 +791,7 @@ export default function App() {
   const [modelPrimary, setModelPrimary] = useState('');
   const [modelFast, setModelFast] = useState('');
   const [modelSmart, setModelSmart] = useState('');
+  const [detectingDashboard, setDetectingDashboard] = useState(false);
 
   const headers = useMemo(
     () => ({
@@ -807,6 +868,62 @@ export default function App() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  }
+
+  async function autoDetectDashboard() {
+    setDetectingDashboard(true);
+    setError('');
+    setSuccess('');
+    try {
+      const inferredUrl = inferDashboardUrl();
+      const currentHost = extractIpv4Host(baseUrl) || extractIpv4Host(inferredUrl);
+      let deviceIp = '';
+      try {
+        deviceIp = await Network.getIpAddressAsync();
+      } catch (_networkError) {
+      }
+      const hostSeed = extractIpv4Host(`http://${deviceIp}:8080`) || currentHost;
+      if (!hostSeed) {
+        throw new Error('Could not infer your LAN subnet. Enter the PC IP once, then auto-detect will work from there.');
+      }
+
+      const candidates = subnetCandidates(hostSeed);
+      if (!candidates.length) {
+        throw new Error('Could not build LAN scan candidates from the current network.');
+      }
+
+      const batchSize = 18;
+      let found = null;
+      for (let i = 0; i < candidates.length && !found; i += batchSize) {
+        const batch = candidates.slice(i, i + batchSize);
+        const results = await Promise.all(
+          batch.map(async (host) => {
+            const url = `http://${host}:8080/api/mobile/discover`;
+            try {
+              const data = await fetchJsonWithTimeout(url, { method: 'GET' }, 800);
+              if (data?.ok && data?.service === 'ninoclaw') {
+                return { host, data };
+              }
+            } catch (_scanError) {
+            }
+            return null;
+          })
+        );
+        found = results.find(Boolean) || null;
+      }
+
+      if (!found) {
+        throw new Error('No Ninoclaw dashboard found on this LAN subnet.');
+      }
+
+      const discoveredBaseUrl = `http://${found.host}:${found.data.port || 8080}`;
+      setBaseUrl(discoveredBaseUrl);
+      showSuccess(`Found ${found.data.agent_name || 'Ninoclaw'} at ${discoveredBaseUrl}`);
+    } catch (scanError) {
+      setError(scanError.message || 'Failed to auto-detect dashboard.');
+    } finally {
+      setDetectingDashboard(false);
     }
   }
 
@@ -1112,8 +1229,12 @@ export default function App() {
             if (field === 'userId') setUserId(value);
           }}
           onReload={() => loadAll(true)}
+          onAutoDetect={autoDetectDashboard}
           loading={loading}
+          detecting={detectingDashboard}
           error={error}
+          detectedUrl={inferDashboardUrl()}
+          lastSyncedAt={lastSyncedAt}
         />
       );
     }
@@ -1179,7 +1300,9 @@ export default function App() {
               if (field === 'userId') setUserId(value);
             }}
             onReload={() => loadAll(true)}
+            onAutoDetect={autoDetectDashboard}
             loading={loading}
+            detecting={detectingDashboard}
             settingsData={settingsData}
             runtimeHealth={runtimeHealth}
             overview={overview}

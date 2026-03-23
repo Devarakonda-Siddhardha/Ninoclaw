@@ -237,6 +237,20 @@ def _settings_payload():
     }
 
 
+def _mobile_discovery_payload():
+    env = get_env()
+    port = env.get("DASHBOARD_PORT", "8080")
+    return {
+        "ok": True,
+        "service": "ninoclaw",
+        "agent_name": env.get("AGENT_NAME", "Ninoclaw"),
+        "device_name": platform.node() or "unknown-device",
+        "port": int(port) if str(port).isdigit() else 8080,
+        "version": git_version(),
+        "requires_password": True,
+    }
+
+
 def _runtime_health_payload():
     def tool_info(command, args=None):
         path = shutil.which(command)
@@ -682,6 +696,11 @@ def overview_page():
 @require_mobile_api
 def api_mobile_overview():
     return jsonify(_overview_payload())
+
+
+@app.route("/api/mobile/discover")
+def api_mobile_discover():
+    return jsonify(_mobile_discovery_payload())
 
 
 @app.route("/config", methods=["GET", "POST"])
