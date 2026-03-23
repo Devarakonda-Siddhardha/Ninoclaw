@@ -19,4 +19,6 @@ mobile_apps/clicker_game/
 websites/
 
 mobile_apps/
+!mobile_apps/ninoclaw-companion/
+!mobile_apps/ninoclaw-companion/**
 
