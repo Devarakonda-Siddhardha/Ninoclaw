@@ -7,6 +7,7 @@ from typing import Dict, Any
 import asyncio
 import os
 import subprocess
+import json
 from dotenv import load_dotenv
 from run_traces import increment_run_counter, log_event
 
@@ -350,7 +351,9 @@ _BUILTIN_TOOLS = [
             "description": (
                 "Invoke Claude Code CLI for advanced programming, project-wide refactoring, "
                 "or deep analysis. ONLY use this when the user explicitly asks for 'Claude Code'. "
-                "For regular coding or single file tasks, use write_file or run_agent coder instead."
+                "For regular coding or single file tasks, use write_file or run_agent coder instead. "
+                "This tool can run in continuous multi-pass mode, resuming the same Claude Code session "
+                "until the task is done, blocked, or a pass limit is reached."
             ),
             "parameters": {
                 "type": "object",
@@ -362,6 +365,10 @@ _BUILTIN_TOOLS = [
                     "visible": {
                         "type": "boolean",
                         "description": "Set to true to launch in a new visible terminal window on the host PC so you can watch Claude Code work."
+                    },
+                    "max_passes": {
+                        "type": "integer",
+                        "description": "How many resume/continue passes Claude Code may use before stopping. Default 4."
                     }
                 },
                 "required": ["task"]
@@ -400,6 +407,69 @@ _OWNER_ONLY_SKILL_TOOLS = {
 }
 
 
+
+def _claude_status_from_text(text: str) -> str:
+    text_upper = (text or "").upper()
+    if "STATUS: DONE" in text_upper:
+        return "DONE"
+    if "STATUS: BLOCKED" in text_upper:
+        return "BLOCKED"
+    if "STATUS: NEEDS_MORE_WORK" in text_upper:
+        return "NEEDS_MORE_WORK"
+    return "UNKNOWN"
+
+
+async def _run_claude_code_pass(args, timeout):
+    process = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env={**os.environ, "HOME": os.path.expanduser("~")},
+    )
+
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except asyncio.TimeoutExpired:
+        process.kill()
+        await process.communicate()
+        return None, "", f"Claude Code timed out after {timeout}s"
+
+    raw_out = stdout.decode(errors="replace").strip()
+    raw_err = stderr.decode(errors="replace").strip()
+    if process.returncode != 0 and not raw_out:
+        return None, raw_err, f"Claude Code exited with code {process.returncode}"
+
+    payload = None
+    if raw_out:
+        try:
+            payload = json.loads(raw_out)
+        except json.JSONDecodeError:
+            payload = None
+    return payload, raw_err, None
+
+
+def _claude_visible_windows_command(task_desc: str, repo_dir: str, max_passes: int) -> str:
+    task_json = json.dumps(task_desc)
+    repo_json = json.dumps(repo_dir)
+    loop_json = json.dumps(
+        "Continue working on the same task. If it is fully finished, end with STATUS: DONE. "
+        "If you are blocked and need human input, end with STATUS: BLOCKED and say why. "
+        "Otherwise end with STATUS: NEEDS_MORE_WORK and keep progressing."
+    )
+    script = (
+        f"$task = {task_json}; "
+        f"$repo = {repo_json}; "
+        f"$nextPrompt = {loop_json}; "
+        f"$passes = {max_passes}; "
+        f"Write-Host 'Starting Claude Code continuous mode...' -ForegroundColor Cyan; "
+        f"claude -p --output-format text --max-turns 8 --cwd $repo $task; "
+        f"for ($i=1; $i -lt $passes; $i++) {{ "
+        f"Write-Host \"`n--- Claude continue pass $($i+1)/$passes ---\" -ForegroundColor Yellow; "
+        f"claude --continue -p --output-format text --max-turns 6 --cwd $repo $nextPrompt "
+        f"}}"
+    )
+    escaped = script.replace('"', '`"')
+    return f'start "Claude Code Expert" powershell -NoExit -Command "{escaped}"'
 def _tool_requires_owner(tool_name: str) -> bool:
     return tool_name in _OWNER_ONLY_TOOLS or tool_name in _OWNER_ONLY_SKILL_TOOLS
 
@@ -818,6 +888,118 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         except Exception as e:
             return f"❌ Sub-agent failed: {e}"
 
+
+    if tool_name == "claude_code":
+        err = require_owner(user_id)
+        if err:
+            return err
+
+        task_desc = arguments.get("task", "").strip()
+        visible = str(arguments.get("visible", "")).lower() == "true"
+        max_passes = max(1, min(int(arguments.get("max_passes", 4) or 4), 8))
+        repo_dir = os.path.dirname(__file__)
+        status_instructions = (
+            "Work on this task continuously and do not stop after one pass if more work remains. "
+            "End every response with exactly one of these markers on its own line: "
+            "STATUS: DONE, STATUS: NEEDS_MORE_WORK, or STATUS: BLOCKED."
+        )
+        initial_prompt = f"{task_desc}\n\n{status_instructions}"
+        continue_prompt = (
+            "Continue working on the same task. Use the existing session context and keep making progress. "
+            "If fully finished, end with STATUS: DONE. "
+            "If blocked and need human input, end with STATUS: BLOCKED and explain briefly. "
+            "Otherwise end with STATUS: NEEDS_MORE_WORK."
+        )
+
+        if not task_desc:
+            return "❌ No task provided for Claude Code."
+
+        if visible:
+            try:
+                if os.name == 'nt':
+                    subprocess.Popen(_claude_visible_windows_command(task_desc, repo_dir, max_passes), shell=True)
+                    return (
+                        f"✅ Claude Code launched in a visible continuous session window "
+                        f"(up to {max_passes} passes). You can watch it iterate there."
+                    )
+                elif os.uname().sysname == 'Darwin':
+                    subprocess.Popen([
+                        'osascript',
+                        '-e',
+                        (
+                            'tell application "Terminal" to do script '
+                            f'"cd {repo_dir} && claude -p {json.dumps(initial_prompt)}"'
+                        )
+                    ])
+                    return "✅ Claude Code launched in a new visible terminal window."
+                else:
+                    from shutil import which
+                    if which('x-terminal-emulator'):
+                        subprocess.Popen(
+                            f'x-terminal-emulator -e "bash -lc \'cd {repo_dir} && claude -p {json.dumps(initial_prompt)}; exec bash\'"',
+                            shell=True
+                        )
+                        return "✅ Claude Code launched in a new visible terminal window."
+            except Exception as e:
+                return f"⚠️ Failed to launch visible terminal: {e}. Executing invisibly instead..."
+
+        try:
+            pass_summaries = []
+            session_id = None
+            last_status = "UNKNOWN"
+
+            for pass_idx in range(max_passes):
+                if session_id:
+                    args = [
+                        "claude", "--resume", session_id,
+                        "-p", continue_prompt,
+                        "--output-format", "json",
+                        "--max-turns", "6",
+                        "--cwd", repo_dir,
+                    ]
+                else:
+                    args = [
+                        "claude",
+                        "-p", initial_prompt,
+                        "--output-format", "json",
+                        "--max-turns", "8",
+                        "--cwd", repo_dir,
+                    ]
+
+                payload, err_out, run_error = await _run_claude_code_pass(args, timeout=900)
+                if run_error:
+                    return f"❌ Claude Code execution failed on pass {pass_idx + 1}: {run_error}\n\n{err_out[:1000]}"
+
+                result_text = ""
+                if isinstance(payload, dict):
+                    result_text = str(payload.get("result", "")).strip()
+                    session_id = payload.get("session_id") or session_id
+                if not result_text and err_out:
+                    result_text = err_out
+
+                last_status = _claude_status_from_text(result_text)
+                short_result = result_text[:1800] if result_text else "_(no output)_"
+                pass_summaries.append(
+                    f"**Pass {pass_idx + 1}** - {last_status}\n```\n{short_result}\n```"
+                )
+
+                if last_status in {"DONE", "BLOCKED"}:
+                    break
+
+            summary = [
+                f"🤖 **Claude Code Continuous Result for:** {task_desc}",
+                f"Status: **{last_status}**",
+                f"Passes used: **{len(pass_summaries)} / {max_passes}**",
+            ]
+            if session_id:
+                summary.append(f"Session: `{session_id}`")
+            summary.extend(pass_summaries[:4])
+            if len(pass_summaries) > 4:
+                summary.append(f"... plus {len(pass_summaries) - 4} more pass(es)")
+
+            return "\n".join(summary)
+        except Exception as e:
+            return f"❌ Claude Code execution failed: {e}"
     _SYS_TOOLS = {"run_command", "read_file", "write_file", "list_dir", "rename_path"}
     if tool_name in _SYS_TOOLS:
         err = require_owner(user_id)
@@ -1113,6 +1295,8 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         return f"❌ Skill error ({tool_name}): {e}\n\nTraceback:\n{tb}"
 
     return f"Unknown tool: {tool_name}"
+
+
 
 
 

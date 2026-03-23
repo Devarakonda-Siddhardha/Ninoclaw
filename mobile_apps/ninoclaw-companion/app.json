@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Ninoclaw Companion",
+    "slug": "ninoclaw-companion",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/app_icon.png",
+    "splash": {
+      "image": "./assets/mascot.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#07111f"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.ninoclaw.companion",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/app_icon.png",
+        "backgroundColor": "#07111f"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.ninoclaw.companion"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

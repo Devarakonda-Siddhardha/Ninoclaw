@@ -3,6 +3,8 @@ Ninoclaw CLI — command line interface for managing the assistant
 """
 import os
 import sys
+import subprocess
+import shutil
 
 # Load .env before anything else
 from dotenv import load_dotenv
@@ -36,6 +38,8 @@ HELP = f"""
     {DIM}clear [user_id]{RST}    Clear chat history (all users or specific)
     {DIM}stats{RST}             Show memory usage stats
   {G}dashboard{RST}          Start the web dashboard (default port 8080)
+  {G}health{RST}             Check Python, Node, Expo, Ollama, and local environment
+  {G}fixenv{RST}             Install/repair common local dependencies for this repo
   {G}model{RST}              Show or change the AI model
     {DIM}ninoclaw model{RST}          Show current model
     {DIM}ninoclaw model <name>{RST}   Switch to a different model
@@ -64,9 +68,153 @@ HELP = f"""
   {DIM}ninoclaw memory stats{RST}       Show how much is stored
 """
 
+REPO_DIR = os.path.dirname(__file__)
+REQUIREMENTS_FILE = os.path.join(REPO_DIR, "requirements.txt")
+REQUIREMENTS_STAMP = os.path.join(REPO_DIR, ".requirements.installed")
+
+
+def _requirements_stamp_value():
+    try:
+        return str(int(os.path.getmtime(REQUIREMENTS_FILE)))
+    except OSError:
+        return None
+
+
+def ensure_requirements_installed():
+    """Install Python dependencies when requirements.txt is new or changed."""
+    if not os.path.exists(REQUIREMENTS_FILE):
+        return True
+
+    expected = _requirements_stamp_value()
+    current = None
+    if os.path.exists(REQUIREMENTS_STAMP):
+        try:
+            with open(REQUIREMENTS_STAMP, "r", encoding="utf-8") as f:
+                current = f.read().strip()
+        except OSError:
+            current = None
+
+    if expected and current == expected:
+        return True
+
+    print(f"{C}Installing Python dependencies from requirements.txt...{RST}")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-r", REQUIREMENTS_FILE],
+        cwd=REPO_DIR,
+    )
+    if result.returncode != 0:
+        print(f"{R}Failed to install requirements.txt dependencies.{RST}")
+        return False
+
+    try:
+        with open(REQUIREMENTS_STAMP, "w", encoding="utf-8") as f:
+            f.write(expected or "installed")
+    except OSError:
+        pass
+
+    print(f"{G}Dependencies are ready.{RST}\n")
+    return True
+
+
+def _tool_ok(command, args=None):
+    args = args or ["--version"]
+    path = shutil.which(command)
+    if not path:
+        return False, "not found"
+    try:
+        result = subprocess.run([command, *args], cwd=REPO_DIR, capture_output=True, text=True, timeout=15)
+        output = (result.stdout or result.stderr or "").strip().splitlines()
+        summary = output[0] if output else path
+        return result.returncode == 0, summary
+    except Exception as exc:
+        return False, str(exc)
+
+
+def collect_environment_health():
+    checks = []
+    venv_python = os.path.join(REPO_DIR, ".venv", "Scripts", "python.exe")
+    checks.append(("Repo Python", os.path.exists(venv_python), venv_python if os.path.exists(venv_python) else "missing .venv\\Scripts\\python.exe"))
+
+    python_ok, python_info = _tool_ok("py", ["-V"])
+    checks.append(("Windows Python launcher", python_ok, python_info))
+
+    node_ok, node_info = _tool_ok("node")
+    checks.append(("Node.js", node_ok, node_info))
+
+    npx_ok, npx_info = _tool_ok("npx", ["expo", "--version"])
+    checks.append(("Expo CLI via npx", npx_ok, npx_info))
+
+    git_ok, git_info = _tool_ok("git")
+    checks.append(("Git", git_ok, git_info))
+
+    ollama_ok, ollama_info = _tool_ok("ollama")
+    checks.append(("Ollama", ollama_ok, ollama_info))
+
+    dashboard_db = os.path.exists(os.path.join(REPO_DIR, "ninoclaw.db"))
+    checks.append(("Database file", dashboard_db, "ninoclaw.db present" if dashboard_db else "will be created on first run"))
+
+    app_dir = os.path.join(REPO_DIR, "mobile_apps", "ninoclaw-companion")
+    package_ok = os.path.exists(os.path.join(app_dir, "package.json"))
+    node_modules_ok = os.path.exists(os.path.join(app_dir, "node_modules"))
+    checks.append(("Mobile app package", package_ok, "package.json present" if package_ok else "mobile app missing"))
+    checks.append(("Mobile app deps", node_modules_ok, "node_modules present" if node_modules_ok else "run ninoclaw fixenv"))
+    return checks
+
+
+def cmd_health():
+    """Check common local prerequisites and runtime environment."""
+    print(f"\n{C}Environment Health{RST}")
+    print(f"{DIM}{'-' * 40}{RST}")
+    failed = 0
+    for label, ok_state, detail in collect_environment_health():
+        mark = f"{G}OK{RST}" if ok_state else f"{R}MISS{RST}"
+        if not ok_state:
+            failed += 1
+        print(f"  {label:<24} {mark}  {DIM}{detail}{RST}")
+
+    if failed:
+        print(f"\n{Y}Run {W}ninoclaw fixenv{Y} to install common dependencies for this repo.{RST}\n")
+    else:
+        print(f"\n{G}Everything important looks ready.{RST}\n")
+
+
+def cmd_fixenv():
+    """Repair common repo-local dependencies."""
+    print(f"\n{C}Fix Environment{RST}")
+    print(f"{DIM}{'-' * 40}{RST}")
+
+    ok = ensure_requirements_installed()
+    if not ok:
+        print(f"{R}Python dependency install failed. Fix that first, then rerun fixenv.{RST}\n")
+        return
+
+    app_dir = os.path.join(REPO_DIR, "mobile_apps", "ninoclaw-companion")
+    package_json = os.path.join(app_dir, "package.json")
+    if os.path.exists(package_json):
+        node_ok, _ = _tool_ok("node")
+        npm_ok, _ = _tool_ok("npm")
+        if node_ok and npm_ok:
+            print(f"{C}Installing mobile app dependencies...{RST}")
+            result = subprocess.run(["npm", "install"], cwd=app_dir)
+            if result.returncode == 0:
+                print(f"{G}Mobile app dependencies are ready.{RST}")
+            else:
+                print(f"{Y}Mobile app dependency install failed. Check Node/npm and retry.{RST}")
+        else:
+            print(f"{Y}Skipping mobile app dependency install because Node/npm is missing.{RST}")
+
+    print(f"\n{C}Post-fix health check:{RST}")
+    for label, ok_state, detail in collect_environment_health():
+        mark = f"{G}OK{RST}" if ok_state else f"{R}MISS{RST}"
+        print(f"  {label:<24} {mark}  {DIM}{detail}{RST}")
+    print()
+
 
 def cmd_start():
     """Start the Ninoclaw bot"""
+    if not ensure_requirements_installed():
+        sys.exit(1)
+
     from wizard import needs_setup, run_wizard
     if needs_setup():
         print(f"{Y}⚠  No config found — running setup wizard first...{RST}\n")
@@ -80,9 +228,13 @@ def cmd_start():
 
 def cmd_setup():
     """Run setup wizard"""
+    if not ensure_requirements_installed():
+        sys.exit(1)
+
     from wizard import run_wizard
     run_wizard()
-    print(f"{G}✔  Setup complete. Run {W}ninoclaw start{G} to launch.{RST}\n")
+    print(f"{G}✔  Setup complete. Run {W}ninoclaw start{G} to launch.{RST}")
+    cmd_health()
 
 
 def cmd_reset():
@@ -102,7 +254,15 @@ def cmd_reset():
 def cmd_status():
     """Show current config status"""
     from wizard import load_existing_env
+    from config import build_model_chain
     env = load_existing_env()
+    model_chain = build_model_chain(env)
+    fallback_models = [cfg.get("model", "") for cfg in model_chain[1:] if cfg.get("model")]
+    fallback_label = ", ".join(fallback_models[:3])
+    if len(fallback_models) > 3:
+        fallback_label += f" {DIM}(+{len(fallback_models) - 3} more){RST}"
+    elif not fallback_label:
+        fallback_label = f"{DIM}None{RST}"
 
     def masked(val):
         if not val or len(val) < 8:
@@ -119,7 +279,7 @@ def cmd_status():
   {W}Primary Model{RST}    {G}{env.get('OPENAI_MODEL', 'Not set')}{RST}
   {W}API Key{RST}          {masked(env.get('OPENAI_API_KEY'))}
   {W}API URL{RST}          {DIM}{env.get('OPENAI_API_URL', 'Not set')}{RST}
-  {W}Fallback Model{RST}   {env.get('FALLBACK_MODEL') or f'{DIM}None{RST}'}
+  {W}Fallback Chain{RST}   {fallback_label}
   {W}Web Search{RST}       {checkmark(env.get('SERPER_API_KEY'))}
   {W}Owner ID{RST}         {env.get('OWNER_ID') or f'{Y}Not set (open){RST}'}
 {DIM}{'─'*40}{RST}""")
@@ -593,6 +753,10 @@ def main():
         cmd_update()
     elif cmd == "dashboard":
         cmd_dashboard()
+    elif cmd == "health":
+        cmd_health()
+    elif cmd == "fixenv":
+        cmd_fixenv()
     elif cmd == "model":
         cmd_model(args[1:])
     elif cmd == "think":
