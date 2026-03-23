@@ -2,6 +2,10 @@
 
 Personal AI assistant with Telegram chat, a local dashboard, memory/tasks, tool use, website generation, and React Native Expo app generation.
 
+<p align="center">
+  <img src="./assets/mascot.png" alt="Ninoclaw mascot" width="220" />
+</p>
+
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://python.org)
 [![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?logo=telegram)](https://telegram.org)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
@@ -13,6 +17,7 @@ Ninoclaw is no longer just a Telegram bot. The current project includes:
 
 - Telegram bot interface
 - local Flask dashboard
+- React Native Expo mobile companion app
 - SQLite-backed memory and task scheduling
 - model fallback and fast/smart routing
 - plugin-style skills
@@ -27,6 +32,7 @@ Ninoclaw is no longer just a Telegram bot. The current project includes:
 - Model changes from the dashboard apply to new requests without restarting
 - Web chat and Telegram both use the tool-capable agent path
 - Expo apps can be created, started, listed, stopped, and deleted from chat or dashboard
+- Expo mobile companion app can connect to the dashboard, send live chat messages, view tasks/builds, and control Expo apps
 - Mobile Apps dashboard page shows Expo Go links, web preview links, and QR codes
 - Plugin and skill toggles can hot-reload for new requests
 - Capability detection auto-hides unsupported tools on constrained or incompatible devices
@@ -46,6 +52,7 @@ Ninoclaw is no longer just a Telegram bot. The current project includes:
 ### AI routing
 
 - OpenAI-compatible providers
+- OpenAI-compatible providers, including Gemini, Groq, OpenRouter, NVIDIA NIM, and local-compatible endpoints
 - fallback model chain via `MODELS_JSON`
 - fast/smart model routing via `FAST_MODEL` and `SMART_MODEL`
 - optional local Ollama path
@@ -66,6 +73,15 @@ Ninoclaw is no longer just a Telegram bot. The current project includes:
 - tasks and cron management
 - builds page
 - mobile apps page
+
+### Mobile companion
+
+- dashboard-backed live chat on mobile
+- tasks and cron visibility
+- website and Expo app status views
+- Expo app start/stop controls
+- persisted dashboard connection settings
+- branded app icon, splash, and mascot visuals
 
 ## Architecture
 
@@ -89,6 +105,13 @@ Important skill files:
 - [skills/expo_builder.py](./skills/expo_builder.py)
 - [skills/image_gen.py](./skills/image_gen.py)
 
+Mobile companion app:
+
+- [mobile_apps/ninoclaw-companion/App.js](./mobile_apps/ninoclaw-companion/App.js)
+- [mobile_apps/ninoclaw-companion/app.json](./mobile_apps/ninoclaw-companion/app.json)
+- [assets/app_icon.png](./assets/app_icon.png)
+- [assets/mascot.png](./assets/mascot.png)
+
 ## Quick Start
 
 ### Windows
@@ -96,7 +119,6 @@ Important skill files:
 ```powershell
 git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
 cd Ninoclaw
-pip install -r requirements.txt
 .\ninoclaw setup
 .\ninoclaw start
 ```
@@ -106,10 +128,11 @@ pip install -r requirements.txt
 ```bash
 git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
 cd Ninoclaw
-pip install -r requirements.txt
 ./ninoclaw setup
 ./ninoclaw start
 ```
+
+`setup` and `start` now auto-install Python dependencies from `requirements.txt` when needed. If you change `requirements.txt` later, the next `setup` or `start` run will refresh them automatically.
 
 You can also run the core process directly:
 
@@ -201,6 +224,13 @@ Expo previews:
 - `Build me a React Native Expo app called habit-tracker and return the preview link`
 - `Create a mobile to-do app in Expo and start it`
 - `Update the todos app UI and restart Expo`
+
+### Mobile companion app
+
+- `cd mobile_apps/ninoclaw-companion`
+- `npm install`
+- `npx expo start -c`
+- Enter your dashboard LAN URL, `DASHBOARD_PASSWORD`, and a mobile user id inside the app
 
 ## Configuration
 
@@ -312,6 +342,8 @@ Suggested current captures:
 - models page
 - builds page
 - mobile apps page
+- mobile companion app chat tab
+- mobile companion app builds tab
 - Telegram Expo reply
 - Telegram image-to-website flow
 
@@ -341,6 +373,9 @@ PRs are welcome. If you change runtime behavior, keep the README aligned with:
 - platform support
 - security behavior
 - builder workflows
+
+Please avoid committing personal, celebrity-themed, or one-off generated demo content to the main repo.
+Keep tracked examples generic and product-related unless a sample is intentionally part of the project.
 
 ## License
 

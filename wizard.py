@@ -87,6 +87,49 @@ def _pick_existing_url(existing: str, fallback: str, must_contain=(), any_contai
     return fallback
 
 
+def _current_primary_uses(env, *fragments):
+    """Whether the current primary endpoint looks like the requested provider."""
+    api_url = (env.get("OPENAI_API_URL") or "").strip().lower()
+    return any(fragment.lower() in api_url for fragment in fragments)
+
+
+def _sync_primary_provider(cfg, provider):
+    """Mirror the chosen primary provider into provider-specific env keys."""
+    key = cfg.get("OPENAI_API_KEY", "")
+    model = cfg.get("OPENAI_MODEL", "")
+
+    provider_map = {
+        "openrouter": ("OPENROUTER_API_KEY", "OPENROUTER_MODEL"),
+        "gemini": ("GEMINI_API_KEY", "GEMINI_MODEL"),
+        "nvidia": ("NVIDIA_API_KEY", "NVIDIA_MODEL"),
+        "groq": ("GROQ_API_KEY", "GROQ_MODEL"),
+        "mistral": ("MISTRAL_API_KEY", "MISTRAL_MODEL"),
+        "xai": ("XAI_API_KEY", "XAI_MODEL"),
+        "glm": ("GLM_API_KEY", "GLM_MODEL"),
+        "glm_coding": ("GLM_CODING_API_KEY", "GLM_CODING_MODEL"),
+    }
+
+    if provider in provider_map:
+        key_env, model_env = provider_map[provider]
+        if key_env:
+            cfg[key_env] = key
+        if model_env:
+            cfg[model_env] = model
+
+    if provider == "ollama":
+        api_url = (cfg.get("OPENAI_API_URL") or "http://localhost:11434/v1").rstrip("/")
+        cfg["OLLAMA_HOST"] = api_url[:-3] if api_url.endswith("/v1") else api_url
+        cfg["OLLAMA_MODEL"] = model
+
+
+def _choice_default_index(options, current_value, fallback=0):
+    current_value = (current_value or "").strip().lower()
+    for idx, (_, value) in enumerate(options):
+        if str(value).strip().lower() == current_value:
+            return idx
+    return fallback
+
+
 def choose(prompt, options, default=0):
     """Arrow-key menu. options = list of (label, value)."""
     idx = default
@@ -316,6 +359,7 @@ def run_wizard():
     provider = choose("Which AI provider?", [
         ("OpenRouter      (100+ models, free tier)",            "openrouter"),
         ("Google Gemini   (free tier)",                         "gemini"),
+        ("NVIDIA NIM      (trial, Kimi/Nemotron)",             "nvidia"),
         ("Groq            (fast, free)",                        "groq"),
         ("OpenAI          (GPT-4o / GPT-4o-mini)",              "openai"),
         ("Mistral         (mistral-small)",                     "mistral"),
@@ -339,7 +383,10 @@ def run_wizard():
 
     elif provider == "gemini":
         info("Get key: https://aistudio.google.com/app/apikey")
-        gemini_api_key = ask("Gemini API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
+        key_default = e.get("GEMINI_API_KEY") or (
+            e.get("OPENAI_API_KEY") if _current_primary_uses(e, "generativelanguage.googleapis.com") else ""
+        )
+        gemini_api_key = ask("Gemini API Key", default=key_default, secret=True) or ""
         cfg["OPENAI_API_URL"] = "https://generativelanguage.googleapis.com/v1beta/openai"
         cfg["OPENAI_API_KEY"] = gemini_api_key
 
@@ -354,7 +401,16 @@ def run_wizard():
             ("gemini-1.5-pro-preview-0514", "gemini-1.5-pro-preview-0514"),
             ("gemini-1.5-flash-preview-0514", "gemini-1.5-flash-preview-0514"),
         ]
-        cfg["OPENAI_MODEL"] = choose("Select Gemini model", gemini_models, default=0)
+        default_gemini_model = e.get("GEMINI_MODEL") or (
+            e.get("OPENAI_MODEL") if _current_primary_uses(e, "generativelanguage.googleapis.com") else ""
+        )
+        cfg["OPENAI_MODEL"] = choose(
+            "Select Gemini model",
+            gemini_models,
+            default=_choice_default_index(gemini_models, default_gemini_model, fallback=0),
+        )
+        cfg["GEMINI_API_KEY"] = gemini_api_key
+        cfg["GEMINI_MODEL"] = cfg["OPENAI_MODEL"]
 
         # Test the API key
         if gemini_api_key and gemini_api_key != "your-api-key-here":
@@ -364,6 +420,39 @@ def run_wizard():
                 ok(f"API key is valid ✅")
             else:
                 print(f"  {Y}⚠  {msg}{RST}")
+                print(f"  {Y}⚠  Continuing anyway, but the bot may not work.{RST}")
+
+    elif provider == "nvidia":
+        info("Get key: https://build.nvidia.com  (trial access, OpenAI-compatible)")
+        key_default = e.get("NVIDIA_API_KEY") or (
+            e.get("OPENAI_API_KEY") if _current_primary_uses(e, "integrate.api.nvidia.com") else ""
+        )
+        nvidia_api_key = ask("NVIDIA API Key", default=key_default, secret=True) or ""
+        cfg["OPENAI_API_URL"] = "https://integrate.api.nvidia.com/v1"
+        cfg["OPENAI_API_KEY"] = nvidia_api_key
+        nvidia_models = [
+            ("moonshotai/kimi-k2-thinking (recommended)", "moonshotai/kimi-k2-thinking"),
+            ("moonshotai/kimi-k2-instruct", "moonshotai/kimi-k2-instruct"),
+            ("moonshotai/kimi-k2.5", "moonshotai/kimi-k2.5"),
+            ("nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-super-120b-a12b"),
+        ]
+        default_nvidia_model = e.get("NVIDIA_MODEL") or (
+            e.get("OPENAI_MODEL") if _current_primary_uses(e, "integrate.api.nvidia.com") else ""
+        )
+        cfg["OPENAI_MODEL"] = choose(
+            "Select NVIDIA model",
+            nvidia_models,
+            default=_choice_default_index(nvidia_models, default_nvidia_model, fallback=0),
+        )
+        cfg["NVIDIA_API_KEY"] = nvidia_api_key
+        cfg["NVIDIA_MODEL"] = cfg["OPENAI_MODEL"]
+        if nvidia_api_key and nvidia_api_key != "your-api-key-here":
+            info("Testing API key...")
+            valid, msg = test_api_key(cfg["OPENAI_API_URL"], cfg["OPENAI_API_KEY"], cfg["OPENAI_MODEL"])
+            if valid:
+                ok("API key is valid ✅")
+            else:
+                print(f"  {Y}⚠  NVIDIA key test failed: {msg}{RST}")
                 print(f"  {Y}⚠  Continuing anyway, but the bot may not work.{RST}")
 
     elif provider == "groq":
@@ -423,7 +512,12 @@ def run_wizard():
         )
         info(f"Using endpoint: {cfg['OPENAI_API_URL']}  (preloaded)")
         cfg["OPENAI_API_KEY"] = "ollama"
-        cfg["OPENAI_MODEL"]   = ask("Model", default=e.get("OPENAI_MODEL", "llama3.2")) or ""
+        cfg["OPENAI_MODEL"] = ask(
+            "Model",
+            default=e.get("OPENAI_MODEL") or e.get("OLLAMA_MODEL") or "llama3.2"
+        ) or ""
+        cfg["OLLAMA_HOST"] = cfg["OPENAI_API_URL"].rsplit("/v1", 1)[0]
+        cfg["OLLAMA_MODEL"] = cfg["OPENAI_MODEL"]
 
     elif provider == "local":
         info("Make sure your local server is running (e.g. llama-server -hf ... --port 8000)")
@@ -442,11 +536,13 @@ def run_wizard():
         cfg["OPENAI_API_KEY"] = ask("API Key", default=e.get("OPENAI_API_KEY"), secret=True) or ""
         cfg["OPENAI_MODEL"]   = ask("Model name", default=e.get("OPENAI_MODEL")) or ""
 
+    _sync_primary_provider(cfg, provider)
     ok(f"Provider: {provider}  |  Model: {cfg['OPENAI_MODEL']}")
 
     # ── 3. Fallback providers ─────────────────────────────────────────────────
     section("Step 3 - Fallback Providers (optional)")
-    info("Pick up to 2 fallback providers. Space = toggle | Enter = confirm | arrows = move")
+    info("Pick as many fallback providers as you want. Space = toggle | Enter = confirm")
+    info("Tip: highlight 'Continue without fallbacks' and press Enter to skip this step")
 
     fallback_specs = [
         {
@@ -458,6 +554,26 @@ def run_wizard():
             "key_prompt": "OpenRouter API Key",
             "model_prompt": "OpenRouter model",
             "hint": "Get key: https://openrouter.ai/keys",
+        },
+        {
+            "id": "gemini",
+            "label": "Google Gemini",
+            "key_env": "GEMINI_API_KEY",
+            "model_env": "GEMINI_MODEL",
+            "default_model": "gemini-3-flash-preview",
+            "key_prompt": "Gemini API Key",
+            "model_prompt": "Gemini fallback model",
+            "hint": "Get key: https://aistudio.google.com/app/apikey",
+        },
+        {
+            "id": "nvidia",
+            "label": "NVIDIA NIM (Kimi/Nemotron)",
+            "key_env": "NVIDIA_API_KEY",
+            "model_env": "NVIDIA_MODEL",
+            "default_model": "moonshotai/kimi-k2-thinking",
+            "key_prompt": "NVIDIA API Key",
+            "model_prompt": "NVIDIA fallback model",
+            "hint": "Get key: https://build.nvidia.com",
         },
         {
             "id": "groq",
@@ -518,11 +634,13 @@ def run_wizard():
             "key_prompt": "",
             "model_prompt": "Ollama fallback model",
             "hint": "Run local server first: ollama serve",
+            "extra_envs": ["OLLAMA_HOST"],
         },
     ]
 
     fallback_specs = [s for s in fallback_specs if s["id"] != provider]
     fallback_options = [(s["label"], s["id"]) for s in fallback_specs]
+    fallback_options.append(("Continue without fallbacks", "__skip__"))
 
     preselected_fallbacks = []
     for spec in fallback_specs:
@@ -537,12 +655,9 @@ def run_wizard():
         if pick and spec["id"] not in preselected_fallbacks:
             preselected_fallbacks.append(spec["id"])
 
-    selected_fallbacks = set(preselected_fallbacks[:2])
-    if len(preselected_fallbacks) > 2:
-        info("Only 2 existing fallbacks were preselected. You can adjust selection now.")
+    selected_fallbacks = set(preselected_fallbacks)
     idx = 0
     n_fallbacks = len(fallback_options)
-    max_limit_hit = False
 
     def _render_fallbacks():
         for _ in range(n_fallbacks):
@@ -567,13 +682,17 @@ def run_wizard():
                 idx = (idx + 1) % n_fallbacks
             elif k == ' ':
                 val = fallback_options[idx][1]
-                if val in selected_fallbacks:
+                if val == "__skip__":
+                    pass
+                elif val in selected_fallbacks:
                     selected_fallbacks.discard(val)
-                elif len(selected_fallbacks) < 2:
-                    selected_fallbacks.add(val)
                 else:
-                    max_limit_hit = True
+                    selected_fallbacks.add(val)
             elif k in ('\r', '\n'):
+                if fallback_options[idx][1] == "__skip__":
+                    selected_fallbacks.clear()
+                elif not selected_fallbacks and fallback_options:
+                    selected_fallbacks.add(fallback_options[idx][1])
                 break
             elif k == '\x03':
                 sys.stdout.write(SHOW); sys.exit(0)
@@ -581,9 +700,7 @@ def run_wizard():
     finally:
         sys.stdout.write(SHOW); sys.stdout.flush()
 
-    fallback_order = [val for _, val in fallback_options if val in selected_fallbacks]
-    if max_limit_hit:
-        info("Maximum 2 fallbacks allowed; extra selections were ignored.")
+    fallback_order = [val for _, val in fallback_options if val != "__skip__" and val in selected_fallbacks]
     if fallback_order:
         ok(f"Fallbacks selected: {', '.join(fallback_order)}")
     else:
@@ -597,6 +714,8 @@ def run_wizard():
             cfg.pop(spec["key_env"], None)
         if spec["model_env"]:
             cfg.pop(spec["model_env"], None)
+        for extra_env in spec.get("extra_envs", []):
+            cfg.pop(extra_env, None)
 
     # Ask credentials/models only for selected fallback providers.
     fallback_spec_by_id = {s["id"]: s for s in fallback_specs}
@@ -656,7 +775,6 @@ def run_wizard():
     # ── 8. Image Generation ───────────────────────────────────────────────────
     section("Step 8 — Image Generation  (optional)")
     info("Free option: HuggingFace (FLUX.1-schnell) — get token at https://huggingface.co/settings/tokens")
-    info("Paid option: fal.ai (FLUX.1 Schnell) — get key at https://fal.ai")
     info("Fallback: Google Gemini Nano Banana — get key at https://aistudio.google.com/apikey")
     hf_token = ask("HuggingFace Token (free, recommended)", default=e.get("HF_TOKEN"), optional=True, secret=True)
     if hf_token:
@@ -664,12 +782,6 @@ def run_wizard():
         ok("HuggingFace FLUX.1-schnell enabled — say 'generate an image of...' in Telegram")
     else:
         ok("Skipped HuggingFace")
-    fal_key = ask("fal.ai API Key (optional)", default=e.get("FAL_KEY"), optional=True, secret=True)
-    if fal_key:
-        cfg["FAL_KEY"] = fal_key
-        ok("fal.ai FLUX enabled")
-    else:
-        ok("Skipped fal.ai")
     # Gemini fallback
     is_gemini = "generativelanguage.googleapis.com" in cfg.get("OPENAI_API_URL", e.get("OPENAI_API_URL", ""))
     if is_gemini:

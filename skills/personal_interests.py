@@ -1,5 +1,5 @@
-"""
-Personal Interests skill — manage preferences and get personalized news.
+﻿"""
+Personal Interests skill â€” manage preferences and get personalized news.
 Learn user's interests over time: sports players, celebrities, topics, etc.
 """
 import json
@@ -9,7 +9,7 @@ SKILL_INFO = {
     "name": "personal_interests",
     "description": "Manage personal interests, preferences, and get personalized news/research",
     "version": "1.0",
-    "icon": "❤️",
+    "icon": "â¤ï¸",
     "author": "ninoclaw",
     "requires_key": False,
 }
@@ -19,17 +19,17 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_interests",
-            "description": "Set or update user's personal interests. Use this when user says things like 'I love cricket', 'I'm a fan of Virat Kohli', 'I like Kiara Advani', 'My favorite actress is Shraddha Kapoor', etc. Save their preferences for future personalization.",
+            "description": "Set or update user's personal interests. Use this when user says things like 'I love cricket', 'I'm a fan of Virat Kohli', 'I like sci-fi movies', 'My favorite actor is Tom Hanks', etc. Save their preferences for future personalization.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "interests": {
                         "type": "string",
-                        "description": "Comma-separated list of interests, e.g., 'cricket, Virat Kohli, Kiara Advani, Shraddha Kapoor, Karan Johar, Bollywood'"
+                        "description": "Comma-separated list of interests, e.g., 'cricket, Virat Kohli, sci-fi movies, Tom Hanks, AI tools, Bollywood'"
                     },
                     "categories": {
                         "type": "string",
-                        "description": "Optional categories as JSON object, e.g., '{\"sports\": [\"cricket\"], \"players\": [\"Virat Kohli\"], \"actresses\": [\"Kiara Advani\", \"Shraddha Kapoor\"], \"directors\": [\"Karan Johar\"]}'"
+                        "description": "Optional categories as JSON object, e.g., '{\"sports\": [\"cricket\"], \"players\": [\"Virat Kohli\"], \"movies\": [\"sci-fi\"], \"actors\": [\"Tom Hanks\"], \"topics\": [\"AI\"]}'"
                     }
                 },
                 "required": ["interests"]
@@ -69,13 +69,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "add_interest",
-            "description": "Add a single interest to user's preferences. Use this when user mentions something they like, e.g., 'I love cricket', 'I'm a fan of Virat Kohli', 'I like Shraddha Kapoor movies'.",
+            "description": "Add a single interest to user's preferences. Use this when user mentions something they like, e.g., 'I love cricket', 'I'm a fan of Virat Kohli', 'I like sci-fi movies'.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "interest": {
                         "type": "string",
-                        "description": "The interest to add, e.g., 'cricket', 'Virat Kohli', 'Kiara Advani', 'Bollywood movies'"
+                        "description": "The interest to add, e.g., 'cricket', 'Virat Kohli', 'sci-fi movies', 'Bollywood movies'"
                     }
                 },
                 "required": ["interest"]
@@ -111,7 +111,7 @@ def _search_topic(topic):
         from config import SERPER_API_KEY
 
         if not SERPER_API_KEY:
-            return "❌ Search API key not configured. Please set SERPER_API_KEY in .env"
+            return "âŒ Search API key not configured. Please set SERPER_API_KEY in .env"
 
         url = "https://google.serper.dev/news"
         headers = {
@@ -124,26 +124,26 @@ def _search_topic(topic):
         data = response.json()
 
         if not data.get("news"):
-            return f"🔍 No recent news found for: {topic}"
+            return f"ðŸ” No recent news found for: {topic}"
 
-        lines = [f"📰 **News for: {topic}**\n"]
+        lines = [f"ðŸ“° **News for: {topic}**\n"]
         for item in data["news"][:5]:
             title = item.get("title", "")
             link = item.get("link", "")
             snippet = item.get("snippet", "")
             date = item.get("date", "")
-            lines.append(f"• **{title}**")
+            lines.append(f"â€¢ **{title}**")
             if date:
-                lines.append(f"  📅 {date}")
+                lines.append(f"  ðŸ“… {date}")
             if snippet:
                 lines.append(f"  {snippet[:150]}...")
             if link:
-                lines.append(f"  🔗 {link}")
+                lines.append(f"  ðŸ”— {link}")
             lines.append("")
 
         return "\n".join(lines)
     except Exception as e:
-        return f"❌ Search error: {e}"
+        return f"âŒ Search error: {e}"
 
 def execute(tool_name, arguments, user_id=None):
     # Default user_id to config OWNER_ID if not provided
@@ -171,16 +171,16 @@ def execute(tool_name, arguments, user_id=None):
             combined_categories = {**existing_categories, **categories}
 
             if _set_user_interests(user_id, combined_interests, combined_categories):
-                return f"✅ **Preferences saved!**\n\nYour interests: {', '.join(combined_interests)}\n\nI'll remember these and find personalized content for you."
-            return "❌ Failed to save interests."
+                return f"âœ… **Preferences saved!**\n\nYour interests: {', '.join(combined_interests)}\n\nI'll remember these and find personalized content for you."
+            return "âŒ Failed to save interests."
 
         elif tool_name == "get_interests":
             interests, categories = _get_user_interests(user_id)
 
             if not interests and not categories:
-                return "📝 No interests saved yet. Tell me what you like - sports, celebrities, topics, etc!"
+                return "ðŸ“ No interests saved yet. Tell me what you like - sports, celebrities, topics, etc!"
 
-            lines = [f"❤️ **Your Interests:**\n"]
+            lines = [f"â¤ï¸ **Your Interests:**\n"]
             if interests:
                 lines.append(f"**General:** {', '.join(interests)}")
 
@@ -188,7 +188,7 @@ def execute(tool_name, arguments, user_id=None):
                 lines.append("\n**Categories:**")
                 for category, items in categories.items():
                     if items:
-                        lines.append(f"• {category}: {', '.join(items) if isinstance(items, list) else items}")
+                        lines.append(f"â€¢ {category}: {', '.join(items) if isinstance(items, list) else items}")
 
             return "\n".join(lines)
 
@@ -200,7 +200,7 @@ def execute(tool_name, arguments, user_id=None):
                 interests, categories = _get_user_interests(user_id)
 
                 if not interests and not categories:
-                    return "📝 No interests saved yet. Tell me what you like first, or provide a topic to search!"
+                    return "ðŸ“ No interests saved yet. Tell me what you like first, or provide a topic to search!"
 
                 # Build search query from interests
                 search_terms = interests[:3]  # Limit to top 3 interests
@@ -213,7 +213,7 @@ def execute(tool_name, arguments, user_id=None):
                     search_terms = all_items[:3]
 
                 if not search_terms:
-                    return "❌ No interests to search for. Set some interests first!"
+                    return "âŒ No interests to search for. Set some interests first!"
 
                 # Search for each term and combine results
                 results = []
@@ -229,17 +229,18 @@ def execute(tool_name, arguments, user_id=None):
         elif tool_name == "add_interest":
             interest = arguments.get("interest", "").strip()
             if not interest:
-                return "❌ Please provide an interest to add."
+                return "âŒ Please provide an interest to add."
 
             existing_interests, existing_categories = _get_user_interests(user_id)
             if interest not in existing_interests:
                 existing_interests.append(interest)
                 if _set_user_interests(user_id, existing_interests, existing_categories):
-                    return f"✅ Added '{interest}' to your interests!\n\nYour interests: {', '.join(existing_interests)}"
+                    return f"âœ… Added '{interest}' to your interests!\n\nYour interests: {', '.join(existing_interests)}"
             else:
-                return f"✅ '{interest}' is already in your interests."
+                return f"âœ… '{interest}' is already in your interests."
 
     except Exception as e:
-        return f"❌ Personal interests error: {e}"
+        return f"âŒ Personal interests error: {e}"
 
     return None
+

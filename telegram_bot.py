@@ -1091,6 +1091,46 @@ For simple file or folder rename requests on the host system, prefer rename_path
                 except Exception:
                     pass
 
+        # Parse models that fake tools as shell/code blocks like ```bash\nweb_search "query"\n```
+        if not tcalls and final_text:
+            import re as _re2, shlex as _shlex2
+            tool_aliases = {
+                "web_search": "web_search",
+                "claude": "claude_code",
+                "claude_code": "claude_code",
+                "run_command": "run_command",
+                "read_file": "read_file",
+                "list_dir": "list_dir",
+            }
+            arg_name_map = {
+                "web_search": "query",
+                "claude_code": "task",
+                "run_command": "command",
+                "read_file": "path",
+                "list_dir": "path",
+            }
+            code_match = _re2.search(r'```(?:bash|sh|shell)?\s*\n?([\s\S]*?)```', final_text, _re2.IGNORECASE)
+            if code_match:
+                try:
+                    block = (code_match.group(1) or "").strip()
+                    lines = [line.strip() for line in block.splitlines() if line.strip()]
+                    if lines:
+                        cmd_line = lines[0]
+                        parts = _shlex2.split(cmd_line, posix=True)
+                        if parts:
+                            tool_name = tool_aliases.get(parts[0].lower())
+                            if tool_name:
+                                remainder_parts = parts[1:]
+                                if parts[0].lower() == "claude" and remainder_parts and remainder_parts[0].lower() == "code":
+                                    remainder_parts = remainder_parts[1:]
+                                arg_key = arg_name_map.get(tool_name)
+                                arg_value = " ".join(remainder_parts).strip()
+                                if arg_key and arg_value:
+                                    tcalls = [{"function": {"name": tool_name, "arguments": {arg_key: arg_value}}}]
+                                    final_text = _re2.sub(r'```(?:bash|sh|shell)?\s*[\s\S]*?```', '', final_text, count=1, flags=_re2.IGNORECASE).strip()
+                except Exception:
+                    pass
+
         # Direct intent mapping - bypass model hallucination for common tool commands
         if allow_direct_map and not tcalls:
             msg_l = (text_for_direct_map or "").lower().strip()
