@@ -1,0 +1,12 @@
+*
+!.easignore
+!mobile_apps/
+!mobile_apps/ninoclaw-companion/
+!mobile_apps/ninoclaw-companion/App.js
+!mobile_apps/ninoclaw-companion/app.json
+!mobile_apps/ninoclaw-companion/eas.json
+!mobile_apps/ninoclaw-companion/index.js
+!mobile_apps/ninoclaw-companion/package.json
+!mobile_apps/ninoclaw-companion/package-lock.json
+!mobile_apps/ninoclaw-companion/assets/
+!mobile_apps/ninoclaw-companion/assets/**
