@@ -98,13 +98,63 @@ def ensure_requirements_installed():
         return True
 
     print(f"{C}Installing Python dependencies from requirements.txt...{RST}")
+
+    # Try installing packages one by one to gracefully skip failures
+    requirements = []
+    try:
+        with open(REQUIREMENTS_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    # Parse requirement name (before version specifiers)
+                    pkg = line.split(">")[0].split("=")[0].split("<")[0].split(" ")[0].strip()
+                    if pkg:
+                        requirements.append((pkg, line))
+    except OSError:
+        print(f"{R}Could not read requirements.txt{RST}")
+        return False
+
+    # Install core dependencies first
+    core_packages = [
+        "python-telegram-bot==22.6", "requests==2.31.0", "schedule==1.2.0",
+        "croniter==3.0.3", "youtube-transcript-api", "python-dotenv",
+        "flask>=3.0.0", "pypdf>=4.0.0"
+    ]
+
+    print(f"{C}Installing core dependencies...{RST}")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-r", REQUIREMENTS_FILE],
+        [sys.executable, "-m", "pip", "install"] + core_packages,
         cwd=REPO_DIR,
     )
+
     if result.returncode != 0:
-        print(f"{R}Failed to install requirements.txt dependencies.{RST}")
+        print(f"{R}Failed to install core dependencies.{RST}")
         return False
+
+    # Try optional dependencies - skip if they fail
+    optional_packages = [
+        ("python-docx", "python-docx>=1.0.0"),
+        ("discord.py", "discord.py>=2.3.0")
+    ]
+
+    failed_packages = []
+    for pkg_name, pkg_spec in optional_packages:
+        print(f"{C}Installing optional package: {pkg_name}...{RST}")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", pkg_spec],
+            cwd=REPO_DIR,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode != 0:
+            print(f"{Y}⚠ Skipping {pkg_name} (install failed - likely missing build dependencies){RST}")
+            failed_packages.append(pkg_name)
+        else:
+            print(f"{G}✔ {pkg_name} installed{RST}")
+
+    if failed_packages:
+        print(f"\n{Y}Note: Skipped packages: {', '.join(failed_packages)}{RST}")
+        print(f"{DIM}These features may not work without them.{RST}")
 
     try:
         with open(REQUIREMENTS_STAMP, "w", encoding="utf-8") as f:
