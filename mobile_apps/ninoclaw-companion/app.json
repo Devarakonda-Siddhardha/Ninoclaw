@@ -16,6 +16,7 @@
     ],
     "android": {
       "package": "com.ninoclaw.companion",
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/app_icon.png",
         "backgroundColor": "#07111f"
