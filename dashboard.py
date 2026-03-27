@@ -220,12 +220,15 @@ def _settings_payload():
         "ENABLE_SELF_UPDATE",
     ]
     plugins = {key: env.get(key, "true") != "false" for key in plugin_keys}
+    default_chat_user_id = str(OWNER_ID) if OWNER_ID else "mobile"
     return {
         "agent": {
             "name": env.get("AGENT_NAME", "Ninoclaw"),
             "user_name": env.get("USER_NAME", "friend"),
             "purpose": env.get("BOT_PURPOSE", "be your personal AI assistant"),
             "timezone": env.get("TIMEZONE", "UTC"),
+            "owner_id": str(OWNER_ID) if OWNER_ID else "",
+            "default_chat_user_id": default_chat_user_id,
         },
         "models": {
             "primary": env.get("OPENAI_MODEL", ""),

@@ -4,6 +4,8 @@ Core bot startup — use cli.py / ninoclaw command for full CLI experience.
 """
 import os
 import sys
+import threading
+import textwrap
 
 # ── Load .env before importing config ────────────────────────────────────────
 from dotenv import load_dotenv
@@ -21,6 +23,8 @@ from ai import test_connection
 from tasks import task_manager
 from bg_agent import bg_runner
 from security_audit import security_auditor
+
+LOCAL_TERMINAL_USER_ID = str(OWNER_ID) if OWNER_ID else "local_terminal_owner"
 
 def print_banner():
     """Print startup banner"""
@@ -243,6 +247,50 @@ def ask_personalization():
         print(f"\n  {Y}Skipped — using defaults.{RST}\n")
 
 
+def run_local_terminal_chat():
+    """Simple local terminal chat loop for operator use."""
+    from chat_runtime import generate_reply_sync
+
+    print("Local terminal chat is ready.")
+    print("Type a message and press Enter.")
+    print("Commands: /help, /clear, /exit\n")
+
+    while True:
+        try:
+            user_message = input("You> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("")
+            break
+
+        if not user_message:
+            continue
+
+        command = user_message.lower()
+        if command in {"/exit", "/quit"}:
+            break
+        if command == "/help":
+            print("  /help  Show commands")
+            print("  /clear Clear the screen")
+            print("  /exit  Exit the local terminal chat\n")
+            continue
+        if command == "/clear":
+            os.system("cls" if os.name == "nt" else "clear")
+            continue
+
+        try:
+            reply = generate_reply_sync(LOCAL_TERMINAL_USER_ID, user_message)
+        except Exception as e:
+            print(f"{AGENT_NAME}> Error: {e}\n")
+            continue
+
+        reply = (reply or "").strip() or "No response."
+        wrapped = "\n".join(
+            textwrap.fill(line, width=100, replace_whitespace=False)
+            for line in reply.splitlines()
+        )
+        print(f"{AGENT_NAME}> {wrapped}\n")
+
+
 def main():
     """Main entry point"""
     lock = acquire_lock()  # noqa: F841 — keep lock held
@@ -355,8 +403,29 @@ def main():
     print("\n🦀 Ninoclaw is running!")
     print("💬 Open Telegram and talk to your bot\n")
 
-    # Run bot
-    app.run_polling(allowed_updates=["message", "callback_query"])
+    if sys.stdin.isatty():
+        bot_thread = threading.Thread(
+            target=lambda: app.run_polling(
+                allowed_updates=["message", "callback_query"],
+                stop_signals=None,
+            ),
+            daemon=True,
+        )
+        bot_thread.start()
+        try:
+            from tui import run_tui
+
+            run_tui(LOCAL_TERMINAL_USER_ID)
+            print("TUI closed. Falling back to the basic terminal chat.\n")
+            run_local_terminal_chat()
+        except ImportError:
+            print("Textual is not installed; falling back to the basic terminal chat.\n")
+            run_local_terminal_chat()
+        except Exception as e:
+            print(f"TUI unavailable ({e}); falling back to the basic terminal chat.\n")
+            run_local_terminal_chat()
+    else:
+        app.run_polling(allowed_updates=["message", "callback_query"])
 
 if __name__ == "__main__":
     try:

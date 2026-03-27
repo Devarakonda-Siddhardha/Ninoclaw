@@ -843,13 +843,19 @@ export default function App() {
     }
     setError('');
     try {
-      const [overviewRes, taskRes, buildsRes, appsRes, settingsRes, chatRes, healthRes] = await Promise.all([
+      const settingsRes = await apiGet('/api/mobile/settings');
+      const serverDefaultUserId = settingsRes?.agent?.default_chat_user_id || '';
+      const effectiveUserId =
+        !userId.trim() || userId.trim().toLowerCase() === 'mobile'
+          ? (serverDefaultUserId || userId.trim() || 'mobile')
+          : userId.trim();
+
+      const [overviewRes, taskRes, buildsRes, appsRes, chatRes, healthRes] = await Promise.all([
         apiGet('/api/mobile/overview'),
         apiGet('/api/mobile/tasks'),
         apiGet('/api/mobile/builds'),
         apiGet('/api/mobile/mobile-apps'),
-        apiGet('/api/mobile/settings'),
-        apiGet(`/api/mobile/chat/${encodeURIComponent(userId.trim())}`),
+        apiGet(`/api/mobile/chat/${encodeURIComponent(effectiveUserId)}`),
         apiGet('/api/mobile/runtime/health'),
       ]);
       setOverview(overviewRes);
@@ -859,6 +865,9 @@ export default function App() {
       setSettingsData(settingsRes);
       setRuntimeHealth(healthRes);
       setChatMessages(chatRes.messages || []);
+      if (effectiveUserId !== userId) {
+        setUserId(effectiveUserId);
+      }
       setModelPrimary(settingsRes?.models?.primary || '');
       setModelFast(settingsRes?.models?.fast || '');
       setModelSmart(settingsRes?.models?.smart || '');
