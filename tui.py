@@ -7,6 +7,8 @@ import textwrap
 from datetime import datetime
 
 from config import AGENT_NAME
+from memory import Memory
+from tasks import task_manager
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Footer, Header, Input, RichLog, Static
@@ -64,7 +66,7 @@ class NinoclawTUI(App):
     def on_mount(self) -> None:
         self._set_status("Ready. Telegram and dashboard stay live while you chat here.")
         self._log("system", f"{AGENT_NAME} terminal UI is ready.")
-        self._log("system", "Shortcuts: Ctrl+L clear, Ctrl+C quit.")
+        self._log("system", "Shortcuts: Ctrl+L clear, Ctrl+C quit. Commands: /help, /status, /memory, /facts, /tasks, /clear, /exit.")
         self.query_one(Input).focus()
 
     def action_clear_log(self) -> None:
@@ -75,6 +77,9 @@ class NinoclawTUI(App):
         message = event.value.strip()
         event.input.value = ""
         if not message:
+            return
+        if message.startswith("/"):
+            self._handle_command(message)
             return
         if self.busy:
             self._set_status("Busy. Wait for the current reply to finish.")
@@ -150,6 +155,95 @@ class NinoclawTUI(App):
         for line in lines:
             log.write(line)
         self._pending_marker = ""
+
+    def _handle_command(self, raw: str) -> None:
+        command = raw.strip().lower()
+        self._log("you", raw)
+
+        if command in {"/exit", "/quit"}:
+            self.exit()
+            return
+
+        if command == "/clear":
+            self.action_clear_log()
+            return
+
+        if command == "/help":
+            self._log(
+                "system",
+                "\n".join(
+                    [
+                        "/help   Show commands",
+                        "/status Show runtime summary",
+                        "/memory Show recent conversation messages",
+                        "/facts  Show saved long-term facts",
+                        "/tasks  Show pending reminders and cron jobs",
+                        "/clear  Clear transcript pane",
+                        "/exit   Close the TUI",
+                    ]
+                ),
+            )
+            return
+
+        if command == "/status":
+            tasks = task_manager.list_tasks(self.user_id)
+            crons = task_manager.list_cron_jobs(self.user_id)
+            memory = Memory()
+            conv = memory.get_conversation(self.user_id, limit=6)
+            self._log(
+                "system",
+                "\n".join(
+                    [
+                        f"User ID: {self.user_id}",
+                        f"Recent messages stored: {len(conv)}",
+                        f"Pending reminders: {len(tasks)}",
+                        f"Cron jobs: {len(crons)}",
+                    ]
+                ),
+            )
+            return
+
+        if command == "/memory":
+            memory = Memory()
+            conv = memory.get_conversation(self.user_id, limit=10)
+            if not conv:
+                self._log("system", "No conversation memory yet.")
+                return
+            summary = []
+            for item in conv[-10:]:
+                role = item.get("role", "?")
+                content = str(item.get("content", "")).strip().replace("\n", " ")
+                summary.append(f"{role}: {content[:140]}")
+            self._log("system", "\n".join(summary))
+            return
+
+        if command == "/facts":
+            memory = Memory()
+            facts = memory.get_facts(self.user_id)
+            if not facts:
+                self._log("system", "No saved facts yet.")
+                return
+            self._log("system", "\n".join(f"- {item['key']}: {item['value']}" for item in facts))
+            return
+
+        if command == "/tasks":
+            tasks = task_manager.list_tasks(self.user_id)
+            crons = task_manager.list_cron_jobs(self.user_id)
+            lines = []
+            if tasks:
+                lines.append("Reminders:")
+                for item in tasks[:8]:
+                    lines.append(f"- {item['name']} @ {task_manager.format_timestamp(item['scheduled_time'])}")
+            if crons:
+                lines.append("Cron jobs:")
+                for item in crons[:8]:
+                    lines.append(f"- {item['name']} ({item['original_expression'] or item['cron_expression']})")
+            if not lines:
+                lines.append("No tasks or cron jobs for this user.")
+            self._log("system", "\n".join(lines))
+            return
+
+        self._log("system", f"Unknown command: {raw}. Use /help.")
 
 
 def run_tui(user_id: str) -> None:
