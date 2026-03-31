@@ -794,7 +794,6 @@ def run_wizard():
 
     # ── 9. Dashboard ──────────────────────────────────────────────────────────
     section("Step 9 — Web Dashboard")
-    cfg["DASHBOARD_PASSWORD"] = ask("Dashboard password", default=e.get("DASHBOARD_PASSWORD", "admin")) or "admin"
     cfg["DASHBOARD_PORT"]     = ask("Dashboard port",     default=e.get("DASHBOARD_PORT", "8080"))       or "8080"
     ok(f"Dashboard at http://localhost:{cfg['DASHBOARD_PORT']}")
 

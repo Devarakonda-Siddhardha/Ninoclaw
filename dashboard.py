@@ -39,34 +39,13 @@ def get_db():
     return conn
 
 def require_login(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not session.get("logged_in"):
-            return redirect(url_for("login"))
-        return f(*args, **kwargs)
-    return decorated
-
-
-def _api_password_ok():
-    env = get_env()
-    expected = (env.get("DASHBOARD_PASSWORD") or "admin").strip()
-    provided = (
-        request.headers.get("X-Dashboard-Password")
-        or request.args.get("password")
-        or ((request.get_json(silent=True) or {}).get("password") if request.is_json else None)
-        or request.form.get("password")
-        or ""
-    ).strip()
-    return bool(expected) and provided == expected
+    """No-op decorator — dashboard auth has been removed."""
+    return f
 
 
 def require_mobile_api(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if session.get("logged_in") or _api_password_ok():
-            return f(*args, **kwargs)
-        return jsonify({"error": "unauthorized"}), 401
-    return decorated
+    """No-op decorator — dashboard auth has been removed."""
+    return f
 
 
 def _overview_payload():
@@ -497,64 +476,15 @@ function closeNav() { document.getElementById('sidebar').classList.remove('open'
 </html>
 """
 
-LOGIN_TMPL = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ninoclaw — Login</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<style>
-  body { background:#0d1117; color:#e6edf3; display:flex; align-items:center; justify-content:center; min-height:100vh; }
-  .login-box { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:40px 36px; width:100%; max-width:380px; }
-  .login-box h1 { font-size:1.5rem; font-weight:700; color:#58a6ff; margin-bottom:6px; }
-  .login-box p { color:#8b949e; font-size:0.88rem; margin-bottom:28px; }
-  label { color:#8b949e; font-size:0.8rem; text-transform:uppercase; letter-spacing:.04em; }
-  input { background:#0d1117; border:1px solid #30363d; color:#e6edf3; border-radius:6px; padding:10px 14px; width:100%; margin-top:4px; font-size:0.92rem; outline:none; }
-  input:focus { border-color:#58a6ff; box-shadow:0 0 0 3px rgba(88,166,255,.15); }
-  button { background:#58a6ff; color:#000; border:none; border-radius:6px; padding:10px; width:100%; font-weight:600; margin-top:16px; cursor:pointer; font-size:0.95rem; }
-  .err { background:rgba(248,81,73,.1); border:1px solid rgba(248,81,73,.3); color:#f85149; border-radius:6px; padding:8px 14px; margin-bottom:14px; font-size:.85rem; }
-</style>
-</head>
-<body>
-<div class="login-box">
-  <h1>🦀 Ninoclaw</h1>
-  <p>Sign in to the dashboard</p>
-  {% if error %}<div class="err">{{ error }}</div>{% endif %}
-  <form method="POST">
-    <label>Password</label>
-    <input type="password" name="password" placeholder="Dashboard password" autofocus>
-    <button type="submit">Sign In</button>
-  </form>
-</div>
-</body>
-</html>
-"""
-
 # ─── routes ─────────────────────────────────────────────────────────────────
 
-@app.route("/login", methods=["GET", "POST"])
+@app.route("/login")
 def login():
-    from security import check_login_rate, reset_login_rate
-    error = None
-    if request.method == "POST":
-        ip = request.remote_addr or "unknown"
-        rate_err = check_login_rate(ip)
-        if rate_err:
-            error = rate_err
-        else:
-            env = get_env()
-            pwd = env.get("DASHBOARD_PASSWORD", "admin")
-            if request.form.get("password") == pwd:
-                session["logged_in"] = True
-                reset_login_rate(ip)
-                return redirect(url_for("index"))
-            error = "Incorrect password"
-    return render_template_string(LOGIN_TMPL, error=error)
+    return redirect(url_for("index"))
 
 @app.route("/logout")
 def logout():
-    session.clear()
-    return redirect(url_for("login"))
+    return redirect(url_for("index"))
 
 @app.route("/")
 @require_login
@@ -710,7 +640,7 @@ def config_page():
     if request.method == "POST":
         fields = ["TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY", "OPENAI_API_URL",
                   "OPENAI_MODEL", "SERPER_API_KEY", "OWNER_ID",
-                  "CONTEXT_WINDOW", "DASHBOARD_PASSWORD", "DASHBOARD_PORT",
+                  "CONTEXT_WINDOW", "DASHBOARD_PORT",
                   "AGENT_NAME", "USER_NAME", "BOT_PURPOSE", "TIMEZONE",
                   "RESEND_API_KEY", "RESEND_FROM", "OWNER_EMAIL",
                   "OPENROUTER_API_KEY", "OPENROUTER_MODEL",
@@ -848,10 +778,6 @@ def config_page():
     <div style="margin-bottom:16px">
       <label class="form-label">Context Window (messages sent to AI per request)</label>
       <input class="form-control" name="CONTEXT_WINDOW" value="{{ env.get('CONTEXT_WINDOW','20') }}" style="max-width:120px">
-    </div>
-    <div style="margin-bottom:16px">
-      <label class="form-label">Dashboard Password</label>
-      <input class="form-control" type="password" name="DASHBOARD_PASSWORD" placeholder="Leave blank to keep current" autocomplete="off">
     </div>
     <div>
       <label class="form-label">Dashboard Port</label>
@@ -2427,18 +2353,8 @@ def run_dashboard():
     port = int(env.get("DASHBOARD_PORT", os.getenv("DASHBOARD_PORT", "8080")))
     host = "0.0.0.0"
 
-    # Enforce a non-default dashboard password on startup.
-    pwd = (env.get("DASHBOARD_PASSWORD") or "").strip()
-    if not pwd or pwd == "admin":
-        import secrets
-        pwd = secrets.token_urlsafe(18)
-        save_env_key("DASHBOARD_PASSWORD", pwd)
-        print("⚠️  Generated a secure DASHBOARD_PASSWORD (default/empty password was unsafe).")
-
     print(f"\n🦀 Ninoclaw Dashboard")
-    print(f"   URL:      http://localhost:{port}")
-    print(f"   Password: {pwd}")
-    print(f"   (change it in Config page or set DASHBOARD_PASSWORD in .env)\n")
+    print(f"   URL:      http://localhost:{port}\n")
     app.run(host=host, port=port, debug=False)
 
 
