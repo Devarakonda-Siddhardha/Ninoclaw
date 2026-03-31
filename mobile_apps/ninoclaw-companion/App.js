@@ -163,6 +163,7 @@ function EmptyState({ title, body }) {
 
 function ConnectionGate({
   baseUrl,
+  password,
   userId,
   onChange,
   onReload,
@@ -180,7 +181,7 @@ function ConnectionGate({
         <View style={styles.connectionCopy}>
           <Text style={styles.panelTitle}>Connect to your dashboard</Text>
           <Text style={styles.panelBody}>
-            Enter your Ninoclaw dashboard LAN URL and a mobile chat user id.
+            Enter your Ninoclaw dashboard LAN URL, dashboard password, and a mobile chat user id.
           </Text>
           {!!detectedUrl && !baseUrl && (
             <Text style={styles.helperText}>Suggested from this device: {detectedUrl}</Text>
@@ -198,6 +199,15 @@ function ConnectionGate({
         placeholderTextColor={COLORS.muted}
         style={styles.input}
         autoCapitalize="none"
+      />
+      <TextInput
+        value={password}
+        onChangeText={(value) => onChange('password', value)}
+        placeholder="Dashboard password"
+        placeholderTextColor={COLORS.muted}
+        style={styles.input}
+        autoCapitalize="none"
+        secureTextEntry
       />
       <TextInput
         value={userId}
@@ -585,6 +595,7 @@ function BuildsTab({ baseUrl, buildsData, mobileAppsData, onExpoAction, actionBu
 
 function SettingsTab({
   baseUrl,
+  password,
   userId,
   onChange,
   onReload,
@@ -619,6 +630,7 @@ function SettingsTab({
 
       <ConnectionGate
         baseUrl={baseUrl}
+        password={password}
         userId={userId}
         onChange={onChange}
         onReload={onReload}
@@ -752,6 +764,7 @@ function SettingsTab({
 export default function App() {
   const [activeTab, setActiveTab] = useState('chat');
   const [baseUrl, setBaseUrl] = useState('');
+  const [password, setPassword] = useState('');
   const [userId, setUserId] = useState('mobile');
   const [draft, setDraft] = useState('');
   const [reminderName, setReminderName] = useState('');
@@ -784,8 +797,9 @@ export default function App() {
   const headers = useMemo(
     () => ({
       'Content-Type': 'application/json',
+      ...(password.trim() ? { 'X-Dashboard-Password': password.trim() } : {}),
     }),
-    []
+    [password]
   );
 
   async function apiGet(path) {
@@ -821,8 +835,8 @@ export default function App() {
   }
 
   async function loadAll(showSpinner = true) {
-    if (!normalizeBaseUrl(baseUrl) || !userId.trim()) {
-      setError('Base URL and user id are required.');
+    if (!normalizeBaseUrl(baseUrl) || !password.trim() || !userId.trim()) {
+      setError('Base URL, dashboard password, and user id are required.');
       return;
     }
     if (showSpinner) {
@@ -1208,9 +1222,11 @@ export default function App() {
       return (
         <ConnectionGate
           baseUrl={baseUrl}
+          password={password}
           userId={userId}
           onChange={(field, value) => {
             if (field === 'baseUrl') setBaseUrl(value);
+            if (field === 'password') setPassword(value);
             if (field === 'userId') setUserId(value);
           }}
           onReload={() => loadAll(true)}
@@ -1277,9 +1293,11 @@ export default function App() {
         return (
           <SettingsTab
             baseUrl={baseUrl}
+            password={password}
             userId={userId}
             onChange={(field, value) => {
               if (field === 'baseUrl') setBaseUrl(value);
+              if (field === 'password') setPassword(value);
               if (field === 'userId') setUserId(value);
             }}
             onReload={() => loadAll(true)}
@@ -1329,12 +1347,13 @@ export default function App() {
         if (raw && mounted) {
           const saved = JSON.parse(raw);
           if (saved.baseUrl) setBaseUrl(saved.baseUrl);
+          if (saved.password) setPassword(saved.password);
           if (saved.userId) setUserId(saved.userId);
           if (!saved.baseUrl) {
             const inferred = inferDashboardUrl();
             if (inferred) setBaseUrl(inferred);
           }
-          if (saved.baseUrl && saved.userId) {
+          if (saved.baseUrl && saved.password && saved.userId) {
             setTimeout(() => {
               loadAll(true);
             }, 0);
@@ -1367,10 +1386,11 @@ export default function App() {
       STORAGE_KEY,
       JSON.stringify({
         baseUrl,
+        password,
         userId,
       })
     ).catch(() => {});
-  }, [baseUrl, userId, bootstrapped]);
+  }, [baseUrl, password, userId, bootstrapped]);
 
   return (
     <SafeAreaView style={styles.safe}>

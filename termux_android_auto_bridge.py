@@ -31,8 +31,7 @@ PORT = int(os.getenv("ANDROID_AUTO_BRIDGE_PORT", "5056"))
 def run_cmd(command: str):
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            shlex.split(command),
             capture_output=True,
             text=True,
             timeout=15,

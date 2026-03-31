@@ -9,6 +9,7 @@ import base64
 import tempfile
 import subprocess
 import json
+import shlex
 
 SKILL_INFO = {
     "name": "auto_fixer",
@@ -47,7 +48,12 @@ def _save_image(b64):
 
 def _run(cmd, timeout=120):
     try:
-        out = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        out = subprocess.run(
+            ["bash", "-lc", cmd] if isinstance(cmd, str) else cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
         return out.returncode, out.stdout.strip(), out.stderr.strip()
     except Exception as e:
         return 1, "", str(e)
@@ -89,7 +95,7 @@ def run_auto_fix(tool_name, arguments):
     ocr_text = ""
     rc, out, err = _run(f"which tesseract || true")
     if rc == 0 and out:
-        rc2, ocr_out, ocr_err = _run(f"tesseract {img_path} stdout || true", timeout=30)
+        rc2, ocr_out, ocr_err = _run(f"tesseract {shlex.quote(img_path)} stdout || true", timeout=30)
         ocr_text = (ocr_out or "") + "\n" + (ocr_err or "")
         report.append("OCR extracted text from image.")
     else:

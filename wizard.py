@@ -1,7 +1,7 @@
 """
 Ninoclaw Setup Wizard — clean single-flow interactive CLI
 """
-import os, sys, getpass, shutil
+import os, sys, getpass, shutil, secrets
 from runtime_capabilities import detect_capabilities, recommended_env_overrides, summarized_capability_report
 
 _IS_WIN = sys.platform == "win32"
@@ -794,7 +794,13 @@ def run_wizard():
 
     # ── 9. Dashboard ──────────────────────────────────────────────────────────
     section("Step 9 — Web Dashboard")
-    cfg["DASHBOARD_PORT"]     = ask("Dashboard port",     default=e.get("DASHBOARD_PORT", "8080"))       or "8080"
+    suggested_dashboard_password = e.get("DASHBOARD_PASSWORD") or secrets.token_urlsafe(12)
+    cfg["DASHBOARD_PORT"] = ask("Dashboard port", default=e.get("DASHBOARD_PORT", "8080")) or "8080"
+    cfg["DASHBOARD_PASSWORD"] = ask(
+        "Dashboard password",
+        default=suggested_dashboard_password,
+        secret=True,
+    ) or suggested_dashboard_password
     ok(f"Dashboard at http://localhost:{cfg['DASHBOARD_PORT']}")
 
     # ── 10. Compatibility Profile ─────────────────────────────────

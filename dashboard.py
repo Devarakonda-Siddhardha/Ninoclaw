@@ -2,11 +2,12 @@
 Ninoclaw Web Dashboard — configure plugins, view memory, manage tasks
 Run with: ninoclaw dashboard  (or python dashboard.py)
 """
-import os, re, sys, json, sqlite3, subprocess, shutil, platform
+import os, re, sys, json, sqlite3, subprocess, shutil, platform, hmac
 from functools import wraps
 from pathlib import Path
 from dotenv import load_dotenv, set_key, dotenv_values
 from run_traces import get_run, get_run_events, list_runs, summarize_runs
+from sqlite_utils import connect_db
 
 # Lazy Flask import so the rest of the app doesn't depend on it
 try:
@@ -21,7 +22,8 @@ DB_FILE   = os.path.join(os.path.dirname(__file__), "ninoclaw.db")
 DIR       = os.path.dirname(__file__)
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+_startup_env = dotenv_values(ENV_FILE)
+app.secret_key = (_startup_env.get("DASHBOARD_SECRET_KEY") or os.urandom(24).hex())
 
 # ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -31,21 +33,67 @@ def get_env():
 def save_env_key(key, value):
     set_key(ENV_FILE, key, value)
 
+
+def _dashboard_password():
+    return (get_env().get("DASHBOARD_PASSWORD") or "").strip()
+
+
+def _password_matches(candidate):
+    expected = _dashboard_password()
+    if not expected:
+        return False
+    return hmac.compare_digest(str(candidate or ""), expected)
+
 def get_db():
     if not os.path.exists(DB_FILE):
         return None
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect_db(DB_FILE)
 
 def require_login(f):
-    """No-op decorator — dashboard auth has been removed."""
-    return f
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not _dashboard_password():
+            return (
+                "Dashboard password is not configured. Run `ninoclaw setup` or set "
+                "`DASHBOARD_PASSWORD` in `.env`.",
+                503,
+            )
+        if session.get("dashboard_auth"):
+            return f(*args, **kwargs)
+        return redirect(url_for("login", next=request.path))
+    return wrapper
 
 
 def require_mobile_api(f):
-    """No-op decorator — dashboard auth has been removed."""
-    return f
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not _dashboard_password():
+            return jsonify({"error": "Dashboard password is not configured."}), 503
+        supplied = request.headers.get("X-Dashboard-Password", "")
+        if not supplied:
+            auth = request.headers.get("Authorization", "")
+            if auth.lower().startswith("bearer "):
+                supplied = auth[7:].strip()
+        if not _password_matches(supplied):
+            return jsonify({"error": "Unauthorized"}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/fonts/;"
+        " img-src 'self' data:;"
+        " font-src 'self' https://cdn.jsdelivr.net https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/fonts/;"
+        " script-src 'self' 'unsafe-inline';"
+        " style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
+    )
+    return response
 
 
 def _overview_payload():
@@ -478,13 +526,63 @@ function closeNav() { document.getElementById('sidebar').classList.remove('open'
 
 # ─── routes ─────────────────────────────────────────────────────────────────
 
-@app.route("/login")
+@app.route("/login", methods=["GET", "POST"])
 def login():
-    return redirect(url_for("index"))
+    if not _dashboard_password():
+        return (
+            "Dashboard password is not configured. Run `ninoclaw setup` or set "
+            "`DASHBOARD_PASSWORD` in `.env`.",
+            503,
+        )
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if _password_matches(password):
+            session["dashboard_auth"] = True
+            next_url = request.form.get("next") or url_for("index")
+            return redirect(next_url)
+        flash("Invalid dashboard password.", "danger")
+
+    next_url = request.args.get("next") or request.form.get("next") or url_for("index")
+    return render_template_string(
+        """
+        <!doctype html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Ninoclaw Dashboard Login</title>
+          <style>
+            body { background:#07111f; color:#edf4ff; font-family:system-ui, sans-serif; display:flex; min-height:100vh; align-items:center; justify-content:center; margin:0; }
+            .card { width:min(420px, 92vw); background:#0f1b2d; border:1px solid #243853; border-radius:18px; padding:28px; box-shadow:0 18px 60px rgba(0,0,0,.35); }
+            input { width:100%; box-sizing:border-box; border-radius:12px; border:1px solid #243853; background:#132238; color:#edf4ff; padding:14px 16px; margin:14px 0; }
+            button { width:100%; border:0; border-radius:12px; padding:14px 16px; background:#5ca8ff; color:#07111f; font-weight:700; cursor:pointer; }
+            .muted { color:#97a8c4; font-size:.95rem; }
+            .flash { color:#ff8f83; margin-top:10px; }
+          </style>
+        </head>
+        <body>
+          <form class="card" method="post">
+            <h1 style="margin:0 0 8px;">Ninoclaw Dashboard</h1>
+            <div class="muted">Enter the dashboard password from your <code>.env</code>.</div>
+            <input type="hidden" name="next" value="{{ next_url }}">
+            <input type="password" name="password" placeholder="Dashboard password" autofocus required>
+            <button type="submit">Unlock</button>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+              {% if messages %}
+                <div class="flash">{{ messages[-1][1] }}</div>
+              {% endif %}
+            {% endwith %}
+          </form>
+        </body>
+        </html>
+        """,
+        next_url=next_url,
+    )
 
 @app.route("/logout")
 def logout():
-    return redirect(url_for("index"))
+    session.pop("dashboard_auth", None)
+    return redirect(url_for("login"))
 
 @app.route("/")
 @require_login
@@ -1905,7 +2003,7 @@ def api_mobile_tasks_create_reminder():
     if not user_id or not name or not when:
         return jsonify({"error": "user_id, name, and when are required"}), 400
 
-    scheduled_time = task_manager.parse_time(when)
+    scheduled_time = task_manager.parse_time(when, user_id=user_id)
     task_id = task_manager.add_task(user_id, name, scheduled_time)
     return jsonify({"ok": True, "task_id": task_id, "tasks": _tasks_payload()})
 
@@ -1940,7 +2038,7 @@ def api_mobile_tasks_update_reminder(task_id):
     if not name or not when:
         return jsonify({"error": "name and when are required"}), 400
 
-    scheduled_time = task_manager.parse_time(when)
+    scheduled_time = task_manager.parse_time(when, user_id=user_id)
     conn = sqlite3.connect(DB_FILE)
     cur = conn.execute(
         "UPDATE tasks SET name=?, scheduled_time=? WHERE id=?",

@@ -697,7 +697,7 @@ async def add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     task_name = " ".join(context.args)
     # Default: schedule in 1 hour
-    ts = task_manager.parse_time("in 60 minutes")
+    ts = task_manager.parse_time("in 60 minutes", user_id=user_id)
     task_id = task_manager.add_task(user_id, task_name, ts)
 
     time_str = task_manager.format_timestamp(ts)
@@ -715,7 +715,7 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     time_str = context.args[0]
     message = " ".join(context.args[1:])
 
-    ts = task_manager.parse_time(time_str)
+    ts = task_manager.parse_time(time_str, user_id=user_id)
     task_id = task_manager.add_task(user_id, f"⏰ Reminder: {message}", ts)
 
     time_str_formatted = task_manager.format_timestamp(ts)

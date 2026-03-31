@@ -4,6 +4,7 @@ Core bot startup — use cli.py / ninoclaw command for full CLI experience.
 """
 import os
 import sys
+import atexit
 
 # ── Load .env before importing config ────────────────────────────────────────
 from dotenv import load_dotenv
@@ -21,6 +22,28 @@ from ai import test_connection
 from tasks import task_manager
 from bg_agent import bg_runner
 from security_audit import security_auditor
+from sqlite_utils import maybe_backup_database
+
+_LOCK_FILE = None
+
+
+def _run_async_periodic(check_fn, error_label):
+    """Run an async checker in a thread-safe loop with guaranteed cleanup."""
+    import asyncio
+
+    loop = None
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(check_fn())
+    except Exception as e:
+        print(f"❌ {error_label} error: {e}")
+    finally:
+        if loop is not None:
+            try:
+                loop.close()
+            except Exception as close_error:
+                print(f"⚠️  {error_label} loop cleanup error: {close_error}")
 
 def print_banner():
     """Print startup banner"""
@@ -143,6 +166,7 @@ def start_dashboard():
 
 def acquire_lock():
     """Ensure only one instance runs. Returns lock file path or exits."""
+    global _LOCK_FILE
     lock_path = os.path.join(os.path.dirname(__file__), ".ninoclaw.lock")
     lock_file = open(lock_path, "w")
     try:
@@ -154,6 +178,8 @@ def acquire_lock():
             fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         lock_file.write(str(os.getpid()))
         lock_file.flush()
+        _LOCK_FILE = lock_file
+        atexit.register(lambda: release_lock(_LOCK_FILE))
         return lock_file  # keep reference alive
     except OSError:
         print("❌ Another Ninoclaw instance is already running!")
@@ -162,6 +188,15 @@ def acquire_lock():
         else:
             print("   Stop it first: pkill -f 'python.*main.py'")
         sys.exit(1)
+
+
+def release_lock(lock_file):
+    if not lock_file:
+        return
+    try:
+        lock_file.close()
+    except Exception:
+        pass
 
 
 def ask_personalization():
@@ -239,6 +274,7 @@ def ask_personalization():
 def main():
     """Main entry point"""
     lock = acquire_lock()  # noqa: F841 — keep lock held
+    maybe_backup_database()
 
     print_banner()
 
@@ -292,14 +328,7 @@ def main():
         import threading
         def research_checker():
             while True:
-                try:
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(researcher.check_and_research())
-                    loop.close()
-                except Exception as e:
-                    print(f"❌ Research checker error: {e}")
+                _run_async_periodic(researcher.check_and_research, "Research checker")
                 # Check every hour
                 import time
                 time.sleep(3600)
@@ -317,14 +346,7 @@ def main():
         # Add periodic task to check for autonomous job search
         def job_search_checker():
             while True:
-                try:
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(job_searcher.check_and_search())
-                    loop.close()
-                except Exception as e:
-                    print(f"❌ Job search checker error: {e}")
+                _run_async_periodic(job_searcher.check_and_search, "Job search checker")
                 # Check every hour
                 import time
                 time.sleep(3600)
@@ -370,3 +392,5 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        release_lock(_LOCK_FILE)

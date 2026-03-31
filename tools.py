@@ -8,6 +8,7 @@ import asyncio
 import os
 import subprocess
 import json
+import shlex
 from dotenv import load_dotenv
 from run_traces import increment_run_counter, log_event
 
@@ -448,7 +449,7 @@ async def _run_claude_code_pass(args, timeout):
     return payload, raw_err, None
 
 
-def _claude_visible_windows_command(task_desc: str, repo_dir: str, max_passes: int) -> str:
+def _claude_visible_windows_script(task_desc: str, repo_dir: str, max_passes: int) -> str:
     task_json = json.dumps(task_desc)
     repo_json = json.dumps(repo_dir)
     loop_json = json.dumps(
@@ -468,8 +469,23 @@ def _claude_visible_windows_command(task_desc: str, repo_dir: str, max_passes: i
         f"claude --continue -p --output-format text --max-turns 6 --cwd $repo $nextPrompt "
         f"}}"
     )
-    escaped = script.replace('"', '`"')
-    return f'start "Claude Code Expert" powershell -NoExit -Command "{escaped}"'
+    return script
+
+
+def _spawn_windows_terminal(command, title="Ninoclaw Agent", cwd=None):
+    creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    return subprocess.Popen(
+        command,
+        cwd=cwd,
+        creationflags=creationflags,
+        env={**os.environ, "HOME": os.path.expanduser("~")},
+    )
+
+
+def _shell_exec_args(command: str):
+    if os.name == "nt":
+        return ["cmd.exe", "/c", command]
+    return ["bash", "-lc", command]
 def _tool_requires_owner(tool_name: str) -> bool:
     return tool_name in _OWNER_ONLY_TOOLS or tool_name in _OWNER_ONLY_SKILL_TOOLS
 
@@ -724,7 +740,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
     if tool_name == "schedule_reminder":
         message = arguments.get("message", "Reminder!")
         when = arguments.get("when", "in 5 minutes")
-        ts = task_manager.parse_time(when)
+        ts = task_manager.parse_time(when, user_id=user_id)
         task_manager.add_task(user_id, f"⏰ {message}", ts)
         time_str = task_manager.format_timestamp(ts)
         return f"⏰ Reminder set!\n\n📝 {message}\n📅 {time_str}"
@@ -889,7 +905,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             return f"❌ Sub-agent failed: {e}"
 
 
-    if tool_name == "claude_code":
+    if False and tool_name == "claude_code":
         err = require_owner(user_id)
         if err:
             return err
@@ -917,7 +933,16 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         if visible:
             try:
                 if os.name == 'nt':
-                    subprocess.Popen(_claude_visible_windows_command(task_desc, repo_dir, max_passes), shell=True)
+                    _spawn_windows_terminal(
+                        [
+                            "powershell.exe",
+                            "-NoExit",
+                            "-Command",
+                            _claude_visible_windows_script(task_desc, repo_dir, max_passes),
+                        ],
+                        title="Claude Code Expert",
+                        cwd=repo_dir,
+                    )
                     return (
                         f"✅ Claude Code launched in a visible continuous session window "
                         f"(up to {max_passes} passes). You can watch it iterate there."
@@ -936,8 +961,14 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
                     from shutil import which
                     if which('x-terminal-emulator'):
                         subprocess.Popen(
-                            f'x-terminal-emulator -e "bash -lc \'cd {repo_dir} && claude -p {json.dumps(initial_prompt)}; exec bash\'"',
-                            shell=True
+                            [
+                                "x-terminal-emulator",
+                                "-e",
+                                "bash",
+                                "-lc",
+                                f"cd {shlex.quote(repo_dir)} && claude -p {shlex.quote(initial_prompt)}; exec bash",
+                            ],
+                            env={**os.environ, "HOME": os.path.expanduser("~")},
                         )
                         return "✅ Claude Code launched in a new visible terminal window."
             except Exception as e:
@@ -1019,7 +1050,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             try:
                 if os.name == 'nt':
                     # Windows
-                    subprocess.Popen(f'start "Ninoclaw Agent" cmd /k "{command}"', shell=True)
+                    _spawn_windows_terminal(["cmd.exe", "/k", command], title="Ninoclaw Agent")
                     return "✅ Command launched in a new visible terminal window."
                 elif os.uname().sysname == 'Darwin':
                     # macOS
@@ -1029,7 +1060,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
                     # Termux
                     from shutil import which
                     if which('tmux'):
-                        subprocess.Popen(f'tmux new-window -n "Ninoclaw" "{command}"', shell=True)
+                        subprocess.Popen(["tmux", "new-window", "-n", "Ninoclaw", command])
                         return "✅ Command launched in a new tmux window."
                     else:
                         pass # Fallback to invisible
@@ -1037,10 +1068,10 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
                     # Linux Desktop
                     from shutil import which
                     if which('x-terminal-emulator'):
-                        subprocess.Popen(f'x-terminal-emulator -e "bash -c \\"{command}; exec bash\\""', shell=True)
+                        subprocess.Popen(["x-terminal-emulator", "-e", "bash", "-lc", f"{command}; exec bash"])
                         return "✅ Command launched in a new visible terminal window."
                     elif which('gnome-terminal'):
-                        subprocess.Popen(f'gnome-terminal -- bash -c "{command}; exec bash"', shell=True)
+                        subprocess.Popen(["gnome-terminal", "--", "bash", "-lc", f"{command}; exec bash"])
                         return "✅ Command launched in a new visible terminal window."
                     
             except Exception as e:
@@ -1049,8 +1080,8 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
         # Invisible Execution
         try:
             # Use async execution to avoid blocking the event loop
-            process = await asyncio.create_subprocess_shell(
-                command,
+            process = await asyncio.create_subprocess_exec(
+                *_shell_exec_args(command),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env={**__import__('os').environ, "HOME": __import__('os').path.expanduser("~")}
@@ -1137,7 +1168,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
                 if os.name == 'nt':
                     # Windows: Launch in a new window and stay open
                     # Popen is non-blocking, so this is fine
-                    subprocess.Popen(f'start "Claude Code Expert" cmd /k "claude \"{task_desc}\""', shell=True)
+                    _spawn_windows_terminal(["cmd.exe", "/k", f'claude "{task_desc}"'], title="Claude Code Expert")
                     return "✅ Claude Code launched in a new visible terminal window. You can watch it work there!"
                 elif os.uname().sysname == 'Darwin':
                     subprocess.Popen(['osascript', '-e', f'tell application "Terminal" to do script "claude {task_desc}"'])
@@ -1145,7 +1176,7 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
                 else:
                     from shutil import which
                     if which('x-terminal-emulator'):
-                        subprocess.Popen(f'x-terminal-emulator -e "claude \\"{task_desc}\\""', shell=True)
+                        subprocess.Popen(["x-terminal-emulator", "-e", "bash", "-lc", f'claude {shlex.quote(task_desc)}; exec bash'])
                         return "✅ Claude Code launched in a new visible terminal window."
             except Exception as e:
                 return f"⚠️ Failed to launch visible terminal: {e}. Executing invisibly instead..."
@@ -1278,6 +1309,13 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
             if m_code:
                 patched_code = m_code.group(1).strip()
                 if patched_code:
+                    validation_error = validate_skill_code(patched_code)
+                    if validation_error:
+                        return (
+                            f"❌ Skill error ({tool_name}): {e}\n\n"
+                            f"Auto-heal produced unsafe code and was rejected: {validation_error}\n\n"
+                            f"Traceback:\n{tb}"
+                        )
                     with open(skill_file, "w", encoding="utf-8") as f:
                         f.write(patched_code)
                     
