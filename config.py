@@ -214,7 +214,6 @@ ENABLE_SELF_UPDATE = os.getenv("ENABLE_SELF_UPDATE", "true") != "false"
 
 # Dashboard
 DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "8080"))
-DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "admin")
 
 # Memory Settings
 MEMORY_FILE = "memory.json"
