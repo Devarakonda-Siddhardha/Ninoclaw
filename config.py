@@ -36,7 +36,11 @@ TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 DISCORD_BOT_TOKEN = _env("DISCORD_BOT_TOKEN", "")
 
 # Bot Owner - Only this Telegram user ID can trigger /update and admin commands
-OWNER_ID = int(_env("OWNER_ID", "0"))  # 0 = not set
+try:
+    OWNER_ID = int(_env("OWNER_ID", "0"))
+except (ValueError, TypeError):
+    print("⚠️  OWNER_ID in .env is not a valid integer — defaulting to 0 (disabled).")
+    OWNER_ID = 0
 
 # Personalization - set via wizard or .env directly
 AGENT_NAME = _env("AGENT_NAME", "Ninoclaw")
@@ -186,7 +190,14 @@ ENABLE_CRON = os.getenv("ENABLE_CRON", "true") != "false"
 ENABLE_SELF_UPDATE = os.getenv("ENABLE_SELF_UPDATE", "true") != "false"
 
 # Dashboard
-DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "8080"))
+try:
+    DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "8080"))
+    if not (1 <= DASHBOARD_PORT <= 65535):
+        print(f"⚠️  DASHBOARD_PORT={DASHBOARD_PORT} is out of range — defaulting to 8080.")
+        DASHBOARD_PORT = 8080
+except (ValueError, TypeError):
+    print("⚠️  DASHBOARD_PORT in .env is not a valid integer — defaulting to 8080.")
+    DASHBOARD_PORT = 8080
 DASHBOARD_PASSWORD = _env("DASHBOARD_PASSWORD", "")
 DASHBOARD_SECRET_KEY = _env("DASHBOARD_SECRET_KEY", "")
 
