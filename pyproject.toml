@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ninoclaw"
+version = "0.1.0"
+description = "Ninoclaw personal AI assistant"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Ninoclaw contributors" }
+]
+dynamic = ["dependencies"]
+
+[project.scripts]
+ninoclaw = "cli:main"
+
+[tool.setuptools]
+py-modules = [
+  "agent",
+  "ai",
+  "autonomous_job_searcher",
+  "autonomous_researcher",
+  "bg_agent",
+  "chat_runtime",
+  "cli",
+  "config",
+  "dashboard",
+  "discord_bot",
+  "expo_manager",
+  "main",
+  "mcp_manager",
+  "memory",
+  "memory_compressor",
+  "proactive",
+  "run_traces",
+  "runtime_capabilities",
+  "security",
+  "security_audit",
+  "skill_manager",
+  "sqlite_utils",
+  "subagent",
+  "summarizer",
+  "tasks",
+  "telegram_bot",
+  "tools",
+  "updater",
+  "wizard"
+]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }

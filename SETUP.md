@@ -12,13 +12,15 @@ A lightweight personal AI assistant with memory, scheduling, web search, image v
 git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
 cd Ninoclaw
 
-# 2. Install dependencies
-pip install -r requirements.txt
+# 2. Install Ninoclaw as a local editable package
+pip install -e .
 
 # 3. Run setup wizard + start bot
-.\ninoclaw setup
-.\ninoclaw start
+ninoclaw setup
+ninoclaw start
 ```
+
+If you skip package installation, you can still use `.\ninoclaw setup` and `.\ninoclaw start` from inside the repo.
 
 ### Linux / macOS / Termux 🐧🍎
 ```bash
@@ -29,14 +31,9 @@ sudo apt install python3 git -y    # Ubuntu
 # 2. Clone repository & install python packages
 git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
 cd Ninoclaw
-pip install -r requirements.txt
+pip install -e .
 
-# 3. Make CLI available globally
-chmod +x ninoclaw
-ln -s "$(pwd)/ninoclaw" "$PREFIX/bin/ninoclaw"          # Termux
-sudo ln -s "$(pwd)/ninoclaw" "/usr/local/bin/ninoclaw"  # Linux/macOS
-
-# 4. Run setup wizard + start bot
+# 3. Run setup wizard + start bot
 ninoclaw setup
 ninoclaw start
 ```

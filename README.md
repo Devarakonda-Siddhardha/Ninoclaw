@@ -119,17 +119,28 @@ Mobile companion app:
 ```powershell
 git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
 cd Ninoclaw
+pip install -e .
+ninoclaw setup
+ninoclaw start
+```
+
+If you prefer not to install the package, you can still use the repo-local launcher:
+
+```powershell
 .\ninoclaw setup
 .\ninoclaw start
 ```
+
+The packaged CLI is the recommended path for plain `ninoclaw ...` commands. The repo-local batch launcher still bootstraps `.venv`, repairs `pip` if needed, and installs `requirements.txt` automatically on first run.
 
 ### Linux / macOS / Termux
 
 ```bash
 git clone https://github.com/Devarakonda-Siddhardha/Ninoclaw.git
 cd Ninoclaw
-./ninoclaw setup
-./ninoclaw start
+pip install -e .
+ninoclaw setup
+ninoclaw start
 ```
 
 `setup` and `start` now auto-install Python dependencies from `requirements.txt` when needed. If you change `requirements.txt` later, the next `setup` or `start` run will refresh them automatically.

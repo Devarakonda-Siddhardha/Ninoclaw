@@ -6,9 +6,12 @@ import sys
 import subprocess
 import shutil
 
-# Load .env before anything else
-from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # Colors
 G   = "\033[92m"
@@ -40,6 +43,7 @@ HELP = f"""
   {G}dashboard{RST}          Start the web dashboard (default port 8080)
   {G}health{RST}             Check Python, Node, Expo, Ollama, and local environment
   {G}fixenv{RST}             Install/repair common local dependencies for this repo
+  {G}install{RST}            Install global ninoclaw launcher for this user
   {G}model{RST}              Show or change the AI model
     {DIM}ninoclaw model{RST}          Show current model
     {DIM}ninoclaw model <name>{RST}   Switch to a different model
@@ -64,13 +68,197 @@ HELP = f"""
   {DIM}ninoclaw setup{RST}              Configure API keys, model, etc.
   {DIM}ninoclaw reset{RST}              Wipe config and start fresh
   {DIM}ninoclaw status{RST}             Check what's configured
+  {DIM}ninoclaw install{RST}            Make ninoclaw available on PATH
   {DIM}ninoclaw memory clear{RST}       Clear all conversations
   {DIM}ninoclaw memory stats{RST}       Show how much is stored
 """
 
 REPO_DIR = os.path.dirname(__file__)
+VENV_DIR = os.path.join(REPO_DIR, ".venv")
+if os.name == "nt":
+    VENV_PYTHON = os.path.join(VENV_DIR, "Scripts", "python.exe")
+else:
+    VENV_PYTHON = os.path.join(VENV_DIR, "bin", "python")
 REQUIREMENTS_FILE = os.path.join(REPO_DIR, "requirements.txt")
 REQUIREMENTS_STAMP = os.path.join(REPO_DIR, ".requirements.installed")
+
+
+def load_repo_env():
+    """Best-effort .env load after dependencies are available."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(os.path.join(REPO_DIR, ".env"), override=False)
+
+
+def _same_path(a, b):
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def _running_in_repo_venv():
+    return os.path.exists(VENV_PYTHON) and _same_path(sys.executable, VENV_PYTHON)
+
+
+def _find_bootstrap_python():
+    launcher = shutil.which("py")
+    if launcher:
+        return [launcher]
+    python = shutil.which("python")
+    if python:
+        return [python]
+    if sys.executable and os.path.exists(sys.executable):
+        return [sys.executable]
+    return None
+
+
+def _run_python_command(python_cmd, extra_args, **kwargs):
+    return subprocess.run([*python_cmd, *extra_args], cwd=REPO_DIR, **kwargs)
+
+
+def ensure_repo_venv():
+    """Create the repo-local virtualenv and make sure pip exists."""
+    python_cmd = _find_bootstrap_python()
+    if not python_cmd:
+        print(f"{R}Python launcher not found. Install Python 3 and try again.{RST}")
+        return False
+
+    if not os.path.exists(VENV_PYTHON):
+        print(f"{C}Creating repo virtual environment...{RST}")
+        result = _run_python_command(python_cmd, ["-m", "venv", VENV_DIR])
+        if result.returncode != 0 or not os.path.exists(VENV_PYTHON):
+            print(f"{R}Failed to create .venv in this repo.{RST}")
+            return False
+
+    pip_check = subprocess.run(
+        [VENV_PYTHON, "-m", "pip", "--version"],
+        cwd=REPO_DIR,
+        capture_output=True,
+        text=True,
+    )
+    if pip_check.returncode == 0:
+        return True
+
+    print(f"{Y}Repo virtualenv is missing pip. Repairing it with ensurepip...{RST}")
+    temp_dir = os.path.join(REPO_DIR, ".tmp")
+    os.makedirs(temp_dir, exist_ok=True)
+    repair_env = os.environ.copy()
+    repair_env["TMP"] = temp_dir
+    repair_env["TEMP"] = temp_dir
+    repair = subprocess.run(
+        [VENV_PYTHON, "-m", "ensurepip", "--upgrade"],
+        cwd=REPO_DIR,
+        env=repair_env,
+    )
+    if repair.returncode != 0:
+        print(f"{Y}ensurepip failed. Rebuilding the repo virtual environment...{RST}")
+        rebuild = _run_python_command(python_cmd, ["-m", "venv", "--clear", VENV_DIR])
+        if rebuild.returncode != 0 or not os.path.exists(VENV_PYTHON):
+            print(f"{R}Failed to rebuild .venv in this repo.{RST}")
+            return False
+
+    pip_check = subprocess.run(
+        [VENV_PYTHON, "-m", "pip", "--version"],
+        cwd=REPO_DIR,
+        capture_output=True,
+        text=True,
+    )
+    if pip_check.returncode != 0:
+        print(f"{R}pip is still unavailable inside .venv after repair.{RST}")
+        return False
+    return True
+
+
+def relaunch_in_repo_venv():
+    """Run the current CLI command inside the repo-local virtualenv."""
+    if not ensure_repo_venv():
+        sys.exit(1)
+    if _running_in_repo_venv():
+        return
+
+    print(f"{C}Switching to repo virtual environment...{RST}")
+    result = subprocess.run([VENV_PYTHON, __file__, *sys.argv[1:]], cwd=REPO_DIR)
+    sys.exit(result.returncode)
+
+
+def _user_bin_dir():
+    if os.name == "nt":
+        return os.path.join(os.path.expanduser("~"), ".local", "bin")
+    return os.path.join(os.path.expanduser("~"), ".local", "bin")
+
+
+def _path_entries():
+    return [p.strip().rstrip("\\/") for p in os.environ.get("PATH", "").split(os.pathsep) if p.strip()]
+
+
+def _path_contains(path):
+    target = os.path.normcase(os.path.abspath(path)).rstrip("\\/")
+    return any(os.path.normcase(os.path.abspath(entry)).rstrip("\\/") == target for entry in _path_entries())
+
+
+def _add_windows_user_path(path):
+    try:
+        import winreg
+    except ImportError:
+        return False, "winreg unavailable"
+
+    normalized = os.path.abspath(path)
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE) as key:
+        try:
+            current, reg_type = winreg.QueryValueEx(key, "Path")
+        except FileNotFoundError:
+            current, reg_type = "", winreg.REG_EXPAND_SZ
+
+        existing = [p.strip().rstrip("\\/") for p in current.split(os.pathsep) if p.strip()]
+        normalized_existing = [os.path.normcase(os.path.abspath(p)).rstrip("\\/") for p in existing]
+        if os.path.normcase(normalized).rstrip("\\/") in normalized_existing:
+            return True, "already on PATH"
+
+        updated = current + (os.pathsep if current else "") + normalized
+        winreg.SetValueEx(key, "Path", 0, reg_type, updated)
+    return True, "added to user PATH"
+
+
+def _install_windows_launcher():
+    bin_dir = _user_bin_dir()
+    os.makedirs(bin_dir, exist_ok=True)
+
+    launcher_path = os.path.join(bin_dir, "ninoclaw.cmd")
+    repo_launcher = os.path.join(REPO_DIR, "ninoclaw.bat")
+    content = (
+        "@echo off\n"
+        f"call \"{repo_launcher}\" %*\n"
+    )
+    with open(launcher_path, "w", encoding="utf-8", newline="\r\n") as f:
+        f.write(content)
+
+    if _path_contains(bin_dir):
+        return launcher_path, True, "already on PATH"
+
+    ok, detail = _add_windows_user_path(bin_dir)
+    return launcher_path, ok, detail
+
+
+def _install_unix_launcher():
+    bin_dir = _user_bin_dir()
+    os.makedirs(bin_dir, exist_ok=True)
+    launcher_path = os.path.join(bin_dir, "ninoclaw")
+    repo_launcher = os.path.join(REPO_DIR, "ninoclaw")
+
+    try:
+        if os.path.lexists(launcher_path):
+            os.remove(launcher_path)
+        os.symlink(repo_launcher, launcher_path)
+    except OSError:
+        content = (
+            "#!/usr/bin/env bash\n"
+            f"exec \"{repo_launcher}\" \"$@\"\n"
+        )
+        with open(launcher_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(content)
+        os.chmod(launcher_path, 0o755)
+
+    return launcher_path, _path_contains(bin_dir), "already on PATH" if _path_contains(bin_dir) else "add ~/.local/bin to PATH"
 
 
 def _requirements_stamp_value():
@@ -84,6 +272,9 @@ def ensure_requirements_installed():
     """Install Python dependencies when requirements.txt is new or changed."""
     if not os.path.exists(REQUIREMENTS_FILE):
         return True
+
+    if not ensure_repo_venv():
+        return False
 
     expected = _requirements_stamp_value()
     current = None
@@ -123,7 +314,7 @@ def ensure_requirements_installed():
 
     print(f"{C}Installing core dependencies...{RST}")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install"] + core_packages,
+        [VENV_PYTHON, "-m", "pip", "install"] + core_packages,
         cwd=REPO_DIR,
     )
 
@@ -141,7 +332,7 @@ def ensure_requirements_installed():
     for pkg_name, pkg_spec in optional_packages:
         print(f"{C}Installing optional package: {pkg_name}...{RST}")
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", pkg_spec],
+            [VENV_PYTHON, "-m", "pip", "install", pkg_spec],
             cwd=REPO_DIR,
             capture_output=True,
             text=True
@@ -182,8 +373,14 @@ def _tool_ok(command, args=None):
 
 def collect_environment_health():
     checks = []
-    venv_python = os.path.join(REPO_DIR, ".venv", "Scripts", "python.exe")
-    checks.append(("Repo Python", os.path.exists(venv_python), venv_python if os.path.exists(venv_python) else "missing .venv\\Scripts\\python.exe"))
+    checks.append(("Repo Python", os.path.exists(VENV_PYTHON), VENV_PYTHON if os.path.exists(VENV_PYTHON) else f"missing {os.path.relpath(VENV_PYTHON, REPO_DIR)}"))
+    pip_ok = os.path.exists(VENV_PYTHON) and subprocess.run(
+        [VENV_PYTHON, "-m", "pip", "--version"],
+        cwd=REPO_DIR,
+        capture_output=True,
+        text=True,
+    ).returncode == 0
+    checks.append(("Repo pip", pip_ok, "pip ready in .venv" if pip_ok else "run .\\ninoclaw fixenv"))
 
     python_ok, python_info = _tool_ok("py", ["-V"])
     checks.append(("Windows Python launcher", python_ok, python_info))
@@ -258,6 +455,43 @@ def cmd_fixenv():
         mark = f"{G}OK{RST}" if ok_state else f"{R}MISS{RST}"
         print(f"  {label:<24} {mark}  {DIM}{detail}{RST}")
     print()
+
+
+def cmd_install():
+    """Install a user-local launcher so 'ninoclaw' works from anywhere."""
+    try:
+        if os.name == "nt":
+            launcher_path, path_ok, detail = _install_windows_launcher()
+            print(f"\n{C}Installed Windows launcher{RST}")
+            print(f"  Launcher: {W}{launcher_path}{RST}")
+            if path_ok:
+                print(f"  PATH: {G}{detail}{RST}")
+                print(f"\n{G}Open a new terminal, then run:{RST}")
+                print(f"  {W}ninoclaw setup{RST}")
+                print(f"  {W}ninoclaw start{RST}\n")
+            else:
+                print(f"  PATH: {Y}{detail}{RST}")
+                print(f"\n{Y}Add this folder to your user PATH, then open a new terminal:{RST}")
+                print(f"  {W}{_user_bin_dir()}{RST}\n")
+            return
+
+        launcher_path, path_ok, detail = _install_unix_launcher()
+    except OSError as exc:
+        print(f"\n{R}Install failed:{RST} {exc}")
+        print(f"{Y}Try running from a terminal with permission to write to {W}{_user_bin_dir()}{Y}.{RST}\n")
+        return
+
+    print(f"\n{C}Installed launcher{RST}")
+    print(f"  Launcher: {W}{launcher_path}{RST}")
+    if path_ok:
+        print(f"  PATH: {G}{detail}{RST}")
+        print(f"\n{G}Open a new shell, then run:{RST}")
+        print(f"  {W}ninoclaw setup{RST}")
+        print(f"  {W}ninoclaw start{RST}\n")
+    else:
+        print(f"  PATH: {Y}{detail}{RST}")
+        print(f"\n{Y}Add this to your shell profile, then open a new shell:{RST}")
+        print(f"  {W}export PATH=\"$HOME/.local/bin:$PATH\"{RST}\n")
 
 
 def cmd_start():
@@ -786,8 +1020,13 @@ def cmd_integrations(args):
 
 
 def main():
+    load_repo_env()
     args = sys.argv[1:]
     cmd  = args[0].lower() if args else "start"
+
+    if cmd in ("start", "run", "setup", "onboard", "configure", "config", "health", "fixenv"):
+        relaunch_in_repo_venv()
+        load_repo_env()
 
     if cmd in ("start", "run"):
         cmd_start()
@@ -807,6 +1046,8 @@ def main():
         cmd_health()
     elif cmd == "fixenv":
         cmd_fixenv()
+    elif cmd == "install":
+        cmd_install()
     elif cmd == "model":
         cmd_model(args[1:])
     elif cmd == "think":

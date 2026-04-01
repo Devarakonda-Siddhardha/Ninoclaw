@@ -3,6 +3,9 @@
 __pycache__/
 *.pyc
 *.pyo
+.venv/
+.tmp/
+.pkgtest/
 memory.json
 tasks.json
 cron_jobs.json
