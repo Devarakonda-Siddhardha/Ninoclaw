@@ -1323,9 +1323,12 @@ async def execute_tool(tool_name: str, arguments: Dict[str, Any], user_id: int, 
                     _sm.load_skills()
                     reload_runtime_state()
                     
-                    # Intercept: Retry the tool execution entirely with the patched skill
-                    retry_result = _sm.execute(tool_name, arguments)
-                    return f"⚠️ **Self-Healing Triggered:** The skill `{tool_name}` threw a `{type(e).__name__}`. I automatically patched the code and recovered successfully.\n\n{retry_result}"
+                    # Retry once — if the patched skill still crashes, give up
+                    try:
+                        retry_result = _sm.execute(tool_name, arguments)
+                        return f"⚠️ **Self-Healing Triggered:** The skill `{tool_name}` threw a `{type(e).__name__}`. I automatically patched the code and recovered successfully.\n\n{retry_result}"
+                    except Exception as retry_err:
+                        return f"❌ Skill error ({tool_name}): {e}\n\n*(Auto-heal patched the code but it still failed: {retry_err})*\n\nOriginal traceback:\n{tb}"
                 
         except Exception as heal_err:
             return f"❌ Skill error ({tool_name}): {e}\n\n*(Auto-heal also failed: {heal_err})*\n\nTraceback:\n{tb}"

@@ -196,6 +196,10 @@ class TaskManager:
         except Exception:
             return None, None
 
+    def _clamp_time(self, hour, minute=0):
+        """Ensure hour (0-23) and minute (0-59) are within valid bounds."""
+        return max(0, min(23, hour)), max(0, min(59, minute))
+
     def _daily_to_cron(self, match):
         hour = int(match.group(1))
         minute = int(match.group(2)) if match.group(2) else 0
@@ -204,6 +208,7 @@ class TaskManager:
             hour += 12
         elif ampm == 'am' and hour == 12:
             hour = 0
+        hour, minute = self._clamp_time(hour, minute)
         return f"{minute} {hour} * * *"
 
     def _daily_to_cron_simple(self, match):
@@ -213,6 +218,7 @@ class TaskManager:
             hour += 12
         elif ampm == 'am' and hour == 12:
             hour = 0
+        hour, _ = self._clamp_time(hour)
         return f"0 {hour} * * *"
 
     def _weekday_to_cron(self, match):
@@ -228,6 +234,7 @@ class TaskManager:
             hour += 12
         elif ampm == 'am' and hour == 12:
             hour = 0
+        hour, minute = self._clamp_time(hour, minute)
         return f"{minute} {hour} * * 1-5"
 
     def _weekends_to_cron(self, match):
@@ -238,6 +245,7 @@ class TaskManager:
             hour += 12
         elif ampm == 'am' and hour == 12:
             hour = 0
+        hour, minute = self._clamp_time(hour, minute)
         return f"{minute} {hour} * * 0,6"
 
     def add_cron_job(self, user_id, name, expression, command):
