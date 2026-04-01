@@ -4,14 +4,13 @@ Memory management for Ninoclaw — SQLite backend
 import sqlite3
 import json
 from datetime import datetime
+from sqlite_utils import connect_db
 from config import MAX_MEMORY_SIZE, CONTEXT_WINDOW
 
 DB_FILE = "ninoclaw.db"
 
 def _get_conn():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect_db(DB_FILE)
 
 def _init_db():
     conn = _get_conn()

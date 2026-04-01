@@ -16,6 +16,7 @@ The bridge listens on port 5055 by default.
 """
 import subprocess
 import os
+import shlex
 
 try:
     from flask import Flask, request, jsonify
@@ -30,7 +31,7 @@ PORT = int(os.getenv("MUSIC_BRIDGE_PORT", "5055"))
 def run_cmd(cmd):
     """Run a shell command and return output."""
     try:
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+        r = subprocess.run(shlex.split(cmd), capture_output=True, text=True, timeout=10)
         return r.stdout.strip()
     except Exception as e:
         return str(e)
@@ -46,7 +47,7 @@ def music_control():
         url = data.get("url", "")
         if url:
             # Open YouTube Music in the browser/app
-            run_cmd(f'am start -a android.intent.action.VIEW -d "{url}"')
+            run_cmd(f"am start -a android.intent.action.VIEW -d {shlex.quote(url)}")
             return jsonify({"result": f"🎵 Opening YouTube Music: **{query}**"})
         return jsonify({"result": "❌ No query provided"}), 400
 

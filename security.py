@@ -55,7 +55,7 @@ def safe_path(path: str) -> Optional[str]:
     Returns None if path is safe, else an error string.
     Blocks traversal and sensitive files.
     """
-    expanded = os.path.abspath(os.path.expanduser(path))
+    expanded = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
 
     # Block path traversal attempts
     if ".." in path:

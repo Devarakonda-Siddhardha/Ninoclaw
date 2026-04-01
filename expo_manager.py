@@ -14,6 +14,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
+from sqlite_utils import connect_db
 
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -24,9 +25,7 @@ DEFAULT_EXPO_TEMPLATE = "blank@sdk-54"
 
 
 def _get_conn():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect_db(DB_FILE)
 
 
 def _init_db():

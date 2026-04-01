@@ -6,16 +6,16 @@ import json
 import schedule
 import time
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Thread
 from croniter import croniter
+from zoneinfo import ZoneInfo
+from sqlite_utils import connect_db
 
 DB_FILE = "ninoclaw.db"
 
 def _get_conn():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect_db(DB_FILE)
 
 def _init_db():
     conn = _get_conn()
@@ -53,6 +53,37 @@ class TaskManager:
         self.running = False
         self.thread = None
         self.telegram_app = None
+        self._running_cron_jobs = set()
+
+    def _utc_now(self):
+        return datetime.now(timezone.utc)
+
+    def _iso_utc_now(self):
+        return self._utc_now().isoformat()
+
+    def _get_user_zone(self, user_id=None):
+        tz_name = "UTC"
+        try:
+            from memory import Memory
+            from config import TIMEZONE
+            tz_name = Memory().get_timezone(user_id) or TIMEZONE or "UTC"
+        except Exception:
+            tz_name = "UTC"
+        try:
+            return ZoneInfo(str(tz_name))
+        except Exception:
+            return timezone.utc
+
+    def _now_for_user(self, user_id=None):
+        return datetime.now(self._get_user_zone(user_id))
+
+    def _cron_next_run(self, cron_expr, user_id=None):
+        base = self._now_for_user(user_id)
+        cron = croniter(cron_expr, base)
+        next_run = cron.get_next(datetime)
+        if next_run.tzinfo is None:
+            next_run = next_run.replace(tzinfo=self._get_user_zone(user_id))
+        return next_run.timestamp()
 
     @property
     def tasks(self):
@@ -72,11 +103,11 @@ class TaskManager:
         return d
 
     def add_task(self, user_id, task_name, schedule_time, callback=None):
-        task_id = f"{datetime.now().timestamp()}".replace('.', '')
+        task_id = str(time.time_ns())
         conn = _get_conn()
         conn.execute(
             "INSERT INTO tasks (id, user_id, name, scheduled_time, completed, created_at) VALUES (?,?,?,?,0,?)",
-            (task_id, str(user_id), task_name, schedule_time, datetime.now().isoformat())
+            (task_id, str(user_id), task_name, schedule_time, self._iso_utc_now())
         )
         conn.commit()
         conn.close()
@@ -95,7 +126,7 @@ class TaskManager:
         conn = _get_conn()
         cur = conn.execute(
             "UPDATE tasks SET completed=1, completed_at=? WHERE id=?",
-            (datetime.now().isoformat(), task_id)
+            (self._iso_utc_now(), task_id)
         )
         conn.commit()
         conn.close()
@@ -107,30 +138,31 @@ class TaskManager:
         conn.commit()
         conn.close()
 
-    def parse_time(self, time_str):
+    def parse_time(self, time_str, user_id=None):
         """Parse 'in X minutes/hours/days' into a timestamp"""
         time_str = time_str.lower().strip()
+        now_ts = self._now_for_user(user_id).timestamp()
 
         match = re.search(r'in (\d+)\s*(minute|minutes|min|hour|hours|hr|day|days)', time_str)
         if match:
             amount = int(match.group(1))
             unit = match.group(2)
             if unit in ('hour', 'hours', 'hr'):
-                return datetime.now().timestamp() + amount * 3600
+                return now_ts + amount * 3600
             elif unit in ('day', 'days'):
-                return datetime.now().timestamp() + amount * 86400
+                return now_ts + amount * 86400
             else:
-                return datetime.now().timestamp() + amount * 60
+                return now_ts + amount * 60
 
-        return datetime.now().timestamp() + 300
+        return now_ts + 300
 
     def format_timestamp(self, ts):
         if ts is None:
             return "Unknown"
-        dt = datetime.fromtimestamp(ts)
+        dt = datetime.fromtimestamp(ts, timezone.utc).astimezone()
         return dt.strftime("%Y-%m-%d %H:%M")
 
-    def _parse_cron_expression(self, expr):
+    def _parse_cron_expression(self, expr, user_id=None):
         expr = expr.lower().strip()
 
         patterns = [
@@ -155,16 +187,12 @@ class TaskManager:
             if match:
                 cron_expr = converter(match)
                 try:
-                    cron = croniter(cron_expr, datetime.now())
-                    next_run = cron.get_next(datetime)
-                    return cron_expr, next_run.timestamp()
+                    return cron_expr, self._cron_next_run(cron_expr, user_id)
                 except Exception:
                     pass
 
         try:
-            cron = croniter(expr, datetime.now())
-            next_run = cron.get_next(datetime)
-            return expr, next_run.timestamp()
+            return expr, self._cron_next_run(expr, user_id)
         except Exception:
             return None, None
 
@@ -213,16 +241,15 @@ class TaskManager:
         return f"{minute} {hour} * * 0,6"
 
     def add_cron_job(self, user_id, name, expression, command):
-        print(f"[DEBUG] Parsing expression: '{expression}'")
-        cron_expr, next_run = self._parse_cron_expression(expression)
+        cron_expr, next_run = self._parse_cron_expression(expression, user_id=user_id)
         if not cron_expr:
             return None, f"Invalid cron expression: '{expression}'. Try formats like 'every day at 9am', 'hourly', 'daily', or '*/30 * * * *'"
 
-        task_id = f"{datetime.now().timestamp()}".replace('.', '')
+        task_id = str(time.time_ns())
         conn = _get_conn()
         conn.execute(
             "INSERT INTO cron_jobs (id,user_id,name,cron_expression,original_expression,command,is_active,created_at,next_run) VALUES (?,?,?,?,?,?,1,?,?)",
-            (task_id, str(user_id), name, cron_expr, expression, command, datetime.now().isoformat(), next_run)
+            (task_id, str(user_id), name, cron_expr, expression, command, self._iso_utc_now(), next_run)
         )
         conn.commit()
         conn.close()
@@ -260,7 +287,7 @@ class TaskManager:
         return self._row_to_job(row) if row else None
 
     async def check_due_tasks(self):
-        now = datetime.now().timestamp()
+        now = self._utc_now().timestamp()
         conn = _get_conn()
         rows = conn.execute(
             "SELECT * FROM tasks WHERE completed=0 AND scheduled_time<=?", (now,)
@@ -270,7 +297,7 @@ class TaskManager:
             task = self._row_to_task(row)
             conn.execute(
                 "UPDATE tasks SET completed=1, completed_at=? WHERE id=?",
-                (datetime.now().isoformat(), task["id"])
+                (self._iso_utc_now(), task["id"])
             )
             if self.telegram_app:
                 try:
@@ -333,11 +360,10 @@ This is an automated task execution. Be helpful and concise."""
                 )
 
             conn = _get_conn()
-            cron = croniter(job["cron_expression"], datetime.now())
-            next_run = cron.get_next(datetime).timestamp()
+            next_run = self._cron_next_run(job["cron_expression"], user_id)
             conn.execute(
                 "UPDATE cron_jobs SET last_run=?, next_run=? WHERE id=?",
-                (datetime.now().isoformat(), next_run, job["id"])
+                (self._iso_utc_now(), next_run, job["id"])
             )
             conn.commit()
             conn.close()
@@ -352,14 +378,21 @@ This is an automated task execution. Be helpful and concise."""
                     pass
 
     async def update_cron_schedules(self):
-        now = datetime.now().timestamp()
+        now = self._utc_now().timestamp()
         conn = _get_conn()
         rows = conn.execute(
             "SELECT * FROM cron_jobs WHERE is_active=1 AND next_run<=?", (now,)
         ).fetchall()
         conn.close()
         for row in rows:
-            await self.execute_cron_job(self._row_to_job(row))
+            job = self._row_to_job(row)
+            if job["id"] in self._running_cron_jobs:
+                continue
+            self._running_cron_jobs.add(job["id"])
+            try:
+                await self.execute_cron_job(job)
+            finally:
+                self._running_cron_jobs.discard(job["id"])
 
     def start_scheduler(self):
         if self.running:
@@ -380,8 +413,8 @@ This is an automated task execution. Be helpful and concise."""
                 try:
                     asyncio.run(self.check_due_tasks())
                     asyncio.run(self.update_cron_schedules())
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[Scheduler] Error: {e}")
                 time.sleep(1)
 
         self.thread = Thread(target=run, daemon=True)

@@ -2,11 +2,12 @@
 Ninoclaw Web Dashboard — configure plugins, view memory, manage tasks
 Run with: ninoclaw dashboard  (or python dashboard.py)
 """
-import os, re, sys, json, sqlite3, subprocess, shutil, platform
+import os, re, sys, json, sqlite3, subprocess, shutil, platform, hmac
 from functools import wraps
 from pathlib import Path
 from dotenv import load_dotenv, set_key, dotenv_values
 from run_traces import get_run, get_run_events, list_runs, summarize_runs
+from sqlite_utils import connect_db
 
 # Lazy Flask import so the rest of the app doesn't depend on it
 try:
@@ -21,7 +22,8 @@ DB_FILE   = os.path.join(os.path.dirname(__file__), "ninoclaw.db")
 DIR       = os.path.dirname(__file__)
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+_startup_env = dotenv_values(ENV_FILE)
+app.secret_key = (_startup_env.get("DASHBOARD_SECRET_KEY") or os.urandom(24).hex())
 
 # ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -31,42 +33,67 @@ def get_env():
 def save_env_key(key, value):
     set_key(ENV_FILE, key, value)
 
+
+def _dashboard_password():
+    return (get_env().get("DASHBOARD_PASSWORD") or "").strip()
+
+
+def _password_matches(candidate):
+    expected = _dashboard_password()
+    if not expected:
+        return False
+    return hmac.compare_digest(str(candidate or ""), expected)
+
 def get_db():
     if not os.path.exists(DB_FILE):
         return None
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect_db(DB_FILE)
 
 def require_login(f):
     @wraps(f)
-    def decorated(*args, **kwargs):
-        if not session.get("logged_in"):
-            return redirect(url_for("login"))
-        return f(*args, **kwargs)
-    return decorated
-
-
-def _api_password_ok():
-    env = get_env()
-    expected = (env.get("DASHBOARD_PASSWORD") or "admin").strip()
-    provided = (
-        request.headers.get("X-Dashboard-Password")
-        or request.args.get("password")
-        or ((request.get_json(silent=True) or {}).get("password") if request.is_json else None)
-        or request.form.get("password")
-        or ""
-    ).strip()
-    return bool(expected) and provided == expected
+    def wrapper(*args, **kwargs):
+        if not _dashboard_password():
+            return (
+                "Dashboard password is not configured. Run `ninoclaw setup` or set "
+                "`DASHBOARD_PASSWORD` in `.env`.",
+                503,
+            )
+        if session.get("dashboard_auth"):
+            return f(*args, **kwargs)
+        return redirect(url_for("login", next=request.path))
+    return wrapper
 
 
 def require_mobile_api(f):
     @wraps(f)
-    def decorated(*args, **kwargs):
-        if session.get("logged_in") or _api_password_ok():
-            return f(*args, **kwargs)
-        return jsonify({"error": "unauthorized"}), 401
-    return decorated
+    def wrapper(*args, **kwargs):
+        if not _dashboard_password():
+            return jsonify({"error": "Dashboard password is not configured."}), 503
+        supplied = request.headers.get("X-Dashboard-Password", "")
+        if not supplied:
+            auth = request.headers.get("Authorization", "")
+            if auth.lower().startswith("bearer "):
+                supplied = auth[7:].strip()
+        if not _password_matches(supplied):
+            return jsonify({"error": "Unauthorized"}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/fonts/;"
+        " img-src 'self' data:;"
+        " font-src 'self' https://cdn.jsdelivr.net https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/fonts/;"
+        " script-src 'self' 'unsafe-inline';"
+        " style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;"
+    )
+    return response
 
 
 def _overview_payload():
@@ -497,63 +524,64 @@ function closeNav() { document.getElementById('sidebar').classList.remove('open'
 </html>
 """
 
-LOGIN_TMPL = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ninoclaw — Login</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<style>
-  body { background:#0d1117; color:#e6edf3; display:flex; align-items:center; justify-content:center; min-height:100vh; }
-  .login-box { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:40px 36px; width:100%; max-width:380px; }
-  .login-box h1 { font-size:1.5rem; font-weight:700; color:#58a6ff; margin-bottom:6px; }
-  .login-box p { color:#8b949e; font-size:0.88rem; margin-bottom:28px; }
-  label { color:#8b949e; font-size:0.8rem; text-transform:uppercase; letter-spacing:.04em; }
-  input { background:#0d1117; border:1px solid #30363d; color:#e6edf3; border-radius:6px; padding:10px 14px; width:100%; margin-top:4px; font-size:0.92rem; outline:none; }
-  input:focus { border-color:#58a6ff; box-shadow:0 0 0 3px rgba(88,166,255,.15); }
-  button { background:#58a6ff; color:#000; border:none; border-radius:6px; padding:10px; width:100%; font-weight:600; margin-top:16px; cursor:pointer; font-size:0.95rem; }
-  .err { background:rgba(248,81,73,.1); border:1px solid rgba(248,81,73,.3); color:#f85149; border-radius:6px; padding:8px 14px; margin-bottom:14px; font-size:.85rem; }
-</style>
-</head>
-<body>
-<div class="login-box">
-  <h1>🦀 Ninoclaw</h1>
-  <p>Sign in to the dashboard</p>
-  {% if error %}<div class="err">{{ error }}</div>{% endif %}
-  <form method="POST">
-    <label>Password</label>
-    <input type="password" name="password" placeholder="Dashboard password" autofocus>
-    <button type="submit">Sign In</button>
-  </form>
-</div>
-</body>
-</html>
-"""
-
 # ─── routes ─────────────────────────────────────────────────────────────────
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    from security import check_login_rate, reset_login_rate
-    error = None
+    if not _dashboard_password():
+        return (
+            "Dashboard password is not configured. Run `ninoclaw setup` or set "
+            "`DASHBOARD_PASSWORD` in `.env`.",
+            503,
+        )
     if request.method == "POST":
-        ip = request.remote_addr or "unknown"
-        rate_err = check_login_rate(ip)
-        if rate_err:
-            error = rate_err
-        else:
-            env = get_env()
-            pwd = env.get("DASHBOARD_PASSWORD", "admin")
-            if request.form.get("password") == pwd:
-                session["logged_in"] = True
-                reset_login_rate(ip)
-                return redirect(url_for("index"))
-            error = "Incorrect password"
-    return render_template_string(LOGIN_TMPL, error=error)
+        password = request.form.get("password", "")
+        if _password_matches(password):
+            session["dashboard_auth"] = True
+            next_url = request.form.get("next") or url_for("index")
+            return redirect(next_url)
+        flash("Invalid dashboard password.", "danger")
+
+    next_url = request.args.get("next") or request.form.get("next") or url_for("index")
+    return render_template_string(
+        """
+        <!doctype html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Ninoclaw Dashboard Login</title>
+          <style>
+            body { background:#07111f; color:#edf4ff; font-family:system-ui, sans-serif; display:flex; min-height:100vh; align-items:center; justify-content:center; margin:0; }
+            .card { width:min(420px, 92vw); background:#0f1b2d; border:1px solid #243853; border-radius:18px; padding:28px; box-shadow:0 18px 60px rgba(0,0,0,.35); }
+            input { width:100%; box-sizing:border-box; border-radius:12px; border:1px solid #243853; background:#132238; color:#edf4ff; padding:14px 16px; margin:14px 0; }
+            button { width:100%; border:0; border-radius:12px; padding:14px 16px; background:#5ca8ff; color:#07111f; font-weight:700; cursor:pointer; }
+            .muted { color:#97a8c4; font-size:.95rem; }
+            .flash { color:#ff8f83; margin-top:10px; }
+          </style>
+        </head>
+        <body>
+          <form class="card" method="post">
+            <h1 style="margin:0 0 8px;">Ninoclaw Dashboard</h1>
+            <div class="muted">Enter the dashboard password from your <code>.env</code>.</div>
+            <input type="hidden" name="next" value="{{ next_url }}">
+            <input type="password" name="password" placeholder="Dashboard password" autofocus required>
+            <button type="submit">Unlock</button>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+              {% if messages %}
+                <div class="flash">{{ messages[-1][1] }}</div>
+              {% endif %}
+            {% endwith %}
+          </form>
+        </body>
+        </html>
+        """,
+        next_url=next_url,
+    )
 
 @app.route("/logout")
 def logout():
-    session.clear()
+    session.pop("dashboard_auth", None)
     return redirect(url_for("login"))
 
 @app.route("/")
@@ -710,7 +738,7 @@ def config_page():
     if request.method == "POST":
         fields = ["TELEGRAM_BOT_TOKEN", "OPENAI_API_KEY", "OPENAI_API_URL",
                   "OPENAI_MODEL", "SERPER_API_KEY", "OWNER_ID",
-                  "CONTEXT_WINDOW", "DASHBOARD_PASSWORD", "DASHBOARD_PORT",
+                  "CONTEXT_WINDOW", "DASHBOARD_PORT",
                   "AGENT_NAME", "USER_NAME", "BOT_PURPOSE", "TIMEZONE",
                   "RESEND_API_KEY", "RESEND_FROM", "OWNER_EMAIL",
                   "OPENROUTER_API_KEY", "OPENROUTER_MODEL",
@@ -848,10 +876,6 @@ def config_page():
     <div style="margin-bottom:16px">
       <label class="form-label">Context Window (messages sent to AI per request)</label>
       <input class="form-control" name="CONTEXT_WINDOW" value="{{ env.get('CONTEXT_WINDOW','20') }}" style="max-width:120px">
-    </div>
-    <div style="margin-bottom:16px">
-      <label class="form-label">Dashboard Password</label>
-      <input class="form-control" type="password" name="DASHBOARD_PASSWORD" placeholder="Leave blank to keep current" autocomplete="off">
     </div>
     <div>
       <label class="form-label">Dashboard Port</label>
@@ -1979,7 +2003,11 @@ def api_mobile_tasks_create_reminder():
     if not user_id or not name or not when:
         return jsonify({"error": "user_id, name, and when are required"}), 400
 
+<<<<<<< HEAD
     scheduled_time = task_manager.parse_time(when)
+=======
+    scheduled_time = task_manager.parse_time(when, user_id=user_id)
+>>>>>>> 1a0a1fa05c6c2e5b61fcfaae0d754fde32f86ea4
     task_id = task_manager.add_task(user_id, name, scheduled_time)
     return jsonify({"ok": True, "task_id": task_id, "tasks": _tasks_payload()})
 
@@ -2014,7 +2042,11 @@ def api_mobile_tasks_update_reminder(task_id):
     if not name or not when:
         return jsonify({"error": "name and when are required"}), 400
 
+<<<<<<< HEAD
     scheduled_time = task_manager.parse_time(when)
+=======
+    scheduled_time = task_manager.parse_time(when, user_id=user_id)
+>>>>>>> 1a0a1fa05c6c2e5b61fcfaae0d754fde32f86ea4
     conn = sqlite3.connect(DB_FILE)
     cur = conn.execute(
         "UPDATE tasks SET name=?, scheduled_time=? WHERE id=?",
@@ -2427,18 +2459,8 @@ def run_dashboard():
     port = int(env.get("DASHBOARD_PORT", os.getenv("DASHBOARD_PORT", "8080")))
     host = "0.0.0.0"
 
-    # Enforce a non-default dashboard password on startup.
-    pwd = (env.get("DASHBOARD_PASSWORD") or "").strip()
-    if not pwd or pwd == "admin":
-        import secrets
-        pwd = secrets.token_urlsafe(18)
-        save_env_key("DASHBOARD_PASSWORD", pwd)
-        print("⚠️  Generated a secure DASHBOARD_PASSWORD (default/empty password was unsafe).")
-
     print(f"\n🦀 Ninoclaw Dashboard")
-    print(f"   URL:      http://localhost:{port}")
-    print(f"   Password: {pwd}")
-    print(f"   (change it in Config page or set DASHBOARD_PASSWORD in .env)\n")
+    print(f"   URL:      http://localhost:{port}\n")
     app.run(host=host, port=port, debug=False)
 
 

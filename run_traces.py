@@ -7,6 +7,7 @@ import sqlite3
 import uuid
 from contextvars import ContextVar
 from datetime import datetime
+from sqlite_utils import connect_db
 
 DB_FILE = os.path.join(os.path.dirname(__file__), "ninoclaw.db")
 _CURRENT_RUN_ID = ContextVar("current_run_id", default=None)
@@ -17,9 +18,7 @@ def _utc_now():
 
 
 def _get_conn():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return connect_db(DB_FILE)
 
 
 def _init_db():

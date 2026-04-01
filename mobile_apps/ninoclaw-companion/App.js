@@ -206,6 +206,7 @@ function ConnectionGate({
         placeholder="Dashboard password"
         placeholderTextColor={COLORS.muted}
         style={styles.input}
+        autoCapitalize="none"
         secureTextEntry
       />
       <TextInput
@@ -796,7 +797,7 @@ export default function App() {
   const headers = useMemo(
     () => ({
       'Content-Type': 'application/json',
-      'X-Dashboard-Password': password,
+      ...(password.trim() ? { 'X-Dashboard-Password': password.trim() } : {}),
     }),
     [password]
   );
@@ -835,7 +836,7 @@ export default function App() {
 
   async function loadAll(showSpinner = true) {
     if (!normalizeBaseUrl(baseUrl) || !password.trim() || !userId.trim()) {
-      setError('Base URL, password, and user id are required.');
+      setError('Base URL, dashboard password, and user id are required.');
       return;
     }
     if (showSpinner) {

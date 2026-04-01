@@ -230,7 +230,7 @@ Expo previews:
 - `cd mobile_apps/ninoclaw-companion`
 - `npm install`
 - `npx expo start -c`
-- Enter your dashboard LAN URL, `DASHBOARD_PASSWORD`, and a mobile user id inside the app
+- Enter your dashboard LAN URL and a mobile user id inside the app
 
 ## Configuration
 
@@ -260,7 +260,6 @@ ENABLE_CRON=true
 ENABLE_SELF_UPDATE=true
 
 DASHBOARD_PORT=8080
-DASHBOARD_PASSWORD=change_me
 
 AGENT_NAME=Ninoclaw
 USER_NAME=friend
