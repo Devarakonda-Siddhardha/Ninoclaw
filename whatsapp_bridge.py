@@ -294,27 +294,36 @@ class WhatsAppBridgeManager:
     def get_qr_screenshot(self) -> Dict[str, Any]:
         cfg = self._cfg()
         session = cfg["session"]
-        try:
-            resp = self._request("GET", "/api/screenshot", timeout=20, params={"session": session})
-            if not resp.ok:
-                return {"ok": False, "message": "Failed to fetch WhatsApp QR screenshot.", "http_status": resp.status_code}
-            data = {}
+        deadline = time.time() + 20
+        last_error = None
+        while time.time() < deadline:
             try:
-                data = resp.json()
-            except Exception:
-                data = {"raw": (resp.text or "").strip()[:1000]}
-            b64 = data.get("data") or data.get("screenshot") or data.get("base64")
-            if not b64:
-                return {"ok": False, "message": "Bridge did not return a QR screenshot payload.", "data": data}
+                resp = self._request("GET", "/api/screenshot", timeout=20, params={"session": session})
+                if not resp.ok:
+                    last_error = {"ok": False, "message": "Failed to fetch WhatsApp QR screenshot.", "http_status": resp.status_code}
+                    time.sleep(1)
+                    continue
+                data = {}
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"raw": (resp.text or "").strip()[:1000]}
+                b64 = data.get("data") or data.get("screenshot") or data.get("base64")
+                if not b64:
+                    last_error = {"ok": False, "message": "Bridge did not return a QR screenshot payload.", "data": data}
+                    time.sleep(1)
+                    continue
 
-            out_dir = os.path.join(ROOT_DIR, "assets")
-            os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(out_dir, "whatsapp_qr.png")
-            with open(out_path, "wb") as f:
-                f.write(base64.b64decode(b64))
-            return {"ok": True, "message": "QR screenshot saved.", "path": out_path}
-        except Exception as exc:
-            return {"ok": False, "message": f"Could not fetch WhatsApp QR screenshot: {exc}"}
+                out_dir = os.path.join(ROOT_DIR, "assets")
+                os.makedirs(out_dir, exist_ok=True)
+                out_path = os.path.join(out_dir, "whatsapp_qr.png")
+                with open(out_path, "wb") as f:
+                    f.write(base64.b64decode(b64))
+                return {"ok": True, "message": "QR screenshot saved.", "path": out_path}
+            except Exception as exc:
+                last_error = {"ok": False, "message": f"Could not fetch WhatsApp QR screenshot: {exc}"}
+                time.sleep(1)
+        return last_error or {"ok": False, "message": "QR screenshot was not ready in time."}
 
     def send_text(self, to: str, text: str) -> Dict[str, Any]:
         cfg = self._cfg()

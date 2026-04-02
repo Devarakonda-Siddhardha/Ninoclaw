@@ -8,6 +8,7 @@ const {
   default: makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
+  Browsers,
 } = require("@whiskeysockets/baileys");
 
 const PORT = Number(process.env.WHATSAPP_BAILEYS_PORT || process.env.WHATSAPP_BRIDGE_PORT || 3001);
@@ -197,8 +198,7 @@ async function connectSession(name, isReconnect = false) {
   const auth = await useMultiFileAuthState(authDir(name));
   const sock = makeWASocket({
     auth: auth.state,
-    printQRInTerminal: true,
-    browser: ["Ninoclaw", "Desktop", "1.0.0"],
+    browser: Browsers.ubuntu("Chrome"),
   });
   state.sock = sock;
 
