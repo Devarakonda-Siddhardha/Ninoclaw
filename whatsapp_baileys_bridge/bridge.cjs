@@ -4,12 +4,6 @@ const http = require("http");
 const https = require("https");
 const { URL } = require("url");
 const QRCode = require("qrcode");
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  DisconnectReason,
-  Browsers,
-} = require("@whiskeysockets/baileys");
 
 const PORT = Number(process.env.WHATSAPP_BAILEYS_PORT || process.env.WHATSAPP_BRIDGE_PORT || 3001);
 const TOKEN = (process.env.WHATSAPP_BRIDGE_TOKEN || "").trim();
@@ -19,6 +13,14 @@ const DATA_DIR = path.join(ROOT_DIR, "data");
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const sessions = new Map();
+let baileysModulePromise = null;
+
+async function getBaileys() {
+  if (!baileysModulePromise) {
+    baileysModulePromise = import("@whiskeysockets/baileys");
+  }
+  return baileysModulePromise;
+}
 
 function sessionDir(name) {
   return path.join(DATA_DIR, name);
@@ -183,6 +185,7 @@ async function updateQr(state, qrText) {
 }
 
 async function connectSession(name, isReconnect = false) {
+  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = await getBaileys();
   const state = ensureSessionState(name);
   if (state.sock && state.status === "working") {
     return state;

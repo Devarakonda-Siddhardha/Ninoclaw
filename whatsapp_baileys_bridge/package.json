@@ -6,7 +6,7 @@
   "main": "bridge.cjs",
   "license": "UNLICENSED",
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.18",
+    "@whiskeysockets/baileys": "github:WhiskeySockets/Baileys",
     "qrcode": "^1.5.4"
   }
 }

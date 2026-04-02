@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover
     requests = None
 
 ROOT_DIR = os.path.dirname(__file__)
+BRIDGE_LOG_DIR = os.path.join(ROOT_DIR, "logs")
 
 
 def _default_bridge_command(cfg: Dict[str, str]) -> str:
@@ -147,11 +148,19 @@ class WhatsAppBridgeManager:
             if self._process is not None and self._process.poll() is None:
                 return {"ok": True, "message": "WhatsApp bridge is already running.", "pid": self._process.pid}
             try:
+                popen_kwargs = {
+                    "cwd": ROOT_DIR,
+                    "stdout": subprocess.DEVNULL,
+                    "stderr": subprocess.DEVNULL,
+                }
+                if os.name == "nt":
+                    popen_kwargs["creationflags"] = (
+                        getattr(subprocess, "DETACHED_PROCESS", 0)
+                        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    )
                 self._process = subprocess.Popen(
                     shlex.split(command, posix=os.name != "nt"),
-                    cwd=ROOT_DIR,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    **popen_kwargs,
                 )
                 if self._wait_until_ready():
                     return {"ok": True, "message": "WhatsApp bridge started.", "pid": self._process.pid}
