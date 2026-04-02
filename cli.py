@@ -361,16 +361,27 @@ def ensure_requirements_installed():
 
 def _tool_ok(command, args=None):
     args = args or ["--version"]
-    path = shutil.which(command)
+    candidate = command
+    if os.name == "nt" and not os.path.splitext(command)[1]:
+        cmd_variant = f"{command}.cmd"
+        if shutil.which(cmd_variant):
+            candidate = cmd_variant
+    path = shutil.which(candidate)
     if not path:
         return False, "not found"
     try:
-        result = subprocess.run([command, *args], cwd=REPO_DIR, capture_output=True, text=True, timeout=15)
+        result = subprocess.run([candidate, *args], cwd=REPO_DIR, capture_output=True, text=True, timeout=15)
         output = (result.stdout or result.stderr or "").strip().splitlines()
         summary = output[0] if output else path
         return result.returncode == 0, summary
     except Exception as exc:
         return False, str(exc)
+
+
+def _npm_command():
+    if os.name == "nt" and shutil.which("npm.cmd"):
+        return "npm.cmd"
+    return "npm"
 
 
 def collect_environment_health():
@@ -450,7 +461,7 @@ def cmd_fixenv():
         npm_ok, _ = _tool_ok("npm")
         if node_ok and npm_ok:
             print(f"{C}Installing mobile app dependencies...{RST}")
-            result = subprocess.run(["npm", "install"], cwd=app_dir)
+            result = subprocess.run([_npm_command(), "install"], cwd=app_dir)
             if result.returncode == 0:
                 print(f"{G}Mobile app dependencies are ready.{RST}")
             else:
@@ -465,7 +476,7 @@ def cmd_fixenv():
         npm_ok, _ = _tool_ok("npm")
         if node_ok and npm_ok:
             print(f"{C}Installing WhatsApp bridge dependencies...{RST}")
-            result = subprocess.run(["npm", "install"], cwd=wa_bridge_dir)
+            result = subprocess.run([_npm_command(), "install"], cwd=wa_bridge_dir)
             if result.returncode == 0:
                 print(f"{G}WhatsApp bridge dependencies are ready.{RST}")
             else:
@@ -753,6 +764,7 @@ def cmd_whatsapp(args):
         return
 
     if sub == "login":
+        bridge_manager.maybe_start_for_runtime()
         info = bridge_manager.login_info()
         color = G if info.get("ok") else Y
         print(f"\n{C}WhatsApp Login{RST}")
