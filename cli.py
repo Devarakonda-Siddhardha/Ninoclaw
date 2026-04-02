@@ -44,6 +44,7 @@ HELP = f"""
   {G}health{RST}             Check Python, Node, Expo, Ollama, and local environment
   {G}fixenv{RST}             Install/repair common local dependencies for this repo
   {G}install{RST}            Install global ninoclaw launcher for this user
+  {G}whatsapp{RST}           Manage WhatsApp bridge/channel status
   {G}model{RST}              Show or change the AI model
     {DIM}ninoclaw model{RST}          Show current model
     {DIM}ninoclaw model <name>{RST}   Switch to a different model
@@ -69,6 +70,7 @@ HELP = f"""
   {DIM}ninoclaw reset{RST}              Wipe config and start fresh
   {DIM}ninoclaw status{RST}             Check what's configured
   {DIM}ninoclaw install{RST}            Make ninoclaw available on PATH
+  {DIM}ninoclaw whatsapp status{RST}    Check WhatsApp bridge status
   {DIM}ninoclaw memory clear{RST}       Clear all conversations
   {DIM}ninoclaw memory stats{RST}       Show how much is stored
 """
@@ -689,6 +691,69 @@ def cmd_version():
         print(f"{R}Could not determine version.{RST}")
 
 
+def cmd_whatsapp(args):
+    """Manage WhatsApp bridge status and login flow."""
+    from whatsapp_bridge import bridge_manager
+
+    sub = (args[0].lower() if args else "status")
+
+    if sub == "status":
+        status = bridge_manager.status()
+        print(f"\n{C}WhatsApp Status{RST}")
+        print(f"  {DIM}{'-' * 40}{RST}")
+        ok_state = status.get("ok", False)
+        mark = f"{G}OK{RST}" if ok_state else f"{Y}WARN{RST}"
+        print(f"  Bridge reachability       {mark}")
+        print(f"  Base URL                  {W}{status.get('base_url', '')}{RST}")
+        print(f"  Session                   {W}{status.get('session', '')}{RST}")
+        print(f"  Webhook URL               {W}{status.get('webhook_url', '')}{RST}")
+        print(f"  Managed process           {G}running{RST}" if status.get("managed_process_running") else f"  Managed process           {DIM}not running{RST}")
+        print(f"  Detail                    {DIM}{status.get('message', '')}{RST}")
+        bridge_status = status.get("bridge_status")
+        if bridge_status:
+            print(f"  Bridge payload            {DIM}{bridge_status}{RST}")
+        print()
+        return
+
+    if sub == "start":
+        result = bridge_manager.start()
+        color = G if result.get("ok") else R
+        ensure = bridge_manager.ensure_session()
+        start = bridge_manager.start_session()
+        print(f"\n{color}{result.get('message', '')}{RST}")
+        print(f"{(G if ensure.get('ok') else Y)}{ensure.get('message', '')}{RST}")
+        print(f"{(G if start.get('ok') else Y)}{start.get('message', '')}{RST}\n")
+        return
+
+    if sub == "stop":
+        result = bridge_manager.stop()
+        color = G if result.get("ok") else R
+        print(f"\n{color}{result.get('message', '')}{RST}\n")
+        return
+
+    if sub == "login":
+        info = bridge_manager.login_info()
+        color = G if info.get("ok") else Y
+        print(f"\n{C}WhatsApp Login{RST}")
+        print(f"  {color}{info.get('message', '')}{RST}")
+        for key in ("ensure", "start", "qr"):
+            data = info.get(key)
+            if data:
+                label = key.upper()
+                msg = data.get("message", "")
+                print(f"  {W}{label}:{RST} {DIM}{msg}{RST}")
+                if data.get("path"):
+                    print(f"  {W}{label} file:{RST} {data.get('path')}")
+        print()
+        return
+
+    print(f"\n{W}Usage:{RST}")
+    print(f"  {G}ninoclaw whatsapp status{RST}")
+    print(f"  {G}ninoclaw whatsapp start{RST}")
+    print(f"  {G}ninoclaw whatsapp stop{RST}")
+    print(f"  {G}ninoclaw whatsapp login{RST}\n")
+
+
 def cmd_model(args):
     """Show or switch the AI model"""
     from dotenv import dotenv_values, set_key
@@ -1048,6 +1113,8 @@ def main():
         cmd_fixenv()
     elif cmd == "install":
         cmd_install()
+    elif cmd == "whatsapp":
+        cmd_whatsapp(args[1:])
     elif cmd == "model":
         cmd_model(args[1:])
     elif cmd == "think":

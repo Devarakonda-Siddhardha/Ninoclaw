@@ -6,6 +6,10 @@ __pycache__/
 .venv/
 .tmp/
 .pkgtest/
+.wwebjs_auth/
+.wwebjs_cache/
+whatsapp_sessions/
+assets/whatsapp_qr.png
 memory.json
 tasks.json
 cron_jobs.json

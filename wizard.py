@@ -270,6 +270,7 @@ def run_wizard():
     _platforms = [
         ("Telegram   (recommended — most features)",   "telegram"),
         ("Discord    (@mention + DM support)",          "discord"),
+        ("WhatsApp   (bridge-based preview)",           "whatsapp"),
     ]
     # Multi-select: toggle each platform
     selected = set()
@@ -278,6 +279,8 @@ def run_wizard():
         selected.add("telegram")
     if e.get("DISCORD_BOT_TOKEN"):
         selected.add("discord")
+    if str(e.get("WHATSAPP_ENABLED", "false")).strip().lower() == "true":
+        selected.add("whatsapp")
     if not selected:
         selected.add("telegram")  # default
 
@@ -353,6 +356,29 @@ def run_wizard():
             print(f"  {Y}⚠  Skipped Discord (no token entered){RST}")
     else:
         cfg["DISCORD_BOT_TOKEN"] = e.get("DISCORD_BOT_TOKEN", "")
+
+    # —— 1c. WhatsApp bridge preview ————————————————————————————————————————————————
+    if "whatsapp" in selected:
+        section("Step 1c — WhatsApp Bridge")
+        info("This uses a local WAHA-style bridge. Keep it local-only and protect it with a token if possible.")
+        bridge_url = ask("WhatsApp Bridge URL", default=e.get("WHATSAPP_BRIDGE_URL", "http://127.0.0.1:3001"))
+        allowed = ask("Allowed sender numbers (comma-separated)", default=e.get("WHATSAPP_ALLOWED_SENDERS", ""))
+        session = ask("WhatsApp session name", default=e.get("WHATSAPP_SESSION_NAME", "ninoclaw"))
+        token = ask("Bridge token (optional)", default=e.get("WHATSAPP_BRIDGE_TOKEN", ""), secret=True)
+        webhook_url = ask("Webhook URL override (optional)", default=e.get("WHATSAPP_WEBHOOK_URL", ""))
+        bridge_cmd = ask("Bridge start command (optional)", default=e.get("WHATSAPP_BRIDGE_COMMAND", ""))
+        cfg["WHATSAPP_ENABLED"] = "true"
+        cfg["WHATSAPP_BRIDGE_TYPE"] = "waha"
+        cfg["WHATSAPP_BRIDGE_URL"] = bridge_url or "http://127.0.0.1:3001"
+        cfg["WHATSAPP_ALLOWED_SENDERS"] = allowed or ""
+        cfg["WHATSAPP_SESSION_NAME"] = session or "ninoclaw"
+        cfg["WHATSAPP_WEBHOOK_URL"] = webhook_url or ""
+        cfg["WHATSAPP_BRIDGE_COMMAND"] = bridge_cmd or ""
+        if token:
+            cfg["WHATSAPP_BRIDGE_TOKEN"] = token
+        ok("WhatsApp bridge settings saved")
+    else:
+        cfg["WHATSAPP_ENABLED"] = e.get("WHATSAPP_ENABLED", "false")
 
     # ── 2. AI Provider ────────────────────────────────────────────────────────
     section("Step 2 — AI Provider")
@@ -826,9 +852,10 @@ def needs_setup():
     e = load_existing_env()
     token = e.get("TELEGRAM_BOT_TOKEN", "")
     discord = e.get("DISCORD_BOT_TOKEN", "")
+    whatsapp = str(e.get("WHATSAPP_ENABLED", "false")).strip().lower() == "true"
     has_telegram = token and token != "YOUR_BOT_TOKEN_HERE"
     has_discord  = bool(discord)
-    return not has_telegram and not has_discord
+    return not has_telegram and not has_discord and not whatsapp
 
 
 if __name__ == "__main__":

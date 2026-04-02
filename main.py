@@ -14,7 +14,7 @@ from telegram import BotCommand
 from telegram.ext import Application
 from telegram import __version__ as ptb_version
 from config import (
-    TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, AGENT_NAME, USER_NAME, BOT_PURPOSE, TIMEZONE,
+    TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, WHATSAPP_ENABLED, AGENT_NAME, USER_NAME, BOT_PURPOSE, TIMEZONE,
     OWNER_ID
 )
 import telegram_bot as telegram_module  # Import our local telegram module
@@ -365,6 +365,25 @@ def main():
             print("⚠️  Discord token set but discord.py not installed — run: pip install discord.py")
         except Exception as e:
             print(f"⚠️  Discord bot failed to start: {e}")
+
+    # Start WhatsApp bridge/channel if configured
+    if WHATSAPP_ENABLED:
+        try:
+            from whatsapp_bridge import bridge_manager
+            from whatsapp_bot import run_bot as run_whatsapp_bot
+
+            run_whatsapp_bot()
+            print("✅ WhatsApp webhook server started")
+            bridge_result = bridge_manager.maybe_start_for_runtime()
+            print(f"✅ WhatsApp bridge: {bridge_result.get('message', 'started')}")
+            session_result = bridge_manager.ensure_session()
+            print(f"✅ WhatsApp session: {session_result.get('message', 'configured')}")
+            start_result = bridge_manager.start_session()
+            print(f"✅ WhatsApp runtime: {start_result.get('message', 'started')}")
+        except ImportError as e:
+            print(f"⚠️  WhatsApp dependencies missing: {e}")
+        except Exception as e:
+            print(f"⚠️  WhatsApp bot failed to start: {e}")
 
     # Start bot
     print("\n🦀 Ninoclaw is running!")

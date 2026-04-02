@@ -145,6 +145,35 @@ ninoclaw start
 
 `setup` and `start` now auto-install Python dependencies from `requirements.txt` when needed. If you change `requirements.txt` later, the next `setup` or `start` run will refresh them automatically.
 
+## WhatsApp Preview
+
+An early WAHA-based WhatsApp channel is now available. The current flow is:
+
+```powershell
+ninoclaw whatsapp status
+ninoclaw whatsapp start
+ninoclaw whatsapp login
+```
+
+Configuration lives in `.env`:
+
+- `WHATSAPP_ENABLED=true`
+- `WHATSAPP_BRIDGE_URL=http://127.0.0.1:3001`
+- `WHATSAPP_BRIDGE_TOKEN=...`
+- `WHATSAPP_SESSION_NAME=ninoclaw`
+- `WHATSAPP_ALLOWED_SENDERS=+911234567890`
+- `WHATSAPP_BRIDGE_COMMAND=...`
+- `WHATSAPP_WEBHOOK_URL=...`  # optional override
+
+`ninoclaw start` now attempts to:
+
+- start the local webhook receiver
+- auto-start the bridge if `WHATSAPP_BRIDGE_COMMAND` is configured
+- ensure the WAHA session exists
+- start the WhatsApp session
+
+Keep the bridge local-only on `127.0.0.1` when possible. If WAHA runs in Docker, you may need to set `WHATSAPP_WEBHOOK_URL` explicitly so the container can reach Ninoclaw's webhook endpoint.
+
 You can also run the core process directly:
 
 ```bash
