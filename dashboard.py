@@ -2003,11 +2003,7 @@ def api_mobile_tasks_create_reminder():
     if not user_id or not name or not when:
         return jsonify({"error": "user_id, name, and when are required"}), 400
 
-<<<<<<< HEAD
-    scheduled_time = task_manager.parse_time(when)
-=======
     scheduled_time = task_manager.parse_time(when, user_id=user_id)
->>>>>>> 1a0a1fa05c6c2e5b61fcfaae0d754fde32f86ea4
     task_id = task_manager.add_task(user_id, name, scheduled_time)
     return jsonify({"ok": True, "task_id": task_id, "tasks": _tasks_payload()})
 
@@ -2042,12 +2038,10 @@ def api_mobile_tasks_update_reminder(task_id):
     if not name or not when:
         return jsonify({"error": "name and when are required"}), 400
 
-<<<<<<< HEAD
-    scheduled_time = task_manager.parse_time(when)
-=======
-    scheduled_time = task_manager.parse_time(when, user_id=user_id)
->>>>>>> 1a0a1fa05c6c2e5b61fcfaae0d754fde32f86ea4
     conn = sqlite3.connect(DB_FILE)
+    row = conn.execute("SELECT user_id FROM tasks WHERE id=?", (task_id,)).fetchone()
+    task_user_id = str(row[0]).strip() if row and row[0] is not None else None
+    scheduled_time = task_manager.parse_time(when, user_id=task_user_id)
     cur = conn.execute(
         "UPDATE tasks SET name=?, scheduled_time=? WHERE id=?",
         (name, scheduled_time, task_id),

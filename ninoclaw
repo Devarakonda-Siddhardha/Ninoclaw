@@ -11,4 +11,16 @@ while [ -L "$SOURCE" ]; do
 done
 DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 
+if [ -x "$DIR/.venv/bin/python" ]; then
+  exec "$DIR/.venv/bin/python" "$DIR/cli.py" "$@"
+fi
+
+if [ -x "$DIR/.venv/Scripts/python.exe" ]; then
+  exec "$DIR/.venv/Scripts/python.exe" "$DIR/cli.py" "$@"
+fi
+
+if command -v py >/dev/null 2>&1; then
+  exec py "$DIR/cli.py" "$@"
+fi
+
 exec python "$DIR/cli.py" "$@"
