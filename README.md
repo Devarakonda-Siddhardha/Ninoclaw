@@ -147,7 +147,18 @@ ninoclaw start
 
 ## WhatsApp Preview
 
-An early WAHA-based WhatsApp channel is now available. The current flow is:
+Ninoclaw now supports a local WhatsApp bridge. The easiest path is the built-in Baileys bridge; WAHA is still supported if you prefer Docker/API style.
+
+Recommended first-time setup:
+
+```powershell
+ninoclaw fixenv
+ninoclaw setup
+ninoclaw start
+ninoclaw whatsapp login
+```
+
+The current management flow is:
 
 ```powershell
 ninoclaw whatsapp status
@@ -158,6 +169,7 @@ ninoclaw whatsapp login
 Configuration lives in `.env`:
 
 - `WHATSAPP_ENABLED=true`
+- `WHATSAPP_BRIDGE_TYPE=baileys`
 - `WHATSAPP_BRIDGE_URL=http://127.0.0.1:3001`
 - `WHATSAPP_BRIDGE_TOKEN=...`
 - `WHATSAPP_SESSION_NAME=ninoclaw`
@@ -169,10 +181,16 @@ Configuration lives in `.env`:
 
 - start the local webhook receiver
 - auto-start the bridge if `WHATSAPP_BRIDGE_COMMAND` is configured
-- ensure the WAHA session exists
+- ensure the WhatsApp session exists
 - start the WhatsApp session
 
-Keep the bridge local-only on `127.0.0.1` when possible. If WAHA runs in Docker, you may need to set `WHATSAPP_WEBHOOK_URL` explicitly so the container can reach Ninoclaw's webhook endpoint.
+For the built-in Baileys bridge, the default command is:
+
+```powershell
+node whatsapp_baileys_bridge\bridge.cjs
+```
+
+Keep the bridge local-only on `127.0.0.1` when possible. If you use WAHA in Docker, you may need to set `WHATSAPP_WEBHOOK_URL` explicitly so the container can reach Ninoclaw's webhook endpoint.
 
 You can also run the core process directly:
 

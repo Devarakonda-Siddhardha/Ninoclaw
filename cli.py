@@ -407,6 +407,12 @@ def collect_environment_health():
     node_modules_ok = os.path.exists(os.path.join(app_dir, "node_modules"))
     checks.append(("Mobile app package", package_ok, "package.json present" if package_ok else "mobile app missing"))
     checks.append(("Mobile app deps", node_modules_ok, "node_modules present" if node_modules_ok else "run ninoclaw fixenv"))
+
+    wa_bridge_dir = os.path.join(REPO_DIR, "whatsapp_baileys_bridge")
+    wa_package_ok = os.path.exists(os.path.join(wa_bridge_dir, "package.json"))
+    wa_deps_ok = os.path.exists(os.path.join(wa_bridge_dir, "node_modules"))
+    checks.append(("WhatsApp bridge", wa_package_ok, "Baileys bridge present" if wa_package_ok else "bridge missing"))
+    checks.append(("WhatsApp deps", wa_deps_ok, "node_modules present" if wa_deps_ok else "run ninoclaw fixenv"))
     return checks
 
 
@@ -451,6 +457,21 @@ def cmd_fixenv():
                 print(f"{Y}Mobile app dependency install failed. Check Node/npm and retry.{RST}")
         else:
             print(f"{Y}Skipping mobile app dependency install because Node/npm is missing.{RST}")
+
+    wa_bridge_dir = os.path.join(REPO_DIR, "whatsapp_baileys_bridge")
+    wa_package_json = os.path.join(wa_bridge_dir, "package.json")
+    if os.path.exists(wa_package_json):
+        node_ok, _ = _tool_ok("node")
+        npm_ok, _ = _tool_ok("npm")
+        if node_ok and npm_ok:
+            print(f"{C}Installing WhatsApp bridge dependencies...{RST}")
+            result = subprocess.run(["npm", "install"], cwd=wa_bridge_dir)
+            if result.returncode == 0:
+                print(f"{G}WhatsApp bridge dependencies are ready.{RST}")
+            else:
+                print(f"{Y}WhatsApp bridge dependency install failed. Check Node/npm and retry.{RST}")
+        else:
+            print(f"{Y}Skipping WhatsApp bridge dependency install because Node/npm is missing.{RST}")
 
     print(f"\n{C}Post-fix health check:{RST}")
     for label, ok_state, detail in collect_environment_health():

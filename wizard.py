@@ -360,15 +360,28 @@ def run_wizard():
     # —— 1c. WhatsApp bridge preview ————————————————————————————————————————————————
     if "whatsapp" in selected:
         section("Step 1c — WhatsApp Bridge")
-        info("This uses a local WAHA-style bridge. Keep it local-only and protect it with a token if possible.")
+        bridge_options = [
+            ("Baileys        (local Node bridge, easier)", "baileys"),
+            ("WAHA           (Docker/API bridge)", "waha"),
+        ]
+        current_bridge = (e.get("WHATSAPP_BRIDGE_TYPE", "baileys") or "baileys").strip().lower()
+        default_bridge_idx = next((i for i, (_, value) in enumerate(bridge_options) if value == current_bridge), 0)
+        bridge_type = choose("Which WhatsApp bridge?", bridge_options, default=default_bridge_idx)
+        if bridge_type == "baileys":
+            info("Recommended: Baileys runs as a local Node bridge and auto-starts more easily than WAHA.")
+            default_script = "node whatsapp_baileys_bridge\\bridge.cjs" if os.name == "nt" else "node whatsapp_baileys_bridge/bridge.cjs"
+            default_command = e.get("WHATSAPP_BRIDGE_COMMAND", "") or default_script
+        else:
+            info("WAHA works well too, but usually needs Docker. Keep it local-only and protect it with a token if possible.")
+            default_command = e.get("WHATSAPP_BRIDGE_COMMAND", "")
         bridge_url = ask("WhatsApp Bridge URL", default=e.get("WHATSAPP_BRIDGE_URL", "http://127.0.0.1:3001"))
         allowed = ask("Allowed sender numbers (comma-separated)", default=e.get("WHATSAPP_ALLOWED_SENDERS", ""))
         session = ask("WhatsApp session name", default=e.get("WHATSAPP_SESSION_NAME", "ninoclaw"))
         token = ask("Bridge token (optional)", default=e.get("WHATSAPP_BRIDGE_TOKEN", ""), secret=True)
         webhook_url = ask("Webhook URL override (optional)", default=e.get("WHATSAPP_WEBHOOK_URL", ""))
-        bridge_cmd = ask("Bridge start command (optional)", default=e.get("WHATSAPP_BRIDGE_COMMAND", ""))
+        bridge_cmd = ask("Bridge start command (optional)", default=default_command)
         cfg["WHATSAPP_ENABLED"] = "true"
-        cfg["WHATSAPP_BRIDGE_TYPE"] = "waha"
+        cfg["WHATSAPP_BRIDGE_TYPE"] = bridge_type
         cfg["WHATSAPP_BRIDGE_URL"] = bridge_url or "http://127.0.0.1:3001"
         cfg["WHATSAPP_ALLOWED_SENDERS"] = allowed or ""
         cfg["WHATSAPP_SESSION_NAME"] = session or "ninoclaw"

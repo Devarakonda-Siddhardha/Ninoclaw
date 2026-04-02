@@ -375,11 +375,14 @@ def main():
             run_whatsapp_bot()
             print("✅ WhatsApp webhook server started")
             bridge_result = bridge_manager.maybe_start_for_runtime()
-            print(f"✅ WhatsApp bridge: {bridge_result.get('message', 'started')}")
+            bridge_mark = "✅" if bridge_result.get("ok") else "⚠️ "
+            print(f"{bridge_mark} WhatsApp bridge: {bridge_result.get('message', 'started')}")
             session_result = bridge_manager.ensure_session()
-            print(f"✅ WhatsApp session: {session_result.get('message', 'configured')}")
+            session_mark = "✅" if session_result.get("ok") else "⚠️ "
+            print(f"{session_mark} WhatsApp session: {session_result.get('message', 'configured')}")
             start_result = bridge_manager.start_session()
-            print(f"✅ WhatsApp runtime: {start_result.get('message', 'started')}")
+            runtime_mark = "✅" if start_result.get("ok") else "⚠️ "
+            print(f"{runtime_mark} WhatsApp runtime: {start_result.get('message', 'started')}")
         except ImportError as e:
             print(f"⚠️  WhatsApp dependencies missing: {e}")
         except Exception as e:

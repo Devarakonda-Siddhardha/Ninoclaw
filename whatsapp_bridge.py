@@ -1,16 +1,16 @@
 """
-WAHA-based WhatsApp bridge management for Ninoclaw.
+WhatsApp bridge management for Ninoclaw.
 
-References:
-- WAHA sessions API
-- WAHA send text API
-- WAHA webhooks/events configuration
+Supports:
+- local Baileys bridge (default, easier setup)
+- WAHA-compatible HTTP bridge
 """
 import base64
 import os
 import shlex
 import subprocess
 import threading
+import time
 from typing import Any, Dict, Optional
 
 try:
@@ -19,6 +19,16 @@ except ImportError:  # pragma: no cover
     requests = None
 
 ROOT_DIR = os.path.dirname(__file__)
+
+
+def _default_bridge_command(cfg: Dict[str, str]) -> str:
+    bridge_type = (cfg.get("type") or "").strip().lower()
+    if bridge_type == "baileys":
+        script = os.path.join(ROOT_DIR, "whatsapp_baileys_bridge", "bridge.cjs")
+        if os.name == "nt":
+            return f'node "{script}"'
+        return f"node {shlex.quote(script)}"
+    return ""
 
 
 def _env() -> Dict[str, str]:
@@ -72,7 +82,7 @@ class WhatsAppBridgeManager:
     def _cfg(self) -> Dict[str, str]:
         env = _env()
         return {
-            "type": env.get("WHATSAPP_BRIDGE_TYPE", "waha").strip().lower() or "waha",
+            "type": env.get("WHATSAPP_BRIDGE_TYPE", "baileys").strip().lower() or "baileys",
             "base_url": _normalize_base_url(env.get("WHATSAPP_BRIDGE_URL", "")),
             "token": env.get("WHATSAPP_BRIDGE_TOKEN", "").strip(),
             "session": env.get("WHATSAPP_SESSION_NAME", "ninoclaw").strip() or "ninoclaw",
@@ -102,17 +112,35 @@ class WhatsAppBridgeManager:
         headers.update(kwargs.pop("headers", {}) or {})
         return requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
 
+    def _wait_until_ready(self, timeout: int = 20) -> bool:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                resp = self._request("GET", "/health", timeout=3)
+                if resp.ok:
+                    return True
+            except Exception:
+                pass
+            try:
+                resp = self._request("GET", "/api/sessions", timeout=3)
+                if resp.ok:
+                    return True
+            except Exception:
+                pass
+            time.sleep(1)
+        return False
+
     def is_running(self) -> bool:
         with self._lock:
             return self._process is not None and self._process.poll() is None
 
     def start(self) -> Dict[str, Any]:
         cfg = self._cfg()
-        command = cfg["command"]
+        command = cfg["command"] or _default_bridge_command(cfg)
         if not command:
             return {
                 "ok": False,
-                "message": "WHATSAPP_BRIDGE_COMMAND is not set. For WAHA, point it to your docker run or local bridge command.",
+                "message": "WHATSAPP_BRIDGE_COMMAND is not set. Configure a WAHA command or use the built-in Baileys bridge.",
             }
 
         with self._lock:
@@ -125,7 +153,13 @@ class WhatsAppBridgeManager:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-                return {"ok": True, "message": "WhatsApp bridge started.", "pid": self._process.pid}
+                if self._wait_until_ready():
+                    return {"ok": True, "message": "WhatsApp bridge started.", "pid": self._process.pid}
+                return {
+                    "ok": False,
+                    "message": "WhatsApp bridge process started but did not become ready in time.",
+                    "pid": self._process.pid,
+                }
             except Exception as exc:
                 self._process = None
                 return {"ok": False, "message": f"Failed to start WhatsApp bridge: {exc}"}
