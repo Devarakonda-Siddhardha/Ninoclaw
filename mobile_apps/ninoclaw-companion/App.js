@@ -1,13 +1,24 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Network from 'expo-network';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
+import { useAudioRecorder, requestMicrophonePermissionsAsync, RecordingPresets } from 'expo-audio';
+import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  FlatList,
   Image,
+  KeyboardAvoidingView,
   Linking,
+  Modal,
   NativeModules,
   Platform,
+  Pressable,
   RefreshControl,
   SafeAreaView,
   ScrollView,
@@ -18,6 +29,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {
+  getAndroidAgentStatus,
+  openAndroidAccessibilitySettings,
+  performAndroidAgentAction,
+} from './native/androidAgent';
 
 const COLORS = {
   bg: '#07111f',
@@ -44,6 +60,21 @@ const TABS = [
 const STORAGE_KEY = 'ninoclaw-companion-connection';
 const DEVICE_ID_KEY = 'ninoclaw-companion-device-id';
 const MASCOT = require('./assets/mascot.png');
+const BASE_MOBILE_CAPABILITIES = [
+  'chat',
+  'tasks',
+  'builds',
+  'settings',
+  'mobile_executor',
+  'ping',
+  'show_alert',
+  'open_url',
+  'open_settings',
+  'dial_number',
+  'send_sms',
+  'open_maps',
+  'open_app',
+];
 
 function normalizeBaseUrl(value) {
   return (value || '').trim().replace(/\/+$/, '');
@@ -121,6 +152,17 @@ function appLaunchCandidates(name, payload = {}) {
     settings: ['app-settings:'],
   };
   return map[app] || [];
+}
+
+function buildDeviceCapabilities(androidAgentStatus) {
+  const nativeCapabilities = Array.isArray(androidAgentStatus?.supportedActions)
+    ? androidAgentStatus.supportedActions.map((action) => `android_agent:${action}`)
+    : [];
+  return [
+    ...BASE_MOBILE_CAPABILITIES,
+    ...(androidAgentStatus?.available ? ['native_android_agent'] : ['native_android_agent_unavailable']),
+    ...nativeCapabilities,
+  ];
 }
 
 function extractIpv4Host(url) {
@@ -273,75 +315,456 @@ function ConnectionGate({
   );
 }
 
-function ChatTab({ overview, chatMessages, draft, setDraft, onSend, sending, userId }) {
-  const stats = [
-    { label: 'Runs Today', value: overview?.stats?.total_messages ?? '0', tone: 'cyan' },
-    { label: 'Pending Tasks', value: overview?.stats?.pending_tasks ?? '0', tone: 'amber' },
-    { label: 'Live Builds', value: overview?.stats?.total_builds ?? '0', tone: 'green' },
-    { label: 'Expo Apps', value: overview?.stats?.expo_apps ?? '0', tone: 'blue' },
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function isSameDay(a, b) {
+  const da = new Date(a);
+  const db = new Date(b);
+  return da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate();
+}
+
+function dayLabel(ts) {
+  const d = new Date(ts);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (isSameDay(d, today)) return 'Today';
+  if (isSameDay(d, yesterday)) return 'Yesterday';
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function msgTime(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// ─── ReplyBar ───────────────────────────────────────────────────────────────
+
+function ReplyBar({ message, onCancel }) {
+  if (!message) return null;
+  const preview = message.type === 'image' ? '📷 Photo' :
+    message.type === 'file' ? `📎 ${message.fileName || 'File'}` :
+    message.type === 'audio' ? '🎤 Voice message' :
+    (message.content || '').slice(0, 60);
+  return (
+    <View style={tgStyles.replyBar}>
+      <View style={tgStyles.replyBarAccent} />
+      <View style={{ flex: 1 }}>
+        <Text style={tgStyles.replyBarFrom}>{message.role === 'user' ? 'You' : 'Ninoclaw'}</Text>
+        <Text style={tgStyles.replyBarText} numberOfLines={1}>{preview}</Text>
+      </View>
+      <TouchableOpacity onPress={onCancel} style={tgStyles.replyBarClose}>
+        <Text style={{ color: COLORS.muted, fontSize: 18, lineHeight: 20 }}>×</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── AttachMenu ─────────────────────────────────────────────────────────────
+
+function AttachMenu({ visible, onClose, onCamera, onGallery, onFile }) {
+  if (!visible) return null;
+  const options = [
+    { icon: 'camera-outline', label: 'Camera', onPress: onCamera },
+    { icon: 'images-outline', label: 'Gallery', onPress: onGallery },
+    { icon: 'document-outline', label: 'File', onPress: onFile },
   ];
+  return (
+    <View style={tgStyles.attachMenu}>
+      {options.map((o) => (
+        <TouchableOpacity key={o.label} style={tgStyles.attachOption} onPress={() => { onClose(); o.onPress(); }}>
+          <View style={tgStyles.attachIconWrap}>
+            <Ionicons name={o.icon} size={26} color="#4fc3f7" />
+          </View>
+          <Text style={tgStyles.attachLabel}>{o.label}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+// ─── ContextMenu ────────────────────────────────────────────────────────────
+
+function ContextMenu({ message, position, onClose, onReply, onCopy, onDelete }) {
+  if (!message) return null;
+  const actions = [
+    { label: '↩ Reply', onPress: onReply },
+    ...(message.type === 'text' ? [{ label: '📋 Copy', onPress: onCopy }] : []),
+    { label: '🗑 Delete', onPress: onDelete, danger: true },
+  ];
+  return (
+    <Modal transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={tgStyles.ctxOverlay} onPress={onClose}>
+        <View style={[tgStyles.ctxMenu, { top: Math.min(position.y, 400), left: position.x > 200 ? undefined : position.x, right: position.x > 200 ? 16 : undefined }]}>
+          {actions.map((a) => (
+            <TouchableOpacity key={a.label} style={tgStyles.ctxItem} onPress={() => { onClose(); a.onPress(); }}>
+              <Text style={[tgStyles.ctxItemText, a.danger && { color: COLORS.coral }]}>{a.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ─── MessageBubble ──────────────────────────────────────────────────────────
+
+function MessageBubble({ message, prevMessage, onLongPress }) {
+  const isUser = message.role === 'user';
+  const showDay = !prevMessage || !isSameDay(message.ts, prevMessage.ts);
+
+  const renderContent = () => {
+    if (message.type === 'image') {
+      return (
+        <View>
+          <Image source={{ uri: message.uri }} style={tgStyles.msgImage} resizeMode="cover" />
+          {!!message.content && <Text style={tgStyles.msgText}>{message.content}</Text>}
+        </View>
+      );
+    }
+    if (message.type === 'file') {
+      return (
+        <View style={tgStyles.fileRow}>
+          <Text style={{ fontSize: 24, marginRight: 10 }}>📎</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={tgStyles.fileName} numberOfLines={1}>{message.fileName || 'File'}</Text>
+            {!!message.fileSize && <Text style={tgStyles.fileSize}>{message.fileSize}</Text>}
+          </View>
+        </View>
+      );
+    }
+    if (message.type === 'audio') {
+      return (
+        <View style={tgStyles.audioRow}>
+          <Text style={{ fontSize: 22, marginRight: 8 }}>🎤</Text>
+          <View style={tgStyles.audioBar}>
+            <View style={tgStyles.audioWave} />
+          </View>
+          <Text style={[tgStyles.msgMeta, { marginLeft: 8, marginBottom: 0 }]}>{message.duration || '0:00'}</Text>
+        </View>
+      );
+    }
+    return <Text style={tgStyles.msgText}>{message.content}</Text>;
+  };
 
   return (
     <View>
-      <SectionTitle
-        eyebrow="Companion"
-        title="Live agent chat"
-        body={`Connected to user id "${userId}" through your real Ninoclaw dashboard APIs.`}
-      />
-
-      <View style={styles.heroCard}>
-        <View style={styles.heroRow}>
-          <View style={styles.heroCopy}>
-            <Text style={styles.heroLabel}>Ninoclaw</Text>
-            <Text style={styles.heroTitle}>Desktop control room, compressed into a mobile command surface.</Text>
-            <Text style={styles.heroBody}>
-              The cards below are now pulled from your live dashboard, and the composer sends real messages to the agent loop.
+      {showDay && (
+        <View style={tgStyles.dayPill}>
+          <Text style={tgStyles.dayPillText}>{dayLabel(message.ts)}</Text>
+        </View>
+      )}
+      {!!message.replyTo && (
+        <View style={[tgStyles.msgReplyPreview, isUser ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start', marginLeft: 8 }]}>
+          <View style={tgStyles.msgReplyAccent} />
+          <View>
+            <Text style={tgStyles.msgReplyFrom}>{message.replyTo.role === 'user' ? 'You' : 'Ninoclaw'}</Text>
+            <Text style={tgStyles.msgReplyText} numberOfLines={1}>
+              {message.replyTo.type === 'image' ? '📷 Photo' : (message.replyTo.content || '').slice(0, 40)}
             </Text>
           </View>
-          <Image source={MASCOT} style={styles.heroMascot} resizeMode="contain" />
         </View>
-      </View>
-
-      <View style={styles.metricsGrid}>
-        {stats.map((item) => (
-          <MetricCard key={item.label} label={item.label} value={String(item.value)} tone={item.tone} />
-        ))}
-      </View>
-
-      <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Conversation</Text>
-        {chatMessages.length ? (
-          chatMessages.map((message, index) => (
-            <View
-              key={`${message.role}-${index}-${message.ts || ''}`}
-              style={[
-                styles.bubble,
-                message.role === 'user' ? styles.userBubble : styles.assistantBubble,
-              ]}
-            >
-              <Text style={styles.bubbleRole}>{message.role === 'user' ? 'You' : 'Ninoclaw'}</Text>
-              <Text style={styles.bubbleText}>{message.content}</Text>
-              {!!message.ts && <Text style={styles.bubbleTime}>{formatTimestamp(message.ts)}</Text>}
-            </View>
-          ))
-        ) : (
-          <EmptyState title="No messages yet" body="Send a message below to start a live conversation." />
+      )}
+      <Pressable
+        onLongPress={(e) => onLongPress(message, e.nativeEvent)}
+        style={[tgStyles.msgRow, isUser ? tgStyles.msgRowUser : tgStyles.msgRowAssistant]}
+      >
+        {!isUser && (
+          <View style={tgStyles.avatarCircle}>
+            <Text style={{ fontSize: 15 }}>🦀</Text>
+          </View>
         )}
+        <View style={[tgStyles.bubble, isUser ? tgStyles.bubbleUser : tgStyles.bubbleAssistant]}>
+          {renderContent()}
+          <View style={tgStyles.msgMetaRow}>
+            <Text style={tgStyles.msgMeta}>{msgTime(message.ts)}</Text>
+            {isUser && <Text style={tgStyles.msgStatus}>{message.status === 'sent' ? ' ✓' : ' ✓✓'}</Text>}
+          </View>
+        </View>
+      </Pressable>
+    </View>
+  );
+}
+
+// ─── VoiceButton ────────────────────────────────────────────────────────────
+
+function VoiceButton({ onRecorded }) {
+  const [recording, setRecording] = useState(false);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  async function startRecord() {
+    try {
+      const { granted } = await requestMicrophonePermissionsAsync();
+      if (!granted) { Alert.alert('Permission required', 'Microphone access needed for voice messages.'); return; }
+      await recorder.record();
+      setRecording(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      Animated.loop(Animated.sequence([
+        Animated.timing(scaleAnim, { toValue: 1.3, duration: 500, useNativeDriver: true }),
+        Animated.timing(scaleAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+      ])).start();
+    } catch (_e) {}
+  }
+
+  async function stopRecord() {
+    if (!recording) return;
+    try {
+      scaleAnim.stopAnimation();
+      Animated.timing(scaleAnim, { toValue: 1, duration: 100, useNativeDriver: true }).start();
+      await recorder.stop();
+      const uri = recorder.uri;
+      setRecording(false);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (uri) onRecorded(uri);
+    } catch (_e) { setRecording(false); }
+  }
+
+  return (
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity
+        style={[tgStyles.voiceBtn, recording && tgStyles.voiceBtnActive]}
+        onPressIn={startRecord}
+        onPressOut={stopRecord}
+        activeOpacity={0.8}
+      >
+        <Text style={{ fontSize: 20 }}>🎤</Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+// ─── EmojiPicker ────────────────────────────────────────────────────────────
+
+const QUICK_EMOJIS = ['😊','😂','❤️','👍','🔥','✅','🎉','😎','🤔','👀','💯','🙏','😅','🚀','💪','🎯','⚡','🤖','🦀','✨'];
+
+function EmojiPicker({ visible, onSelect, onClose }) {
+  if (!visible) return null;
+  return (
+    <View style={tgStyles.emojiPicker}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8 }}>
+        {QUICK_EMOJIS.map((e) => (
+          <TouchableOpacity key={e} onPress={() => onSelect(e)} style={tgStyles.emojiBtn}>
+            <Text style={{ fontSize: 24 }}>{e}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ─── ChatScreen ─────────────────────────────────────────────────────────────
+
+function ChatScreen({ chatMessages, draft, setDraft, onSend, onSendMedia, sending, userId, overview, onBack, setActiveTab, activeTab }) {
+  const flatRef = useRef(null);
+  const [replyTo, setReplyTo] = useState(null);
+  const [contextMsg, setContextMsg] = useState(null);
+  const [contextPos, setContextPos] = useState({ x: 0, y: 0 });
+  const [showAttach, setShowAttach] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [pendingMedia, setPendingMedia] = useState(null); // { type, uri, base64, fileName, fileSize }
+  const isOnline = !!overview;
+
+  useEffect(() => {
+    if (chatMessages.length > 0) {
+      setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [chatMessages.length]);
+
+  function handleLongPress(msg, nativeEvent) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setContextMsg(msg);
+    setContextPos({ x: nativeEvent.pageX, y: nativeEvent.pageY });
+  }
+
+  async function handleCopy() {
+    if (contextMsg?.content) {
+      await Clipboard.setStringAsync(contextMsg.content);
+    }
+  }
+
+  async function pickFromCamera() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') { Alert.alert('Permission required', 'Camera access needed.'); return; }
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7, base64: true });
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      setPendingMedia({ type: 'image', uri: asset.uri, base64: asset.base64 });
+    }
+  }
+
+  async function pickFromGallery() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') { Alert.alert('Permission required', 'Photo library access needed.'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7, base64: true, allowsMultipleSelection: false });
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      setPendingMedia({ type: 'image', uri: asset.uri, base64: asset.base64 });
+    }
+  }
+
+  async function pickFile() {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setPendingMedia({ type: 'file', uri: asset.uri, fileName: asset.name, fileSize: asset.size ? `${(asset.size / 1024).toFixed(1)} KB` : '' });
+      }
+    } catch (_e) {}
+  }
+
+  function handleSend() {
+    const text = draft.trim();
+    if (!text && !pendingMedia) return;
+    if (pendingMedia) {
+      onSendMedia({ ...pendingMedia, content: text, replyTo });
+      setPendingMedia(null);
+    } else {
+      onSend(text, replyTo);
+    }
+    setDraft('');
+    setReplyTo(null);
+    setShowEmoji(false);
+  }
+
+  function handleVoice(uri) {
+    onSendMedia({ type: 'audio', uri, replyTo });
+    setReplyTo(null);
+  }
+
+  const hasDraft = draft.trim().length > 0;
+
+  const TABS_BAR = (
+    <View style={tgStyles.tabBar}>
+      {TABS.map((tab) => {
+        const isActive = tab.key === activeTab;
+        return (
+          <TouchableOpacity key={tab.key} onPress={() => setActiveTab(tab.key)} style={tgStyles.tabBtn}>
+            <Text style={[tgStyles.tabText, isActive && tgStyles.tabTextActive]}>{tab.label}</Text>
+            <View style={[tgStyles.tabIndicator, isActive && tgStyles.tabIndicatorActive]} />
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
+  return (
+    <View style={tgStyles.screen}>
+      {/* Header */}
+      <View style={tgStyles.header}>
+        <Image source={MASCOT} style={tgStyles.headerAvatar} resizeMode="contain" />
+        <View style={{ flex: 1 }}>
+          <Text style={tgStyles.headerName}>Ninoclaw</Text>
+          <Text style={[tgStyles.headerSub, isOnline && { color: '#4fc3f7' }]}>{isOnline ? 'online' : 'offline'}</Text>
+        </View>
+        <View style={[tgStyles.onlineDot, isOnline && { backgroundColor: '#4caf50' }]} />
       </View>
 
-      <View style={styles.composer}>
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="Message Ninoclaw..."
-          placeholderTextColor={COLORS.muted}
-          style={styles.input}
-          multiline
-        />
-        <TouchableOpacity style={styles.primaryButton} onPress={onSend} disabled={sending || !draft.trim()}>
-          <Text style={styles.primaryButtonText}>{sending ? 'Sending...' : 'Send message'}</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Messages */}
+      <FlatList
+        ref={flatRef}
+        data={chatMessages}
+        keyExtractor={(item, i) => `${item.role}-${i}-${item.ts || i}`}
+        renderItem={({ item, index }) => (
+          <MessageBubble
+            message={item}
+            prevMessage={index > 0 ? chatMessages[index - 1] : null}
+            onLongPress={handleLongPress}
+          />
+        )}
+        contentContainerStyle={tgStyles.messageList}
+        ListEmptyComponent={
+          <View style={tgStyles.emptyChat}>
+            <Image source={MASCOT} style={{ width: 80, height: 80, opacity: 0.4, marginBottom: 16 }} resizeMode="contain" />
+            <Text style={tgStyles.emptyChatText}>Send a message to start chatting with Ninoclaw</Text>
+          </View>
+        }
+        onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
+      />
+
+      {/* Emoji picker */}
+      <EmojiPicker visible={showEmoji} onSelect={(e) => setDraft((d) => d + e)} onClose={() => setShowEmoji(false)} />
+
+      {/* Attach menu */}
+      <AttachMenu visible={showAttach} onClose={() => setShowAttach(false)} onCamera={pickFromCamera} onGallery={pickFromGallery} onFile={pickFile} />
+
+      {/* Pending media preview */}
+      {!!pendingMedia && (
+        <View style={tgStyles.pendingBar}>
+          {pendingMedia.type === 'image' ? (
+            <Image source={{ uri: pendingMedia.uri }} style={tgStyles.pendingThumb} />
+          ) : (
+            <View style={tgStyles.pendingFileIcon}>
+              <Ionicons name="document-outline" size={22} color="#4fc3f7" />
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={tgStyles.pendingLabel} numberOfLines={1}>
+              {pendingMedia.type === 'image' ? 'Photo' : pendingMedia.fileName}
+            </Text>
+            <Text style={tgStyles.pendingHint}>Add a caption and tap send</Text>
+          </View>
+          <TouchableOpacity onPress={() => setPendingMedia(null)} style={{ padding: 6 }}>
+            <Ionicons name="close-circle" size={22} color={COLORS.muted} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Reply bar */}
+      <ReplyBar message={replyTo} onCancel={() => setReplyTo(null)} />
+
+      {/* Composer */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={0}>
+        <View style={tgStyles.composer}>
+          <TouchableOpacity style={tgStyles.composerBtn} onPress={() => { setShowEmoji((v) => !v); setShowAttach(false); }}>
+            <Ionicons name={showEmoji ? 'keypad-outline' : 'happy-outline'} size={24} color={COLORS.muted} />
+          </TouchableOpacity>
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            placeholder={pendingMedia ? 'Add a caption...' : 'Message...'}
+            placeholderTextColor={COLORS.muted}
+            style={tgStyles.composerInput}
+            multiline
+            maxHeight={120}
+            onFocus={() => { setShowEmoji(false); setShowAttach(false); }}
+          />
+          {!pendingMedia && (
+            <TouchableOpacity style={tgStyles.composerBtn} onPress={() => { setShowAttach((v) => !v); setShowEmoji(false); }}>
+              <Ionicons name="attach" size={24} color={COLORS.muted} />
+            </TouchableOpacity>
+          )}
+          {(hasDraft || pendingMedia) ? (
+            <TouchableOpacity style={[tgStyles.sendBtn, sending && { opacity: 0.5 }]} onPress={handleSend} disabled={sending}>
+              {sending
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Ionicons name="send" size={18} color="#fff" />}
+            </TouchableOpacity>
+          ) : (
+            <VoiceButton onRecorded={handleVoice} />
+          )}
+        </View>
+      </KeyboardAvoidingView>
+
+      {/* Bottom tabs */}
+      {TABS_BAR}
+
+      {/* Context menu */}
+      <ContextMenu
+        message={contextMsg}
+        position={contextPos}
+        onClose={() => setContextMsg(null)}
+        onReply={() => { setReplyTo(contextMsg); setContextMsg(null); }}
+        onCopy={handleCopy}
+        onDelete={() => {
+          Alert.alert('Delete', 'Remove this message from local view?', [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Delete', style: 'destructive', onPress: () => setContextMsg(null) },
+          ]);
+        }}
+      />
     </View>
   );
 }
@@ -654,11 +1077,15 @@ function SettingsTab({
   onFixEnv,
   actionBusy,
   onToggleMobileControl,
+  androidAgentStatus,
+  onRefreshAndroidAgent,
+  onOpenAccessibilitySettings,
   executorTasks,
   executorLog,
 }) {
   const pluginEntries = Object.entries(settingsData?.plugins || {});
   const mobileControl = settingsData?.mobile_control || { enabled: false, devices: [] };
+  const nativeAgent = androidAgentStatus || {};
 
   return (
     <View>
@@ -745,6 +1172,65 @@ function SettingsTab({
             <Text style={styles.helperText}>No executor actions have run on this device yet.</Text>
           )}
         </View>
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Android agent</Text>
+        <View style={styles.settingRow}>
+          <Text style={styles.settingTitle}>Native bridge</Text>
+          <Text style={styles.settingValue}>{nativeAgent.available ? 'Ready in custom build' : 'Unavailable in Expo Go'}</Text>
+        </View>
+        <View style={styles.settingRow}>
+          <Text style={styles.settingTitle}>Accessibility service</Text>
+          <Text style={styles.settingValue}>{nativeAgent.serviceEnabled ? 'Enabled' : 'Disabled'}</Text>
+        </View>
+        <View style={styles.settingRow}>
+          <Text style={styles.settingTitle}>Tap and text input</Text>
+          <Text style={styles.settingValue}>
+            {nativeAgent.canTap || nativeAgent.canTypeText ? `${nativeAgent.canTap ? 'Tap' : ''}${nativeAgent.canTap && nativeAgent.canTypeText ? ' + ' : ''}${nativeAgent.canTypeText ? 'Type' : ''} ready` : 'Not ready'}
+          </Text>
+        </View>
+        <View style={styles.settingRow}>
+          <Text style={styles.settingTitle}>Last app</Text>
+          <Text style={styles.settingValue}>{nativeAgent.lastPackageName || 'None yet'}</Text>
+        </View>
+        <Text style={styles.helperText}>
+          Native Android control needs a custom dev build or APK. Expo Go can show the control plane, but it cannot load the accessibility module.
+        </Text>
+        {!!nativeAgent.supportedActions?.length && (
+          <Text style={styles.helperText}>Supported native actions: {nativeAgent.supportedActions.join(', ')}</Text>
+        )}
+        <Text style={styles.helperText}>
+          Selector tips: use payload keys like `viewId`, `text`, or `contentDescription`. For raw taps, send `x` and `y` screen coordinates.
+        </Text>
+        {!!nativeAgent.visibleTexts?.length && (
+          <Text style={styles.helperText}>Latest visible text snapshot: {nativeAgent.visibleTexts.slice(0, 8).join(' | ')}</Text>
+        )}
+        {!!nativeAgent.setupSteps?.length && (
+          <View style={{ marginTop: 8 }}>
+            {nativeAgent.setupSteps.map((step, index) => (
+              <Text key={`${index}-${step}`} style={styles.helperText}>{index + 1}. {step}</Text>
+            ))}
+          </View>
+        )}
+        <TouchableOpacity
+          style={[styles.secondaryButton, actionBusy === 'refresh-android-agent' && styles.buttonDisabled, { marginTop: 12 }]}
+          onPress={onRefreshAndroidAgent}
+          disabled={!!actionBusy}
+        >
+          <Text style={styles.secondaryButtonText}>
+            {actionBusy === 'refresh-android-agent' ? 'Refreshing...' : 'Refresh Android agent'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.secondaryButton, actionBusy === 'open-accessibility-settings' && styles.buttonDisabled, { marginTop: 10 }]}
+          onPress={onOpenAccessibilitySettings}
+          disabled={!!actionBusy}
+        >
+          <Text style={styles.secondaryButtonText}>
+            {actionBusy === 'open-accessibility-settings' ? 'Opening...' : 'Open accessibility settings'}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.panel}>
@@ -885,6 +1371,7 @@ export default function App() {
   const [modelSmart, setModelSmart] = useState('');
   const [detectingDashboard, setDetectingDashboard] = useState(false);
   const [deviceId, setDeviceId] = useState('');
+  const [androidAgentStatus, setAndroidAgentStatus] = useState(null);
   const [executorTasks, setExecutorTasks] = useState([]);
   const [executorLog, setExecutorLog] = useState([]);
 
@@ -921,7 +1408,13 @@ export default function App() {
     return data;
   }
 
-  async function registerMobileDevice() {
+  async function refreshAndroidAgentStatus() {
+    const status = await getAndroidAgentStatus();
+    setAndroidAgentStatus(status);
+    return status;
+  }
+
+  async function registerMobileDevice(agentStatus = androidAgentStatus) {
     const id = deviceId || await getOrCreateDeviceId();
     if (!deviceId) {
       setDeviceId(id);
@@ -932,21 +1425,7 @@ export default function App() {
       name: Platform.OS === 'android' ? 'Ninoclaw Android Companion' : 'Ninoclaw Mobile Companion',
       platform: Platform.OS,
       app_version: '1.0.0',
-      capabilities: [
-        'chat',
-        'tasks',
-        'builds',
-        'settings',
-        'mobile_executor',
-        'ping',
-        'show_alert',
-        'open_url',
-        'open_settings',
-        'dial_number',
-        'send_sms',
-        'open_maps',
-        'open_app',
-      ],
+      capabilities: buildDeviceCapabilities(agentStatus),
       status: 'online',
       ip_address: ipAddress,
     });
@@ -989,7 +1468,8 @@ export default function App() {
       setModelFast(settingsRes?.models?.fast || '');
       setModelSmart(settingsRes?.models?.smart || '');
       try {
-        const registerRes = await registerMobileDevice();
+        const nativeStatus = await refreshAndroidAgentStatus();
+        const registerRes = await registerMobileDevice(nativeStatus);
         if (registerRes?.mobile_control) {
           settingsRes.mobile_control = registerRes.mobile_control;
           setSettingsData({ ...settingsRes });
@@ -1066,36 +1546,68 @@ export default function App() {
     await loadAll(false);
   }
 
-  async function sendMessage() {
-    const text = draft.trim();
-    if (!text) {
-      return;
-    }
+  async function sendMessage(text, replyTo = null) {
+    const msgText = (typeof text === 'string' ? text : draft).trim();
+    if (!msgText) return;
     setSending(true);
     setError('');
+    const now = new Date().toISOString();
+    const optimistic = { role: 'user', content: msgText, ts: now, type: 'text', status: 'sent', replyTo: replyTo || null };
+    setChatMessages((current) => [...current, optimistic]);
+    setDraft('');
     try {
       const response = await fetch(
         `${normalizeBaseUrl(baseUrl)}/api/chat/${encodeURIComponent(userId.trim())}/send`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ message: text }),
-        }
+        { method: 'POST', headers, body: JSON.stringify({ message: msgText }) }
       );
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || `Send failed: ${response.status}`);
-      }
-      const now = new Date().toISOString();
+      if (!response.ok) throw new Error(data.error || `Send failed: ${response.status}`);
       setChatMessages((current) => [
         ...current,
-        { role: 'user', content: text, ts: now },
-        { role: 'assistant', content: data.reply, ts: new Date().toISOString() },
+        { role: 'assistant', content: data.reply, ts: new Date().toISOString(), type: 'text', status: 'delivered' },
       ]);
-      setDraft('');
-      await loadAll(false);
     } catch (sendError) {
       setError(sendError.message || 'Failed to send message.');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function sendMedia(media) {
+    // media: { type, uri, base64?, fileName?, fileSize?, duration?, replyTo? }
+    const now = new Date().toISOString();
+    const optimistic = {
+      role: 'user',
+      type: media.type,
+      uri: media.uri,
+      fileName: media.fileName,
+      fileSize: media.fileSize,
+      duration: media.duration,
+      content: media.type === 'image' ? '[Photo]' : media.type === 'file' ? `[File: ${media.fileName}]` : '[Voice message]',
+      ts: now,
+      status: 'sent',
+      replyTo: media.replyTo || null,
+    };
+    setChatMessages((current) => [...current, optimistic]);
+
+    setSending(true);
+    try {
+      const body = { message: media.content || '' };
+      if (media.type === 'image' && media.base64) body.image_b64 = media.base64;
+      if (media.type === 'file') body.message = body.message || `I sent you a file: ${media.fileName}`;
+      if (media.type === 'audio') body.message = body.message || 'I sent you a voice message.';
+      const response = await fetch(
+        `${normalizeBaseUrl(baseUrl)}/api/chat/${encodeURIComponent(userId.trim())}/send`,
+        { method: 'POST', headers, body: JSON.stringify(body) }
+      );
+      const data = await response.json();
+      if (response.ok) {
+        setChatMessages((current) => [
+          ...current,
+          { role: 'assistant', content: data.reply, ts: new Date().toISOString(), type: 'text', status: 'delivered' },
+        ]);
+      }
+    } catch (_e) {
     } finally {
       setSending(false);
     }
@@ -1334,6 +1846,33 @@ export default function App() {
     }
   }
 
+  async function handleRefreshAndroidAgent() {
+    setActionBusy('refresh-android-agent');
+    setError('');
+    try {
+      const status = await refreshAndroidAgentStatus();
+      await registerMobileDevice(status);
+      showSuccess(status?.available ? 'Android agent status refreshed.' : 'Android agent checked. Native module is not loaded in this build.');
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to refresh Android agent status.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
+  async function handleOpenAccessibilitySettings() {
+    setActionBusy('open-accessibility-settings');
+    setError('');
+    try {
+      const result = await openAndroidAccessibilitySettings();
+      showSuccess(result?.summary || 'Opened accessibility settings.');
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to open accessibility settings.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
   async function completeExecutorTask(taskId, status, result = {}, error = '') {
     if (!deviceId) {
       return;
@@ -1346,6 +1885,19 @@ export default function App() {
       });
     } catch (_completeError) {
     }
+  }
+
+  async function runAndroidAgentTask(task, nativeAction, successFallback) {
+    const result = await performAndroidAgentAction(nativeAction, task?.payload || {});
+    if (result?.status) {
+      setAndroidAgentStatus(result.status);
+    }
+    if (result?.ok) {
+      await completeExecutorTask(task.id, 'completed', result);
+      return { ok: true, summary: result.summary || successFallback };
+    }
+    await completeExecutorTask(task.id, 'failed', result || {}, result?.summary || `Android agent action failed: ${nativeAction}`);
+    return { ok: false, summary: result?.summary || `Android agent action failed: ${nativeAction}` };
   }
 
   async function executeExecutorTask(task) {
@@ -1470,6 +2022,44 @@ export default function App() {
       }
       await completeExecutorTask(task.id, 'failed', {}, lastError || `No launch route available for ${requested || 'requested app'}`);
       return { ok: false, summary: `open_app failed: ${lastError || 'no launch route available'}` };
+    }
+    if (action === 'android_agent_status') {
+      const status = await refreshAndroidAgentStatus();
+      await completeExecutorTask(task.id, 'completed', status);
+      return {
+        ok: true,
+        summary: status?.available
+          ? (status?.serviceEnabled ? 'Android agent is available and service is enabled.' : 'Android agent is available, but accessibility service is still disabled.')
+          : 'Android agent is not available in this build.',
+      };
+    }
+    if (action === 'open_accessibility_settings') {
+      try {
+        const result = await openAndroidAccessibilitySettings();
+        await completeExecutorTask(task.id, 'completed', result);
+        return { ok: true, summary: result.summary || 'Opened accessibility settings.' };
+      } catch (settingsError) {
+        await completeExecutorTask(task.id, 'failed', {}, settingsError.message || 'Could not open accessibility settings');
+        return { ok: false, summary: settingsError.message || 'Could not open accessibility settings' };
+      }
+    }
+    if (action === 'agent_press_back') {
+      return runAndroidAgentTask(task, 'press_back', 'Pressed Back via Android agent.');
+    }
+    if (action === 'agent_open_notifications') {
+      return runAndroidAgentTask(task, 'open_notifications', 'Opened notification shade via Android agent.');
+    }
+    if (action === 'agent_open_quick_settings') {
+      return runAndroidAgentTask(task, 'open_quick_settings', 'Opened quick settings via Android agent.');
+    }
+    if (action === 'agent_read_screen') {
+      return runAndroidAgentTask(task, 'read_screen', 'Collected Android screen snapshot.');
+    }
+    if (action === 'agent_tap') {
+      return runAndroidAgentTask(task, 'tap', 'Requested Android tap action.');
+    }
+    if (action === 'agent_type_text') {
+      return runAndroidAgentTask(task, 'type_text', 'Requested Android text input action.');
     }
 
     await completeExecutorTask(task.id, 'failed', {}, `Unsupported action: ${action}`);
@@ -1630,6 +2220,9 @@ export default function App() {
             onSaveModels={handleSaveModels}
             onTogglePlugin={handleTogglePlugin}
             onToggleMobileControl={handleToggleMobileControl}
+            androidAgentStatus={androidAgentStatus}
+            onRefreshAndroidAgent={handleRefreshAndroidAgent}
+            onOpenAccessibilitySettings={handleOpenAccessibilitySettings}
             onReloadRuntime={handleReloadRuntime}
             onFixEnv={handleFixEnv}
             actionBusy={actionBusy}
@@ -1639,17 +2232,7 @@ export default function App() {
         );
       case 'chat':
       default:
-        return (
-          <ChatTab
-            overview={overview}
-            chatMessages={chatMessages}
-            draft={draft}
-            setDraft={setDraft}
-            onSend={sendMessage}
-            sending={sending}
-            userId={userId.trim() || 'mobile'}
-          />
-        );
+        return null;
     }
   })();
 
@@ -1659,8 +2242,10 @@ export default function App() {
       try {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         const savedDeviceId = await getOrCreateDeviceId();
+        const nativeStatus = await getAndroidAgentStatus();
         if (mounted) {
           setDeviceId(savedDeviceId);
+          setAndroidAgentStatus(nativeStatus);
         }
         if (raw && mounted) {
           const saved = JSON.parse(raw);
@@ -1728,6 +2313,27 @@ export default function App() {
       clearInterval(id);
     };
   }, [settingsData?.mobile_control?.enabled, deviceId, baseUrl, password]);
+
+  // Chat tab gets its own full-screen layout (no ScrollView)
+  if (activeTab === 'chat' && overview) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <StatusBar barStyle="light-content" backgroundColor="#1a2332" />
+        <ChatScreen
+          chatMessages={chatMessages}
+          draft={draft}
+          setDraft={setDraft}
+          onSend={sendMessage}
+          onSendMedia={sendMedia}
+          sending={sending}
+          userId={userId.trim() || 'mobile'}
+          overview={overview}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+        />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -2042,6 +2648,99 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
   },
+  chatContainer: {
+    flex: 1,
+  },
+  chatMessages: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  chatRowUser: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 8,
+  },
+  chatRowAssistant: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginBottom: 8,
+    gap: 8,
+  },
+  chatAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+    flexShrink: 0,
+  },
+  chatBubble: {
+    maxWidth: '80%',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  chatBubbleUser: {
+    backgroundColor: '#1d4ed8',
+    borderBottomRightRadius: 4,
+  },
+  chatBubbleAssistant: {
+    backgroundColor: COLORS.panelSoft,
+    borderBottomLeftRadius: 4,
+  },
+  chatBubbleText: {
+    color: COLORS.text,
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  chatBubbleTime: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 10,
+    marginTop: 4,
+    textAlign: 'right',
+  },
+  chatEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  chatComposer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.line,
+    backgroundColor: COLORS.bg,
+    gap: 8,
+  },
+  chatInput: {
+    flex: 1,
+    color: COLORS.text,
+    backgroundColor: COLORS.panelSoft,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 15,
+    maxHeight: 120,
+  },
+  chatSendBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#1d4ed8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatSendBtnText: {
+    color: COLORS.text,
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 24,
+  },
   input: {
     color: COLORS.text,
     backgroundColor: COLORS.panelSoft,
@@ -2218,7 +2917,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingHorizontal: 16,
     paddingTop: 10,
-    paddingBottom: 28,
+    paddingBottom: 48,
     backgroundColor: 'rgba(7, 17, 31, 0.92)',
   },
   bottomTabBar: {
@@ -2276,5 +2975,418 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     fontSize: 13,
     lineHeight: 18,
+  },
+});
+
+// ─── Telegram-style stylesheet ───────────────────────────────────────────────
+const tgStyles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: '#0d1520',
+  },
+  // Header
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a2332',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#243248',
+    gap: 12,
+  },
+  headerAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#243248',
+  },
+  headerName: {
+    color: '#edf4ff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  headerSub: {
+    color: '#97a8c4',
+    fontSize: 13,
+  },
+  onlineDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#97a8c4',
+  },
+  // Messages
+  messageList: {
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  msgRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginBottom: 2,
+    paddingHorizontal: 4,
+  },
+  msgRowUser: {
+    justifyContent: 'flex-end',
+  },
+  msgRowAssistant: {
+    justifyContent: 'flex-start',
+    gap: 6,
+  },
+  avatarCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#1a3558',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+    flexShrink: 0,
+  },
+  bubble: {
+    maxWidth: '78%',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 6,
+    borderRadius: 18,
+  },
+  bubbleUser: {
+    backgroundColor: '#1d4ca3',
+    borderBottomRightRadius: 4,
+  },
+  bubbleAssistant: {
+    backgroundColor: '#1e2d40',
+    borderBottomLeftRadius: 4,
+  },
+  msgText: {
+    color: '#edf4ff',
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  msgMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    gap: 2,
+  },
+  msgMeta: {
+    color: 'rgba(237,244,255,0.45)',
+    fontSize: 11,
+  },
+  msgStatus: {
+    color: '#4fc3f7',
+    fontSize: 12,
+  },
+  // Day separator
+  dayPill: {
+    alignItems: 'center',
+    marginVertical: 12,
+  },
+  dayPillText: {
+    backgroundColor: 'rgba(26,35,50,0.85)',
+    color: '#97a8c4',
+    fontSize: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  // Reply preview inside bubble
+  msgReplyPreview: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 8,
+    marginBottom: 2,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    maxWidth: '78%',
+    gap: 6,
+  },
+  msgReplyAccent: {
+    width: 3,
+    borderRadius: 2,
+    backgroundColor: '#4fc3f7',
+  },
+  msgReplyFrom: {
+    color: '#4fc3f7',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 1,
+  },
+  msgReplyText: {
+    color: '#97a8c4',
+    fontSize: 12,
+  },
+  // Image message
+  msgImage: {
+    width: 220,
+    height: 160,
+    borderRadius: 10,
+    marginBottom: 4,
+  },
+  // File message
+  fileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 180,
+  },
+  fileName: {
+    color: '#edf4ff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fileSize: {
+    color: '#97a8c4',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  // Audio message
+  audioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 160,
+  },
+  audioBar: {
+    flex: 1,
+    height: 24,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  audioWave: {
+    height: 3,
+    backgroundColor: '#4fc3f7',
+    borderRadius: 2,
+    width: '60%',
+  },
+  // Empty state
+  emptyChat: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 80,
+    paddingHorizontal: 32,
+  },
+  emptyChatText: {
+    color: '#97a8c4',
+    fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  // Reply bar above composer
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a2332',
+    borderTopWidth: 1,
+    borderTopColor: '#243248',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  replyBarAccent: {
+    width: 3,
+    height: '100%',
+    minHeight: 32,
+    borderRadius: 2,
+    backgroundColor: '#4fc3f7',
+  },
+  replyBarFrom: {
+    color: '#4fc3f7',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 1,
+  },
+  replyBarText: {
+    color: '#97a8c4',
+    fontSize: 13,
+  },
+  replyBarClose: {
+    padding: 4,
+  },
+  // Attach menu
+  attachMenu: {
+    backgroundColor: '#1a2332',
+    borderTopWidth: 1,
+    borderTopColor: '#243248',
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+  },
+  attachOption: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  attachIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#243248',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachLabel: {
+    color: '#97a8c4',
+    fontSize: 12,
+  },
+  // Emoji picker
+  emojiPicker: {
+    backgroundColor: '#1a2332',
+    borderTopWidth: 1,
+    borderTopColor: '#243248',
+    paddingVertical: 10,
+  },
+  emojiBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  // Composer
+  composer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: '#1a2332',
+    borderTopWidth: 1,
+    borderTopColor: '#243248',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  composerBtn: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  composerInput: {
+    flex: 1,
+    color: '#edf4ff',
+    backgroundColor: '#243248',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    fontSize: 15,
+    maxHeight: 120,
+  },
+  sendBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#1d4ca3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendBtnIcon: {
+    color: '#edf4ff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  // Voice button
+  voiceBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#243248',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  voiceBtnActive: {
+    backgroundColor: '#c0392b',
+  },
+  // Pending media preview bar
+  pendingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a2e44',
+    borderTopWidth: 1,
+    borderTopColor: '#243248',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 10,
+  },
+  pendingThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: '#243248',
+  },
+  pendingFileIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: '#243248',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingLabel: {
+    color: '#edf4ff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  pendingHint: {
+    color: '#97a8c4',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  // Context menu
+  ctxOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  ctxMenu: {
+    position: 'absolute',
+    backgroundColor: '#1e2d40',
+    borderRadius: 12,
+    minWidth: 160,
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  ctxItem: {
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: '#243248',
+  },
+  ctxItemText: {
+    color: '#edf4ff',
+    fontSize: 15,
+  },
+  // Tab bar inside ChatScreen
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: '#1a2332',
+    borderTopWidth: 1,
+    borderTopColor: '#243248',
+    paddingBottom: 28,
+  },
+  tabBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 4,
+  },
+  tabText: {
+    color: '#97a8c4',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  tabTextActive: {
+    color: '#4fc3f7',
+  },
+  tabIndicator: {
+    height: 2,
+    width: 24,
+    borderRadius: 1,
+    backgroundColor: 'transparent',
+  },
+  tabIndicatorActive: {
+    backgroundColor: '#4fc3f7',
   },
 });

@@ -300,6 +300,7 @@ You have access to the following tools:
 - expo_stop_app: Stop a running Expo app dev server.
 - expo_list_apps: List all Expo apps and their statuses.
 - expo_delete_app: Delete an Expo app project.
+You CAN control the user's Android phone through the Ninoclaw Companion app using the mobile_* tools (mobile_open_app, mobile_tap, mobile_type_text, mobile_read_screen, mobile_press_back, mobile_open_url, mobile_send_sms, mobile_dial). The companion app must be connected and accessibility service enabled.
 
 SKILL CREATION - when user asks you to create a skill, call create_skill with valid Python code following this EXACT template:
 

@@ -70,7 +70,7 @@ def _ensure_mobile_tables():
             action TEXT NOT NULL,
             payload_json TEXT,
             status TEXT NOT NULL DEFAULT 'queued',
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime')),
             claimed_at TEXT,
             completed_at TEXT,
             result_json TEXT,
@@ -171,8 +171,8 @@ def _enqueue_mobile_task(device_id, action, payload):
     try:
         cur = conn.execute(
             """
-            INSERT INTO mobile_tasks (device_id, action, payload_json, status)
-            VALUES (?, ?, ?, 'queued')
+            INSERT INTO mobile_tasks (device_id, action, payload_json, status, created_at)
+            VALUES (?, ?, ?, 'queued', strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
             """,
             (device_id, action, json.dumps(payload or {})),
         )
@@ -191,14 +191,14 @@ def _upsert_mobile_device(device_id, payload):
             """
             INSERT INTO mobile_devices
                 (device_id, name, platform, app_version, ip_address, capabilities_json, last_seen, status)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)
+            VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'), ?)
             ON CONFLICT(device_id) DO UPDATE SET
                 name=excluded.name,
                 platform=excluded.platform,
                 app_version=excluded.app_version,
                 ip_address=excluded.ip_address,
                 capabilities_json=excluded.capabilities_json,
-                last_seen=datetime('now'),
+                last_seen=strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'),
                 status=excluded.status
             """,
             (
@@ -1397,7 +1397,7 @@ def api_mobile_device_tasks(device_id):
         conn.execute(
             """
             UPDATE mobile_devices
-            SET last_seen=datetime('now'), status='online', ip_address=?
+            SET last_seen=strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'), status='online', ip_address=?
             WHERE device_id=?
             """,
             (request.remote_addr or "", device_id),
@@ -1405,7 +1405,7 @@ def api_mobile_device_tasks(device_id):
         conn.execute(
             """
             UPDATE mobile_tasks
-            SET status='dispatched', claimed_at=datetime('now')
+            SET status='dispatched', claimed_at=strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime')
             WHERE device_id=? AND status='queued'
             """,
             (device_id,),
@@ -1457,7 +1457,7 @@ def api_mobile_device_task_complete(device_id, task_id):
         cur = conn.execute(
             """
             UPDATE mobile_tasks
-            SET status=?, completed_at=datetime('now'), result_json=?, error=?
+            SET status=?, completed_at=strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'), result_json=?, error=?
             WHERE id=? AND device_id=?
             """,
             (status, result_json, error, int(task_id), device_id),
@@ -1465,7 +1465,7 @@ def api_mobile_device_task_complete(device_id, task_id):
         conn.execute(
             """
             UPDATE mobile_devices
-            SET last_seen=datetime('now'), status=?
+            SET last_seen=strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'), status=?
             WHERE device_id=?
             """,
             ("online" if status == "completed" else "attention", device_id),
@@ -1936,17 +1936,25 @@ def run_view(run_id):
 @app.route("/api/chat/<user_id>/send", methods=["POST"])
 @require_mobile_api
 def chat_send(user_id):
-    """Send a message as the user and get AI response"""
-    data = request.get_json()
-    text = (data or {}).get("message", "").strip()
-    if not text:
+    """Send a message (optionally with an image) and get AI response"""
+    data = request.get_json() or {}
+    text = data.get("message", "").strip()
+    image_b64 = data.get("image_b64", "").strip()
+    if not text and not image_b64:
         return jsonify({"error": "empty message"}), 400
     try:
         sys.path.insert(0, DIR)
         from memory import memory as mem
-        from chat_runtime import generate_reply_sync
-        mem.add_message(user_id, "user", text)
-        reply = generate_reply_sync(user_id, text, memory=mem)
+        from ai import chat
+        from chat_runtime import generate_reply_sync, build_personalized_prompt
+        user_text = text or "What do you see in this image?"
+        mem.add_message(user_id, "user", user_text)
+        if image_b64:
+            system_prompt = build_personalized_prompt(mem, user_id)
+            history = mem.get_history(user_id)
+            reply = chat(user_text, system_prompt=system_prompt, history=history, image_b64=image_b64, force_smart=True)
+        else:
+            reply = generate_reply_sync(user_id, user_text, memory=mem)
         mem.add_message(user_id, "assistant", reply)
         return jsonify({"reply": reply})
     except Exception as e:
@@ -2735,6 +2743,14 @@ def mobile_control_page():
           <option value="send_sms">send_sms</option>
           <option value="open_maps">open_maps</option>
           <option value="open_app">open_app</option>
+          <option value="android_agent_status">android_agent_status</option>
+          <option value="open_accessibility_settings">open_accessibility_settings</option>
+          <option value="agent_press_back">agent_press_back</option>
+          <option value="agent_open_notifications">agent_open_notifications</option>
+          <option value="agent_open_quick_settings">agent_open_quick_settings</option>
+          <option value="agent_read_screen">agent_read_screen</option>
+          <option value="agent_tap">agent_tap</option>
+          <option value="agent_type_text">agent_type_text</option>
         </select>
       </div>
       <div style="margin-bottom:14px;">
@@ -2747,7 +2763,10 @@ def mobile_control_page():
           <code>{"phone":"+919999999999"}</code>,
           <code>{"phone":"+919999999999","message":"On my way"}</code>,
           <code>{"query":"Bengaluru airport"}</code>,
-          <code>{"app":"whatsapp"}</code>
+          <code>{"app":"whatsapp"}</code>,
+          <code>{}</code> for Android agent status,
+          <code>{"text":"hello from Ninoclaw","targetText":"Message"}</code> for `agent_type_text`,
+          <code>{"text":"Send"}</code> or <code>{"viewId":"com.whatsapp:id/send"}</code> for `agent_tap`
         </div>
       </div>
       <button type="submit" class="btn btn-primary">Queue task</button>
