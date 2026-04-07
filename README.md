@@ -289,6 +289,8 @@ Expo previews:
 - `npm install`
 - `npx expo start -c`
 - Enter your dashboard LAN URL and a mobile user id inside the app
+- The app now also registers itself with the dashboard and can opt into future executor mode when `MOBILE_CONTROL_ENABLED=true`
+- Use the dashboard's `Mobile Control` page to enable executor mode and queue actions like `ping`, `show_alert`, `open_url`, `open_settings`, `dial_number`, `send_sms`, `open_maps`, and `open_app`
 
 ## Configuration
 

@@ -5,7 +5,9 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   NativeModules,
+  Platform,
   RefreshControl,
   SafeAreaView,
   ScrollView,
@@ -40,6 +42,7 @@ const TABS = [
 ];
 
 const STORAGE_KEY = 'ninoclaw-companion-connection';
+const DEVICE_ID_KEY = 'ninoclaw-companion-device-id';
 const MASCOT = require('./assets/mascot.png');
 
 function normalizeBaseUrl(value) {
@@ -85,6 +88,39 @@ function inferDashboardUrl() {
     return '';
   }
   return `http://${match[1]}:8080`;
+}
+
+async function getOrCreateDeviceId() {
+  const existing = await AsyncStorage.getItem(DEVICE_ID_KEY);
+  if (existing) {
+    return existing;
+  }
+  const created = `mobile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  await AsyncStorage.setItem(DEVICE_ID_KEY, created);
+  return created;
+}
+
+function appLaunchCandidates(name, payload = {}) {
+  const app = String(name || payload.app || payload.name || '').trim().toLowerCase();
+  const customUrl = String(payload.url || payload.deepLink || '').trim();
+  if (customUrl) {
+    return [customUrl];
+  }
+  const map = {
+    chrome: ['googlechrome://', 'https://www.google.com'],
+    browser: ['https://www.google.com'],
+    youtube: ['youtube://', 'https://www.youtube.com'],
+    spotify: ['spotify://', 'https://open.spotify.com'],
+    whatsapp: ['whatsapp://', 'https://wa.me'],
+    telegram: ['tg://resolve', 'https://t.me'],
+    instagram: ['instagram://', 'https://www.instagram.com'],
+    gmail: ['googlegmail://', 'mailto:'],
+    maps: ['geo:0,0?q=', 'https://maps.google.com'],
+    phone: ['tel:'],
+    sms: ['sms:'],
+    settings: ['app-settings:'],
+  };
+  return map[app] || [];
 }
 
 function extractIpv4Host(url) {
@@ -617,8 +653,12 @@ function SettingsTab({
   onReloadRuntime,
   onFixEnv,
   actionBusy,
+  onToggleMobileControl,
+  executorTasks,
+  executorLog,
 }) {
   const pluginEntries = Object.entries(settingsData?.plugins || {});
+  const mobileControl = settingsData?.mobile_control || { enabled: false, devices: [] };
 
   return (
     <View>
@@ -653,6 +693,57 @@ function SettingsTab({
         <View style={styles.settingRow}>
           <Text style={styles.settingTitle}>Timezone</Text>
           <Text style={styles.settingValue}>{settingsData?.agent?.timezone || 'Unavailable'}</Text>
+        </View>
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>Mobile control</Text>
+        <View style={styles.settingRow}>
+          <Text style={styles.settingTitle}>Executor mode</Text>
+          <TouchableOpacity
+            style={[styles.secondaryButton, actionBusy === 'mobile-control' && styles.buttonDisabled]}
+            onPress={() => onToggleMobileControl(!mobileControl.enabled)}
+            disabled={!!actionBusy}
+          >
+            <Text style={styles.secondaryButtonText}>
+              {actionBusy === 'mobile-control' ? 'Saving...' : mobileControl.enabled ? 'Enabled' : 'Disabled'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.helperText}>
+          When enabled in the dashboard, trusted phones can evolve from companion app to task executor.
+        </Text>
+        {!!mobileControl.devices?.length && mobileControl.devices.map((device) => (
+          <View key={device.device_id} style={styles.settingRow}>
+            <Text style={styles.settingTitle}>{device.name || device.device_id}</Text>
+            <Text style={styles.settingValue}>{device.status} · {device.platform}</Text>
+          </View>
+        ))}
+        <View style={{ marginTop: 14 }}>
+          <Text style={styles.panelTitle}>Executor inbox</Text>
+          {executorTasks.length ? (
+            executorTasks.map((task) => (
+              <View key={task.id} style={styles.settingRow}>
+                <Text style={styles.settingTitle}>{task.action}</Text>
+                <Text style={styles.settingValue}>#{task.id} · {task.status}</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.helperText}>No queued mobile tasks right now.</Text>
+          )}
+        </View>
+        <View style={{ marginTop: 14 }}>
+          <Text style={styles.panelTitle}>Recent executor activity</Text>
+          {executorLog.length ? (
+            executorLog.map((item) => (
+              <View key={item.id} style={styles.settingRow}>
+                <Text style={styles.settingTitle}>{item.text}</Text>
+                <Text style={styles.settingValue}>{formatTimestamp(item.at)}</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.helperText}>No executor actions have run on this device yet.</Text>
+          )}
         </View>
       </View>
 
@@ -793,6 +884,9 @@ export default function App() {
   const [modelFast, setModelFast] = useState('');
   const [modelSmart, setModelSmart] = useState('');
   const [detectingDashboard, setDetectingDashboard] = useState(false);
+  const [deviceId, setDeviceId] = useState('');
+  const [executorTasks, setExecutorTasks] = useState([]);
+  const [executorLog, setExecutorLog] = useState([]);
 
   const headers = useMemo(
     () => ({
@@ -825,6 +919,37 @@ export default function App() {
       throw new Error(data.error || `Request failed: ${response.status}`);
     }
     return data;
+  }
+
+  async function registerMobileDevice() {
+    const id = deviceId || await getOrCreateDeviceId();
+    if (!deviceId) {
+      setDeviceId(id);
+    }
+    const ipAddress = await Network.getIpAddressAsync().catch(() => '');
+    return apiPost('/api/mobile/device/register', {
+      device_id: id,
+      name: Platform.OS === 'android' ? 'Ninoclaw Android Companion' : 'Ninoclaw Mobile Companion',
+      platform: Platform.OS,
+      app_version: '1.0.0',
+      capabilities: [
+        'chat',
+        'tasks',
+        'builds',
+        'settings',
+        'mobile_executor',
+        'ping',
+        'show_alert',
+        'open_url',
+        'open_settings',
+        'dial_number',
+        'send_sms',
+        'open_maps',
+        'open_app',
+      ],
+      status: 'online',
+      ip_address: ipAddress,
+    });
   }
 
   function showSuccess(message) {
@@ -863,6 +988,14 @@ export default function App() {
       setModelPrimary(settingsRes?.models?.primary || '');
       setModelFast(settingsRes?.models?.fast || '');
       setModelSmart(settingsRes?.models?.smart || '');
+      try {
+        const registerRes = await registerMobileDevice();
+        if (registerRes?.mobile_control) {
+          settingsRes.mobile_control = registerRes.mobile_control;
+          setSettingsData({ ...settingsRes });
+        }
+      } catch (_registerError) {
+      }
       setLastSyncedAt(new Date().toISOString());
     } catch (fetchError) {
       setError(fetchError.message || 'Failed to load live data.');
@@ -1187,6 +1320,184 @@ export default function App() {
     }
   }
 
+  async function handleToggleMobileControl(enabled) {
+    setActionBusy('mobile-control');
+    setError('');
+    try {
+      const result = await apiPost('/api/mobile/runtime/mobile-control', { enabled });
+      setSettingsData(result.settings || null);
+      await loadAll(false);
+    } catch (actionError) {
+      setError(actionError.message || 'Failed to update mobile control setting.');
+    } finally {
+      setActionBusy('');
+    }
+  }
+
+  async function completeExecutorTask(taskId, status, result = {}, error = '') {
+    if (!deviceId) {
+      return;
+    }
+    try {
+      await apiPost(`/api/mobile/device/${encodeURIComponent(deviceId)}/tasks/${taskId}/complete`, {
+        status,
+        result,
+        error,
+      });
+    } catch (_completeError) {
+    }
+  }
+
+  async function executeExecutorTask(task) {
+    const action = task?.action;
+    const payload = task?.payload || {};
+    if (action === 'ping') {
+      await completeExecutorTask(task.id, 'completed', { pong: true, at: new Date().toISOString() });
+      return { ok: true, summary: 'Ping acknowledged.' };
+    }
+    if (action === 'show_alert') {
+      const title = payload.title || 'Ninoclaw';
+      const message = payload.message || 'Dashboard requested your attention.';
+      Alert.alert(title, message);
+      await completeExecutorTask(task.id, 'completed', { shown: true, title, message });
+      return { ok: true, summary: `Alert shown: ${title}` };
+    }
+    if (action === 'open_url') {
+      const url = payload.url || payload.href || '';
+      if (!url) {
+        await completeExecutorTask(task.id, 'failed', {}, 'No url provided');
+        return { ok: false, summary: 'open_url failed: no url provided' };
+      }
+      try {
+        await Linking.openURL(url);
+        await completeExecutorTask(task.id, 'completed', { opened: url });
+        return { ok: true, summary: `Opened URL: ${url}` };
+      } catch (openError) {
+        await completeExecutorTask(task.id, 'failed', {}, openError.message || 'Could not open URL');
+        return { ok: false, summary: `open_url failed: ${openError.message || 'unknown error'}` };
+      }
+    }
+    if (action === 'open_settings') {
+      try {
+        await Linking.openSettings();
+        await completeExecutorTask(task.id, 'completed', { opened: 'settings' });
+        return { ok: true, summary: 'Opened device settings.' };
+      } catch (settingsError) {
+        await completeExecutorTask(task.id, 'failed', {}, settingsError.message || 'Could not open settings');
+        return { ok: false, summary: `open_settings failed: ${settingsError.message || 'unknown error'}` };
+      }
+    }
+    if (action === 'dial_number') {
+      const phone = String(payload.phone || payload.number || '').trim();
+      if (!phone) {
+        await completeExecutorTask(task.id, 'failed', {}, 'No phone number provided');
+        return { ok: false, summary: 'dial_number failed: no phone number provided' };
+      }
+      const url = `tel:${phone}`;
+      try {
+        await Linking.openURL(url);
+        await completeExecutorTask(task.id, 'completed', { dialed: phone });
+        return { ok: true, summary: `Opened dialer for ${phone}` };
+      } catch (dialError) {
+        await completeExecutorTask(task.id, 'failed', {}, dialError.message || 'Could not open dialer');
+        return { ok: false, summary: `dial_number failed: ${dialError.message || 'unknown error'}` };
+      }
+    }
+    if (action === 'send_sms') {
+      const phone = String(payload.phone || payload.number || '').trim();
+      const message = String(payload.message || '').trim();
+      if (!phone) {
+        await completeExecutorTask(task.id, 'failed', {}, 'No phone number provided');
+        return { ok: false, summary: 'send_sms failed: no phone number provided' };
+      }
+      const url = `sms:${phone}${message ? `?body=${encodeURIComponent(message)}` : ''}`;
+      try {
+        await Linking.openURL(url);
+        await completeExecutorTask(task.id, 'completed', { sms_to: phone, body: message });
+        return { ok: true, summary: `Opened SMS composer for ${phone}` };
+      } catch (smsError) {
+        await completeExecutorTask(task.id, 'failed', {}, smsError.message || 'Could not open SMS composer');
+        return { ok: false, summary: `send_sms failed: ${smsError.message || 'unknown error'}` };
+      }
+    }
+    if (action === 'open_maps') {
+      const query = String(payload.query || payload.destination || payload.place || '').trim();
+      const lat = String(payload.lat || payload.latitude || '').trim();
+      const lng = String(payload.lng || payload.longitude || '').trim();
+      const url = query
+        ? `geo:0,0?q=${encodeURIComponent(query)}`
+        : lat && lng
+          ? `geo:${lat},${lng}`
+          : '';
+      if (!url) {
+        await completeExecutorTask(task.id, 'failed', {}, 'No map query or coordinates provided');
+        return { ok: false, summary: 'open_maps failed: no query or coordinates provided' };
+      }
+      try {
+        await Linking.openURL(url);
+        await completeExecutorTask(task.id, 'completed', { opened: query || `${lat},${lng}` });
+        return { ok: true, summary: `Opened maps for ${query || `${lat},${lng}`}` };
+      } catch (mapsError) {
+        await completeExecutorTask(task.id, 'failed', {}, mapsError.message || 'Could not open maps');
+        return { ok: false, summary: `open_maps failed: ${mapsError.message || 'unknown error'}` };
+      }
+    }
+    if (action === 'open_app') {
+      const requested = String(payload.app || payload.name || '').trim();
+      const candidates = appLaunchCandidates(requested, payload);
+      if (!requested && !candidates.length) {
+        await completeExecutorTask(task.id, 'failed', {}, 'No app or deep link provided');
+        return { ok: false, summary: 'open_app failed: no app or deep link provided' };
+      }
+      let opened = '';
+      let lastError = '';
+      for (const candidate of candidates) {
+        try {
+          const supported = await Linking.canOpenURL(candidate);
+          if (!supported) {
+            continue;
+          }
+          await Linking.openURL(candidate);
+          opened = candidate;
+          break;
+        } catch (candidateError) {
+          lastError = candidateError.message || 'Could not open candidate';
+        }
+      }
+      if (opened) {
+        await completeExecutorTask(task.id, 'completed', { app: requested, url: opened });
+        return { ok: true, summary: `Opened ${requested || opened}` };
+      }
+      await completeExecutorTask(task.id, 'failed', {}, lastError || `No launch route available for ${requested || 'requested app'}`);
+      return { ok: false, summary: `open_app failed: ${lastError || 'no launch route available'}` };
+    }
+
+    await completeExecutorTask(task.id, 'failed', {}, `Unsupported action: ${action}`);
+    return { ok: false, summary: `Unsupported action: ${action}` };
+  }
+
+  async function pollExecutorTasks() {
+    if (!deviceId || !normalizeBaseUrl(baseUrl) || !password.trim()) {
+      return;
+    }
+    try {
+      const result = await apiGet(`/api/mobile/device/${encodeURIComponent(deviceId)}/tasks`);
+      const tasks = result?.tasks || [];
+      setExecutorTasks(tasks);
+      for (const task of tasks) {
+        const summary = await executeExecutorTask(task);
+        setExecutorLog((current) => [
+          { id: `${task.id}-${Date.now()}`, text: summary.summary, at: new Date().toISOString() },
+          ...current,
+        ].slice(0, 12));
+      }
+      if (result?.mobile_control && settingsData) {
+        setSettingsData((current) => ({ ...(current || {}), mobile_control: result.mobile_control }));
+      }
+    } catch (_pollError) {
+    }
+  }
+
   async function handleReloadRuntime() {
     setActionBusy('reload-runtime');
     setError('');
@@ -1318,9 +1629,12 @@ export default function App() {
             setModelSmart={setModelSmart}
             onSaveModels={handleSaveModels}
             onTogglePlugin={handleTogglePlugin}
+            onToggleMobileControl={handleToggleMobileControl}
             onReloadRuntime={handleReloadRuntime}
             onFixEnv={handleFixEnv}
             actionBusy={actionBusy}
+            executorTasks={executorTasks}
+            executorLog={executorLog}
           />
         );
       case 'chat':
@@ -1344,6 +1658,10 @@ export default function App() {
     async function bootstrap() {
       try {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        const savedDeviceId = await getOrCreateDeviceId();
+        if (mounted) {
+          setDeviceId(savedDeviceId);
+        }
         if (raw && mounted) {
           const saved = JSON.parse(raw);
           if (saved.baseUrl) setBaseUrl(saved.baseUrl);
@@ -1391,6 +1709,25 @@ export default function App() {
       })
     ).catch(() => {});
   }, [baseUrl, password, userId, bootstrapped]);
+
+  useEffect(() => {
+    if (!settingsData?.mobile_control?.enabled || !deviceId || !baseUrl || !password) {
+      return undefined;
+    }
+    let cancelled = false;
+    async function tick() {
+      if (cancelled) {
+        return;
+      }
+      await pollExecutorTasks();
+    }
+    tick();
+    const id = setInterval(tick, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [settingsData?.mobile_control?.enabled, deviceId, baseUrl, password]);
 
   return (
     <SafeAreaView style={styles.safe}>

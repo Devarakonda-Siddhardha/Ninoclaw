@@ -77,6 +77,8 @@ GOOGLE_CALENDAR_ID = _env("GOOGLE_CALENDAR_ID", "primary")
 HF_TOKEN = _env("HF_TOKEN", "")  # HuggingFace - image generation (FLUX.1-schnell, free)
 GEMINI_API_KEY = _env("GEMINI_API_KEY", "")  # Google Gemini - image generation fallback
 NVIDIA_API_KEY = _env("NVIDIA_API_KEY", "")  # NVIDIA NIM / build.nvidia.com - trial API access
+MOBILE_CONTROL_ENABLED = _env("MOBILE_CONTROL_ENABLED", "false").lower() == "true"
+MOBILE_CONTROL_DEVICE_NAME = _env("MOBILE_CONTROL_DEVICE_NAME", "")
 
 
 def _provider(url, key_env, model_env, default_model=None, env=None):

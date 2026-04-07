@@ -49,6 +49,172 @@ def get_db():
         return None
     return connect_db(DB_FILE)
 
+
+def _ensure_mobile_tables():
+    conn = connect_db(DB_FILE)
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS mobile_devices (
+            device_id TEXT PRIMARY KEY,
+            name TEXT,
+            platform TEXT,
+            app_version TEXT,
+            ip_address TEXT,
+            capabilities_json TEXT,
+            last_seen TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'online'
+        );
+        CREATE TABLE IF NOT EXISTS mobile_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            payload_json TEXT,
+            status TEXT NOT NULL DEFAULT 'queued',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            claimed_at TEXT,
+            completed_at TEXT,
+            result_json TEXT,
+            error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_mobile_tasks_device_status ON mobile_tasks(device_id, status, created_at DESC);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def _mobile_control_enabled():
+    return get_env().get("MOBILE_CONTROL_ENABLED", "false") == "true"
+
+
+def _mobile_control_payload():
+    _ensure_mobile_tables()
+    conn = connect_db(DB_FILE)
+    try:
+        rows = conn.execute(
+            """
+            SELECT device_id, name, platform, app_version, ip_address, capabilities_json, last_seen, status
+            FROM mobile_devices
+            ORDER BY last_seen DESC
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    devices = []
+    for row in rows:
+        try:
+            capabilities = json.loads(row["capabilities_json"] or "[]")
+        except Exception:
+            capabilities = []
+        devices.append(
+            {
+                "device_id": row["device_id"],
+                "name": row["name"] or row["device_id"],
+                "platform": row["platform"] or "unknown",
+                "app_version": row["app_version"] or "",
+                "ip_address": row["ip_address"] or "",
+                "capabilities": capabilities,
+                "last_seen": row["last_seen"],
+                "status": row["status"] or "unknown",
+            }
+        )
+    return {
+        "enabled": _mobile_control_enabled(),
+        "devices": devices,
+    }
+
+
+def _recent_mobile_tasks(limit=40):
+    _ensure_mobile_tables()
+    conn = connect_db(DB_FILE)
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, device_id, action, payload_json, status, created_at, claimed_at, completed_at, result_json, error
+            FROM mobile_tasks
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+    finally:
+        conn.close()
+    items = []
+    for row in rows:
+        def _decode(value):
+            if not value:
+                return None
+            try:
+                return json.loads(value)
+            except Exception:
+                return value
+        items.append(
+            {
+                "id": row["id"],
+                "device_id": row["device_id"],
+                "action": row["action"],
+                "payload": _decode(row["payload_json"]),
+                "status": row["status"],
+                "created_at": row["created_at"],
+                "claimed_at": row["claimed_at"],
+                "completed_at": row["completed_at"],
+                "result": _decode(row["result_json"]),
+                "error": row["error"],
+            }
+        )
+    return items
+
+
+def _enqueue_mobile_task(device_id, action, payload):
+    _ensure_mobile_tables()
+    conn = connect_db(DB_FILE)
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO mobile_tasks (device_id, action, payload_json, status)
+            VALUES (?, ?, ?, 'queued')
+            """,
+            (device_id, action, json.dumps(payload or {})),
+        )
+        conn.commit()
+        task_id = cur.lastrowid
+    finally:
+        conn.close()
+    return task_id
+
+
+def _upsert_mobile_device(device_id, payload):
+    _ensure_mobile_tables()
+    conn = connect_db(DB_FILE)
+    try:
+        conn.execute(
+            """
+            INSERT INTO mobile_devices
+                (device_id, name, platform, app_version, ip_address, capabilities_json, last_seen, status)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)
+            ON CONFLICT(device_id) DO UPDATE SET
+                name=excluded.name,
+                platform=excluded.platform,
+                app_version=excluded.app_version,
+                ip_address=excluded.ip_address,
+                capabilities_json=excluded.capabilities_json,
+                last_seen=datetime('now'),
+                status=excluded.status
+            """,
+            (
+                device_id,
+                payload.get("name", ""),
+                payload.get("platform", ""),
+                payload.get("app_version", ""),
+                payload.get("ip_address", ""),
+                json.dumps(payload.get("capabilities") or []),
+                payload.get("status", "online"),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
 def require_login(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -254,6 +420,8 @@ def _settings_payload():
             "purpose": env.get("BOT_PURPOSE", "be your personal AI assistant"),
             "timezone": env.get("TIMEZONE", "UTC"),
         },
+        "mobile_control": _mobile_control_payload(),
+        "mobile_tasks": _recent_mobile_tasks(limit=20),
         "models": {
             "primary": env.get("OPENAI_MODEL", ""),
             "fast": env.get("FAST_MODEL", ""),
@@ -489,6 +657,9 @@ BASE = """<!DOCTYPE html>
     </a>
     <a href="{{ url_for('mobile_apps_page') }}" class="nav-link {{ 'active' if active=='mobile' }}">
       <i class="bi bi-phone"></i> Mobile Apps
+    </a>
+    <a href="{{ url_for('mobile_control_page') }}" class="nav-link {{ 'active' if active=='mobilecontrol' }}">
+      <i class="bi bi-phone-vibrate"></i> Mobile Control
     </a>
   </nav>
   <div style="padding: 12px 16px; border-top: 1px solid var(--border);">
@@ -742,11 +913,13 @@ def config_page():
                   "AGENT_NAME", "USER_NAME", "BOT_PURPOSE", "TIMEZONE",
                   "RESEND_API_KEY", "RESEND_FROM", "OWNER_EMAIL",
                   "OPENROUTER_API_KEY", "OPENROUTER_MODEL",
-                  "GLM_CODING_API_KEY", "GLM_CODING_MODEL"]
+                  "GLM_CODING_API_KEY", "GLM_CODING_MODEL",
+                  "MOBILE_CONTROL_DEVICE_NAME"]
         for f in fields:
             val = request.form.get(f, "").strip()
             if val:
                 save_env_key(f, val)
+        save_env_key("MOBILE_CONTROL_ENABLED", "true" if request.form.get("MOBILE_CONTROL_ENABLED") == "true" else "false")
         flash("Configuration saved!", "success")
         return redirect(url_for("config_page"))
 
@@ -867,6 +1040,24 @@ def config_page():
       <label class="form-label">GLM Coding Model</label>
       <input class="form-control" name="GLM_CODING_MODEL" value="{{ env.get('GLM_CODING_MODEL','glm-4.7') }}">
       <small style="color:var(--muted)">Options: glm-4.7 (complex tasks), glm-4.5-air (faster/lighter)</small>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-header"><i class="bi bi-phone"></i> Mobile Control</div>
+  <div class="card-body">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px;">
+      <div>
+        <label class="form-label" style="margin-bottom:4px;">Enable phone execution mode</label>
+        <div style="color:var(--muted);font-size:0.88rem;">When enabled, trusted mobile devices can register as future task executors.</div>
+      </div>
+      <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" name="MOBILE_CONTROL_ENABLED" value="true" {{ 'checked' if env.get('MOBILE_CONTROL_ENABLED','false') == 'true' }}>
+      </div>
+    </div>
+    <div>
+      <label class="form-label">Preferred Device Name</label>
+      <input class="form-control" name="MOBILE_CONTROL_DEVICE_NAME" value="{{ env.get('MOBILE_CONTROL_DEVICE_NAME','') }}" placeholder="My Pixel 9">
     </div>
   </div>
 </div>
@@ -1164,6 +1355,127 @@ def api_mobile_runtime_models_update():
     save_env_key("SMART_MODEL", smart)
 
     return jsonify({"ok": True, "settings": _settings_payload()})
+
+
+@app.route("/api/mobile/runtime/mobile-control", methods=["POST"])
+@require_mobile_api
+def api_mobile_runtime_mobile_control_update():
+    data = request.get_json(silent=True) or {}
+    enabled = bool(data.get("enabled"))
+    save_env_key("MOBILE_CONTROL_ENABLED", "true" if enabled else "false")
+    preferred_name = str(data.get("preferred_device_name", "")).strip()
+    if preferred_name:
+        save_env_key("MOBILE_CONTROL_DEVICE_NAME", preferred_name)
+    return jsonify({"ok": True, "settings": _settings_payload()})
+
+
+@app.route("/api/mobile/device/register", methods=["POST"])
+@require_mobile_api
+def api_mobile_device_register():
+    data = request.get_json(silent=True) or {}
+    device_id = str(data.get("device_id", "")).strip()
+    if not device_id:
+        return jsonify({"error": "device_id is required"}), 400
+    payload = {
+        "name": str(data.get("name", "")).strip(),
+        "platform": str(data.get("platform", "")).strip(),
+        "app_version": str(data.get("app_version", "")).strip(),
+        "ip_address": request.remote_addr or "",
+        "capabilities": data.get("capabilities") or [],
+        "status": str(data.get("status", "online")).strip() or "online",
+    }
+    _upsert_mobile_device(device_id, payload)
+    return jsonify({"ok": True, "mobile_control": _mobile_control_payload()})
+
+
+@app.route("/api/mobile/device/<device_id>/tasks")
+@require_mobile_api
+def api_mobile_device_tasks(device_id):
+    _ensure_mobile_tables()
+    conn = connect_db(DB_FILE)
+    try:
+        conn.execute(
+            """
+            UPDATE mobile_devices
+            SET last_seen=datetime('now'), status='online', ip_address=?
+            WHERE device_id=?
+            """,
+            (request.remote_addr or "", device_id),
+        )
+        conn.execute(
+            """
+            UPDATE mobile_tasks
+            SET status='dispatched', claimed_at=datetime('now')
+            WHERE device_id=? AND status='queued'
+            """,
+            (device_id,),
+        )
+        conn.commit()
+        rows = conn.execute(
+            """
+            SELECT id, action, payload_json, status, created_at, claimed_at
+            FROM mobile_tasks
+            WHERE device_id=? AND status IN ('dispatched', 'queued')
+            ORDER BY id ASC
+            LIMIT 20
+            """,
+            (device_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    tasks = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except Exception:
+            payload = {}
+        tasks.append(
+            {
+                "id": row["id"],
+                "action": row["action"],
+                "payload": payload,
+                "status": row["status"],
+                "created_at": row["created_at"],
+                "claimed_at": row["claimed_at"],
+            }
+        )
+    return jsonify({"ok": True, "tasks": tasks, "mobile_control": _mobile_control_payload()})
+
+
+@app.route("/api/mobile/device/<device_id>/tasks/<int:task_id>/complete", methods=["POST"])
+@require_mobile_api
+def api_mobile_device_task_complete(device_id, task_id):
+    data = request.get_json(silent=True) or {}
+    status = str(data.get("status", "completed")).strip().lower()
+    if status not in {"completed", "failed"}:
+        return jsonify({"error": "invalid status"}), 400
+    result_json = json.dumps(data.get("result") or {})
+    error = str(data.get("error", "")).strip()
+    _ensure_mobile_tables()
+    conn = connect_db(DB_FILE)
+    try:
+        cur = conn.execute(
+            """
+            UPDATE mobile_tasks
+            SET status=?, completed_at=datetime('now'), result_json=?, error=?
+            WHERE id=? AND device_id=?
+            """,
+            (status, result_json, error, int(task_id), device_id),
+        )
+        conn.execute(
+            """
+            UPDATE mobile_devices
+            SET last_seen=datetime('now'), status=?
+            WHERE device_id=?
+            """,
+            ("online" if status == "completed" else "attention", device_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    if cur.rowcount <= 0:
+        return jsonify({"error": "task not found"}), 404
+    return jsonify({"ok": True})
 
 
 @app.route("/models", methods=["GET", "POST"])
@@ -2326,6 +2638,153 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 """
     return render_template_string(tmpl + FOOTER, active="mobile", version=git_version(), apps=apps)
+
+
+@app.route("/mobile-control", methods=["GET", "POST"])
+@require_login
+def mobile_control_page():
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action == "toggle":
+            enabled = request.form.get("enabled") == "true"
+            save_env_key("MOBILE_CONTROL_ENABLED", "true" if enabled else "false")
+            flash(f"Mobile control {'enabled' if enabled else 'disabled'}.", "success")
+            return redirect(url_for("mobile_control_page"))
+        if action == "queue":
+            device_id = (request.form.get("device_id") or "").strip()
+            task_action = (request.form.get("task_action") or "").strip()
+            payload_text = (request.form.get("payload_json") or "").strip()
+            if not device_id or not task_action:
+                flash("Device and action are required.", "error")
+                return redirect(url_for("mobile_control_page"))
+            try:
+                payload = json.loads(payload_text) if payload_text else {}
+                if not isinstance(payload, dict):
+                    raise ValueError("Payload must be a JSON object.")
+            except Exception as exc:
+                flash(f"Invalid JSON payload: {exc}", "error")
+                return redirect(url_for("mobile_control_page"))
+            task_id = _enqueue_mobile_task(device_id, task_action, payload)
+            flash(f"Queued mobile task #{task_id} for {device_id}.", "success")
+            return redirect(url_for("mobile_control_page"))
+
+    payload = _mobile_control_payload()
+    tasks = _recent_mobile_tasks(limit=30)
+    tmpl = BASE + """
+<h1 class="page-title">Mobile Control</h1>
+<p class="page-sub">Manage mobile executor mode, registered devices, and queued phone-side actions.</p>
+
+<div class="card">
+  <div class="card-header"><i class="bi bi-phone"></i> Executor Mode</div>
+  <div class="card-body">
+    <form method="POST" style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;">
+      <input type="hidden" name="action" value="toggle">
+      <input type="hidden" name="enabled" value="{{ 'false' if mobile.enabled else 'true' }}">
+      <div>
+        <div style="font-weight:600;">Status: <span style="color:{{ 'var(--green)' if mobile.enabled else 'var(--muted)' }}">{{ 'Enabled' if mobile.enabled else 'Disabled' }}</span></div>
+        <div style="color:var(--muted);font-size:0.88rem;">When enabled, registered mobile devices can receive queued actions from Ninoclaw.</div>
+      </div>
+      <button type="submit" class="btn btn-primary">{{ 'Disable' if mobile.enabled else 'Enable' }}</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><i class="bi bi-broadcast"></i> Registered Devices</div>
+  <div class="card-body">
+    {% if mobile.devices %}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;">
+      {% for device in mobile.devices %}
+        <div style="border:1px solid var(--border);border-radius:8px;padding:14px;background:var(--bg);">
+          <div style="font-weight:600;margin-bottom:6px;">{{ device.name }}</div>
+          <div style="color:var(--muted);font-size:0.86rem;margin-bottom:8px;">{{ device.device_id }}</div>
+          <div style="font-size:0.86rem;margin-bottom:4px;">Platform: {{ device.platform }} {{ device.app_version }}</div>
+          <div style="font-size:0.86rem;margin-bottom:4px;">Status: {{ device.status }}</div>
+          <div style="font-size:0.86rem;margin-bottom:4px;">Last seen: {{ device.last_seen }}</div>
+          <div style="font-size:0.82rem;color:var(--muted);">Capabilities: {{ ', '.join(device.capabilities) if device.capabilities else 'none reported' }}</div>
+        </div>
+      {% endfor %}
+      </div>
+    {% else %}
+      <div style="color:var(--muted)">No mobile devices registered yet. Open the companion app and connect it to this dashboard.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><i class="bi bi-send"></i> Queue Mobile Action</div>
+  <div class="card-body">
+    <form method="POST">
+      <input type="hidden" name="action" value="queue">
+      <div style="margin-bottom:14px;">
+        <label class="form-label">Device</label>
+        <select class="form-select" name="device_id">
+          {% for device in mobile.devices %}
+          <option value="{{ device.device_id }}">{{ device.name }} ({{ device.device_id }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label class="form-label">Action</label>
+        <select class="form-select" name="task_action">
+          <option value="ping">ping</option>
+          <option value="show_alert">show_alert</option>
+          <option value="open_url">open_url</option>
+          <option value="open_settings">open_settings</option>
+          <option value="dial_number">dial_number</option>
+          <option value="send_sms">send_sms</option>
+          <option value="open_maps">open_maps</option>
+          <option value="open_app">open_app</option>
+        </select>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label class="form-label">Payload JSON</label>
+        <textarea class="form-control" name="payload_json" rows="5" placeholder='{"message":"Hello from dashboard"}'></textarea>
+        <div style="margin-top:8px;color:var(--muted);font-size:0.82rem;">
+          Examples:
+          <code>{"title":"Ninoclaw","message":"Check the phone"}</code>,
+          <code>{"url":"https://example.com"}</code>,
+          <code>{"phone":"+919999999999"}</code>,
+          <code>{"phone":"+919999999999","message":"On my way"}</code>,
+          <code>{"query":"Bengaluru airport"}</code>,
+          <code>{"app":"whatsapp"}</code>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Queue task</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><i class="bi bi-list-task"></i> Recent Mobile Tasks</div>
+  <div class="card-body" style="padding-top:0;">
+    {% if tasks %}
+    <div class="table-wrap">
+      <table class="table table-hover">
+        <thead>
+          <tr><th>ID</th><th>Device</th><th>Action</th><th>Status</th><th>Created</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          {% for task in tasks %}
+          <tr>
+            <td>{{ task.id }}</td>
+            <td><code>{{ task.device_id }}</code></td>
+            <td>{{ task.action }}</td>
+            <td>{{ task.status }}</td>
+            <td>{{ task.created_at }}</td>
+            <td style="max-width:320px;word-break:break-word;color:var(--muted);font-size:0.82rem;">{{ task.result or task.error or task.payload }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div style="color:var(--muted);padding-top:16px;">No mobile tasks queued yet.</div>
+    {% endif %}
+  </div>
+</div>
+"""
+    return render_template_string(tmpl + FOOTER, active="mobilecontrol", version=git_version(), mobile=payload, tasks=tasks)
 
 
 @app.route("/api/mobile/mobile-apps")
