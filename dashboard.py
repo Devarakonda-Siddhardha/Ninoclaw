@@ -497,6 +497,79 @@ def _chat_messages_payload(user_id):
         conn.close()
     return {"messages": messages}
 
+
+def _summarize_run_event(event):
+    event_type = str(event.get("event_type") or "")
+    label = str(event.get("label") or "").strip()
+    payload = event.get("payload_json") or {}
+    if event_type == "run_started":
+        return "Started"
+    if event_type == "vision_route":
+        return "Routing image to vision"
+    if event_type == "model_attempt":
+        return f"Trying {label}" if label else "Trying model"
+    if event_type == "model_success":
+        duration = payload.get("duration_ms")
+        if label and duration:
+            return f"{label} responded in {duration} ms"
+        if label:
+            return f"{label} responded"
+        return "Model responded"
+    if event_type == "model_failure":
+        return f"{label} failed" if label else "Model failed"
+    if event_type == "tool_call":
+        return f"Using {label}" if label else "Using tool"
+    if event_type == "tool_result":
+        return f"{label} finished" if label else "Tool finished"
+    if event_type == "tool_blocked":
+        return f"{label} blocked" if label else "Tool blocked"
+    if event_type == "tool_confirmation_required":
+        return f"Approval needed for {label}" if label else "Approval needed"
+    if event_type == "run_finished":
+        status = payload.get("status") or "completed"
+        return f"Run {status}"
+    return label or event_type.replace("_", " ").title()
+
+
+def _run_trace_payload(run_id=None, user_id=None, channel=None):
+    run = None
+    if run_id:
+        run = get_run(run_id)
+    elif user_id:
+        runs = list_runs(limit=1, channel=channel, user_id=user_id)
+        run = runs[0] if runs else None
+    if not run:
+        return None
+
+    events = []
+    for event in get_run_events(run["id"]):
+        events.append(
+            {
+                "seq": event.get("seq"),
+                "ts": event.get("ts"),
+                "type": event.get("event_type"),
+                "label": event.get("label"),
+                "summary": _summarize_run_event(event),
+                "payload": event.get("payload_json"),
+            }
+        )
+
+    return {
+        "id": run.get("id"),
+        "status": run.get("status"),
+        "channel": run.get("channel"),
+        "user_id": run.get("user_id"),
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "total_ms": run.get("total_ms"),
+        "model_calls": run.get("model_calls"),
+        "tool_calls": run.get("tool_calls"),
+        "final_response": run.get("final_response"),
+        "error": run.get("error"),
+        "events": events,
+        "needs_approval": any(evt["type"] == "tool_confirmation_required" for evt in events),
+    }
+
 def git_version():
     try:
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"],
@@ -1956,7 +2029,8 @@ def chat_send(user_id):
         else:
             reply = generate_reply_sync(user_id, user_text, memory=mem)
         mem.add_message(user_id, "assistant", reply)
-        return jsonify({"reply": reply})
+        trace = _run_trace_payload(user_id=user_id, channel="dashboard")
+        return jsonify({"reply": reply, "run": trace})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1965,6 +2039,21 @@ def chat_send(user_id):
 @require_mobile_api
 def api_mobile_chat(user_id):
     return jsonify(_chat_messages_payload(user_id))
+
+
+@app.route("/api/mobile/chat/<user_id>/latest-run")
+@require_mobile_api
+def api_mobile_chat_latest_run(user_id):
+    return jsonify({"run": _run_trace_payload(user_id=user_id, channel="dashboard")})
+
+
+@app.route("/api/mobile/chat/run/<run_id>")
+@require_mobile_api
+def api_mobile_chat_run(run_id):
+    trace = _run_trace_payload(run_id=run_id)
+    if not trace:
+        return jsonify({"error": "run not found"}), 404
+    return jsonify({"run": trace})
 
 
 @app.route("/chat/<user_id>")

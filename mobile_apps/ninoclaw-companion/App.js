@@ -340,6 +340,32 @@ function msgTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatRunDuration(totalMs) {
+  const ms = Number(totalMs);
+  if (!Number.isFinite(ms) || ms < 0) {
+    return 'Unknown';
+  }
+  if (ms < 1000) {
+    return `${ms} ms`;
+  }
+  return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)} s`;
+}
+
+function compactRunEvents(events) {
+  if (!Array.isArray(events)) {
+    return [];
+  }
+  const summaries = [];
+  for (const event of events) {
+    const summary = String(event?.summary || '').trim();
+    if (!summary || summaries[summaries.length - 1] === summary) {
+      continue;
+    }
+    summaries.push(summary);
+  }
+  return summaries.slice(-5);
+}
+
 // ─── ReplyBar ───────────────────────────────────────────────────────────────
 
 function ReplyBar({ message, onCancel }) {
@@ -411,11 +437,43 @@ function ContextMenu({ message, position, onClose, onReply, onCopy, onDelete }) 
 
 // ─── MessageBubble ──────────────────────────────────────────────────────────
 
+function RunTraceCard({ trace }) {
+  if (!trace) return null;
+  const summaries = compactRunEvents(trace.events);
+  return (
+    <View style={tgStyles.traceCard}>
+      <View style={tgStyles.traceHeader}>
+        <Text style={tgStyles.traceTitle}>
+          {trace.needs_approval ? 'Approval needed' : trace.status === 'error' ? 'Run failed' : 'Agent trace'}
+        </Text>
+        <Text style={tgStyles.traceMeta}>
+          {formatRunDuration(trace.total_ms)} · {trace.model_calls || 0} model · {trace.tool_calls || 0} tool
+        </Text>
+      </View>
+      {!!summaries.length && summaries.map((summary, index) => (
+        <View key={`${trace.id || 'trace'}-${index}-${summary}`} style={tgStyles.traceRow}>
+          <View style={tgStyles.traceDot} />
+          <Text style={tgStyles.traceText}>{summary}</Text>
+        </View>
+      ))}
+      {!!trace.error && <Text style={tgStyles.traceError}>{trace.error}</Text>}
+    </View>
+  );
+}
+
 function MessageBubble({ message, prevMessage, onLongPress }) {
   const isUser = message.role === 'user';
   const showDay = !prevMessage || !isSameDay(message.ts, prevMessage.ts);
 
   const renderContent = () => {
+    if (message.isThinking) {
+      return (
+        <View>
+          <Text style={tgStyles.msgText}>Thinking…</Text>
+          <Text style={tgStyles.msgSubtle}>Planning next steps and checking tools.</Text>
+        </View>
+      );
+    }
     if (message.type === 'image') {
       return (
         <View>
@@ -478,6 +536,7 @@ function MessageBubble({ message, prevMessage, onLongPress }) {
         )}
         <View style={[tgStyles.bubble, isUser ? tgStyles.bubbleUser : tgStyles.bubbleAssistant]}>
           {renderContent()}
+          {!isUser && <RunTraceCard trace={message.trace} />}
           <View style={tgStyles.msgMetaRow}>
             <Text style={tgStyles.msgMeta}>{msgTime(message.ts)}</Text>
             {isUser && <Text style={tgStyles.msgStatus}>{message.status === 'sent' ? ' ✓' : ' ✓✓'}</Text>}
@@ -663,12 +722,12 @@ function ChatScreen({ chatMessages, draft, setDraft, onSend, onSendMedia, sendin
       </View>
 
       {/* Messages */}
-      <FlatList
-        ref={flatRef}
-        data={chatMessages}
-        keyExtractor={(item, i) => `${item.role}-${i}-${item.ts || i}`}
-        renderItem={({ item, index }) => (
-          <MessageBubble
+        <FlatList
+          ref={flatRef}
+          data={chatMessages}
+          keyExtractor={(item, i) => item.id || `${item.role}-${i}-${item.ts || i}`}
+          renderItem={({ item, index }) => (
+            <MessageBubble
             message={item}
             prevMessage={index > 0 ? chatMessages[index - 1] : null}
             onLongPress={handleLongPress}
@@ -1552,8 +1611,10 @@ export default function App() {
     setSending(true);
     setError('');
     const now = new Date().toISOString();
-    const optimistic = { role: 'user', content: msgText, ts: now, type: 'text', status: 'sent', replyTo: replyTo || null };
-    setChatMessages((current) => [...current, optimistic]);
+    const pendingId = `assistant-pending-${Date.now().toString(36)}`;
+    const optimistic = { id: `user-${Date.now().toString(36)}`, role: 'user', content: msgText, ts: now, type: 'text', status: 'sent', replyTo: replyTo || null };
+    const pendingAssistant = { id: pendingId, role: 'assistant', content: '', ts: now, type: 'text', status: 'pending', isThinking: true };
+    setChatMessages((current) => [...current, optimistic, pendingAssistant]);
     setDraft('');
     try {
       const response = await fetch(
@@ -1562,12 +1623,31 @@ export default function App() {
       );
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || `Send failed: ${response.status}`);
-      setChatMessages((current) => [
-        ...current,
-        { role: 'assistant', content: data.reply, ts: new Date().toISOString(), type: 'text', status: 'delivered' },
-      ]);
+      setChatMessages((current) => current.map((item) => (
+        item.id === pendingId
+          ? {
+            ...item,
+            isThinking: false,
+            content: data.reply,
+            ts: new Date().toISOString(),
+            status: 'delivered',
+            trace: data.run || null,
+          }
+          : item
+      )));
     } catch (sendError) {
       setError(sendError.message || 'Failed to send message.');
+      setChatMessages((current) => current.map((item) => (
+        item.id === pendingId
+          ? {
+            ...item,
+            isThinking: false,
+            content: sendError.message || 'Failed to send message.',
+            ts: new Date().toISOString(),
+            status: 'failed',
+          }
+          : item
+      )));
     } finally {
       setSending(false);
     }
@@ -1576,7 +1656,9 @@ export default function App() {
   async function sendMedia(media) {
     // media: { type, uri, base64?, fileName?, fileSize?, duration?, replyTo? }
     const now = new Date().toISOString();
+    const pendingId = `assistant-pending-${Date.now().toString(36)}`;
     const optimistic = {
+      id: `user-media-${Date.now().toString(36)}`,
       role: 'user',
       type: media.type,
       uri: media.uri,
@@ -1588,7 +1670,8 @@ export default function App() {
       status: 'sent',
       replyTo: media.replyTo || null,
     };
-    setChatMessages((current) => [...current, optimistic]);
+    const pendingAssistant = { id: pendingId, role: 'assistant', content: '', ts: now, type: 'text', status: 'pending', isThinking: true };
+    setChatMessages((current) => [...current, optimistic, pendingAssistant]);
 
     setSending(true);
     try {
@@ -1602,12 +1685,43 @@ export default function App() {
       );
       const data = await response.json();
       if (response.ok) {
-        setChatMessages((current) => [
-          ...current,
-          { role: 'assistant', content: data.reply, ts: new Date().toISOString(), type: 'text', status: 'delivered' },
-        ]);
+        setChatMessages((current) => current.map((item) => (
+          item.id === pendingId
+            ? {
+              ...item,
+              isThinking: false,
+              content: data.reply,
+              ts: new Date().toISOString(),
+              status: 'delivered',
+              trace: data.run || null,
+            }
+            : item
+        )));
+      } else {
+        setChatMessages((current) => current.map((item) => (
+          item.id === pendingId
+            ? {
+              ...item,
+              isThinking: false,
+              content: data.error || 'Failed to send media.',
+              ts: new Date().toISOString(),
+              status: 'failed',
+            }
+            : item
+        )));
       }
     } catch (_e) {
+      setChatMessages((current) => current.map((item) => (
+        item.id === pendingId
+          ? {
+            ...item,
+            isThinking: false,
+            content: 'Failed to send media.',
+            ts: new Date().toISOString(),
+            status: 'failed',
+          }
+          : item
+      )));
     } finally {
       setSending(false);
     }
@@ -3064,6 +3178,53 @@ const tgStyles = StyleSheet.create({
     color: '#edf4ff',
     fontSize: 15,
     lineHeight: 22,
+  },
+  msgSubtle: {
+    color: '#97a8c4',
+    fontSize: 12,
+    marginTop: 6,
+  },
+  traceCard: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(151,168,196,0.16)',
+    gap: 6,
+  },
+  traceHeader: {
+    gap: 2,
+  },
+  traceTitle: {
+    color: '#bfe9ff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  traceMeta: {
+    color: '#7f95b5',
+    fontSize: 11,
+  },
+  traceRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  traceDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#4fc3f7',
+    marginTop: 6,
+  },
+  traceText: {
+    flex: 1,
+    color: '#cfe1f7',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  traceError: {
+    color: '#ff8f83',
+    fontSize: 12,
+    marginTop: 2,
   },
   msgMetaRow: {
     flexDirection: 'row',

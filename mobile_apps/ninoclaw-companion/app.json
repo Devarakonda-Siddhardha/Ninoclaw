@@ -28,6 +28,9 @@
     "web": {
       "bundler": "metro"
     },
+    "plugins": [
+      "./plugins/withNinoclawAndroidAgent"
+    ],
     "owner": "indiccoder",
     "extra": {
       "eas": {
