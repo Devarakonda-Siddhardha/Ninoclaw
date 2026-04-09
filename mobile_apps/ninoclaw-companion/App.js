@@ -2119,10 +2119,8 @@ export default function App() {
       let lastError = '';
       for (const candidate of candidates) {
         try {
-          const supported = await Linking.canOpenURL(candidate);
-          if (!supported) {
-            continue;
-          }
+          // Skip canOpenURL check — on Android 11+ it always returns false for
+          // third-party schemes (e.g. whatsapp://) without <queries> manifest entries.
           await Linking.openURL(candidate);
           opened = candidate;
           break;

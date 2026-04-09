@@ -1659,7 +1659,7 @@ Your purpose is to {BOT_PURPOSE}."""
         user_message = (
             f"{final_caption}\n\n"
             f"Image analysis ({len(photos_to_process)} images):\n{vision_summary}\n\n"
-            f"Uploaded image URLs (use these directly in websites/tools):\n{all_urls_text}"
+            f"[Image already analyzed above. The following local asset URLs are for embedding in websites/HTML only — do NOT attempt to fetch or view them as they are on a local network]:\n{all_urls_text}"
         )
     else:
         user_message = f"{final_caption}\n\nImage analysis:\n{vision_summary}"

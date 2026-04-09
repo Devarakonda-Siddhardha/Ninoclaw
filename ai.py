@@ -213,6 +213,15 @@ def chat(message, system_prompt=None, history=None, tools=None, image_b64=None, 
             if result is not None:
                 return result
             error = error2
+        # If failed with tools (free-tier models often reject function calling), retry without tools.
+        if tools and ("400" in str(error) or "Bad Request" in str(error)):
+            print(f"[AI] Model {model_cfg['model']} rejected tools, retrying without tools...")
+            result, error2 = _try_openai(
+                model_cfg, message, system_prompt, history, None, image_b64, runtime_cfg["ollama_think"]
+            )
+            if result is not None:
+                return result
+            error = error2
         last_error = error
         print(f"[AI] Model {model_cfg['model']} failed ({error}), trying next...")
 
@@ -389,6 +398,13 @@ def _try_openai(model_cfg, message, system_prompt, history, tools, image_b64, ol
                 continue
             if resp.status_code >= 500:
                 return None, f"HTTP {resp.status_code}"
+            if resp.status_code == 400:
+                try:
+                    body = resp.json()
+                    err_msg = body.get("error", {}).get("message", "") or str(body)
+                except Exception:
+                    err_msg = resp.text[:200]
+                return None, f"400 Bad Request: {err_msg}"
             resp.raise_for_status()
             break
         else:

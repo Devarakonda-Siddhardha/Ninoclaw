@@ -285,9 +285,6 @@ You have access to the following tools:
 - music_next: Skip to the next track. Use when user says "next song", "skip", etc.
 - music_previous: Go back to previous track. Use when user says "previous song", "go back", etc.
 - music_volume: Set music volume (0-100). Use when user says "set volume to X", etc.
-- open_app: Open an application on the PC. Use when user says "open Chrome", "open calculator", "launch notepad", etc.
-- close_app: Close an application on the PC. Use when user says "close Chrome", "kill notepad", etc.
-- list_running_apps: List currently running applications on the PC.
 - crypto_price: Get live cryptocurrency price (BTC, ETH, SOL, etc). Use when user asks about crypto prices.
 - stock_price: Get live stock price (TSLA, AAPL, RELIANCE, etc). Use when user asks about stock prices.
 - web_build: Create a website by generating a complete HTML document with inline CSS and JS. Use when user says "build me a website", "create a portfolio", "make a landing page", "build a web app", or asks for something that runs in the browser. Do NOT use this for mobile-native requests like Android apps, iOS apps, phone apps, Expo apps, or React Native apps. Generate beautiful, modern HTML with gradients, animations, and stunning design. After creating, user gets a live preview link at /builds/<name>/. If image URLs are provided in context (uploaded photos or generated images), use them directly in <img src='...'>. **IMPORTANT: If Live Chrome Automation (MCP) is enabled, you SHOULD use the `mcp__chrome_devtools` tools to open the new preview link, inspect the layout, and verify that the page looks and functions correctly (like clicking buttons) before considering the task complete.**
